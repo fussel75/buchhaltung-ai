@@ -24,8 +24,19 @@ docker compose up --build
 Danach:
 
 - Frontend: http://localhost:5173
-- API: http://localhost:8000
+- API: http://localhost:8000/api/health
 - API Docs: http://localhost:8000/docs
+
+## Cloudflare Tunnel Setup
+
+Produktiv ist der Zugriff ueber Cloudflare Access geplant:
+
+- `buha.fristd-bau.net` -> `127.0.0.1:5173`
+- `buha.fristd-bau.net/api/*` -> `127.0.0.1:8000`
+
+Die Compose-Ports binden deshalb nur auf `127.0.0.1`. Das Frontend nutzt relative API-Calls nach `/api/...`.
+
+Siehe [docs/deploy-vps.md](docs/deploy-vps.md) fuer die VPS-Schritte.
 
 ## Erster MVP-Flow
 
@@ -35,4 +46,3 @@ Danach:
 4. Hash bilden und Duplikat pruefen.
 5. Beleg in Review-Queue anzeigen.
 6. OCR/KI/Buchungsvorschlag als naechste Ausbaustufe anbinden.
-

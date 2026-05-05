@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-buchhaltung}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +26,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://buchhaltung:change-me@db:5432/buchhaltung_ai}
       STORAGE_ROOT: /data/storage
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./storage:/data/storage
     depends_on:
@@ -38,12 +38,11 @@ services:
       context: ./apps/web
     restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: ${WEB_API_BASE_URL:-http://localhost:8000}
+      VITE_API_BASE_URL: ${WEB_API_BASE_URL:-/api}
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       - api
 
 volumes:
   postgres_data:
-

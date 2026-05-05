@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 function App() {
   const [tenantId, setTenantId] = useState("demo-mandant");
@@ -107,4 +107,3 @@ function App() {
 }
 
 createRoot(document.getElementById("root")).render(<App />);
-
