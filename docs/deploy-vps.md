@@ -34,6 +34,7 @@ POSTGRES_PASSWORD_VALUE="$(openssl rand -base64 36 | tr -d '\n')"
 sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${POSTGRES_PASSWORD_VALUE}/" .env
 sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://buchhaltung:${POSTGRES_PASSWORD_VALUE}@db:5432/buchhaltung_ai#" .env
 sed -i "s#^WEB_API_BASE_URL=.*#WEB_API_BASE_URL=/api#" .env
+sed -i "s#^WEB_ALLOWED_HOSTS=.*#WEB_ALLOWED_HOSTS=buha.fristd-bau.net#" .env
 chmod 600 .env
 ```
 
@@ -68,4 +69,3 @@ git pull
 docker compose up --build -d
 docker compose ps
 ```
-

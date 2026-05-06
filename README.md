@@ -35,6 +35,7 @@ Produktiv ist der Zugriff ueber Cloudflare Access geplant:
 - `buha.fristd-bau.net/api/*` -> `127.0.0.1:8000`
 
 Die Compose-Ports binden deshalb nur auf `127.0.0.1`. Das Frontend nutzt relative API-Calls nach `/api/...`.
+Der erlaubte Vite-Host wird ueber `WEB_ALLOWED_HOSTS` in `.env` gesetzt.
 
 Siehe [docs/deploy-vps.md](docs/deploy-vps.md) fuer die VPS-Schritte.
 

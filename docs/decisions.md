@@ -20,3 +20,4 @@
 - Backend liefert API-Routen unter `/api` aus.
 - Frontend ruft die API relativ ueber `/api/...` auf.
 - Docker Compose bindet Web, API und Datenbank nur an `127.0.0.1`.
+- Erlaubte Vite-Hosts werden ueber `WEB_ALLOWED_HOSTS` konfiguriert, nicht hart im Code.
