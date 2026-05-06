@@ -44,6 +44,8 @@ Siehe [docs/deploy-vps.md](docs/deploy-vps.md) fuer die VPS-Schritte.
 1. Mandant auswaehlen.
 2. Beleg per Upload/Drag & Drop hochladen.
 3. Original unveraendert speichern.
-4. Hash bilden und Duplikat pruefen.
-5. Beleg in Review-Queue anzeigen.
-6. OCR/KI/Buchungsvorschlag als naechste Ausbaustufe anbinden.
+4. Hash bilden und Duplikat pro Mandant pruefen.
+5. Upload-Metadaten in PostgreSQL speichern.
+6. Beleg auch nach Reload in der Review-Queue anzeigen.
+7. Erste Mock-Extraktion starten und Felder/Warnungen anzeigen.
+8. Echte OCR/KI/Buchungsvorschlag als naechste Ausbaustufe anbinden.

@@ -47,3 +47,9 @@ async def store_original_document(file: UploadFile, tenant_id: str) -> StoredDoc
         storage_path=target.relative_to(settings.storage_root),
     )
 
+
+def delete_stored_document(storage_path: Path) -> None:
+    settings = get_settings()
+    target = settings.storage_root / storage_path
+    if target.exists() and target.is_file():
+        target.unlink()

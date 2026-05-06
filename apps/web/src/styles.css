@@ -105,6 +105,16 @@ input {
   color: #526154;
 }
 
+.notice {
+  margin: 0 0 14px;
+  border: 1px solid #b7c2b8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f9fbf8;
+  color: #176b45;
+  font-weight: 700;
+}
+
 .table {
   display: grid;
   gap: 10px;
@@ -112,7 +122,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 16px;
   padding: 14px 16px;
@@ -121,6 +131,7 @@ input {
   background: #ffffff;
 }
 
+.document-main,
 .row div {
   display: grid;
   gap: 3px;
@@ -136,6 +147,27 @@ code {
   background: #eef2ed;
 }
 
+button {
+  min-height: 38px;
+  border: 1px solid #176b45;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #ffffff;
+  background: #176b45;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.extraction {
+  margin-top: 8px;
+  border-left: 3px solid #176b45;
+  padding-left: 10px;
+}
+
+.warning {
+  color: #8a5a00;
+}
+
 @media (max-width: 720px) {
   .toolbar,
   .row {
@@ -147,4 +179,3 @@ code {
     display: grid;
   }
 }
-
