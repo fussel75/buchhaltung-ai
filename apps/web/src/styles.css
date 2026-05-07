@@ -196,7 +196,7 @@ input {
 .document-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 14px;
 }
 
 .document-card span {
@@ -276,24 +276,16 @@ code {
 }
 
 .allocation-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1.6fr) minmax(110px, 0.7fr);
-  gap: 10px;
-  align-items: center;
   border: 1px solid #e3e9e1;
   border-radius: 6px;
   padding: 10px;
   background: #ffffff;
 }
 
-.allocation-row strong {
-  overflow-wrap: anywhere;
-}
-
-.allocation-row span:last-child {
+.allocation-row span {
   color: #17211b;
-  font-weight: 800;
-  text-align: right;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .pending-extraction {
@@ -350,10 +342,6 @@ button:disabled {
   .pending-extraction {
     grid-template-columns: 1fr;
     align-items: stretch;
-  }
-
-  .allocation-row span:last-child {
-    text-align: left;
   }
 
   .toolbar {

@@ -294,7 +294,7 @@ function UploadApp() {
   const deleteDocument = useCallback(
     async (document) => {
       const confirmed = window.confirm(
-        `Beleg "${document.original_filename}" wirklich aus der Review-Queue loeschen?`,
+        `Beleg "${document.original_filename}" wirklich aus der Review-Queue löschen?`,
       );
       if (!confirmed) return;
 
@@ -308,11 +308,11 @@ function UploadApp() {
         });
 
         if (!response.ok) {
-          throw new Error(`Loeschen fehlgeschlagen: ${response.status}`);
+          throw new Error(`Löschen fehlgeschlagen: ${response.status}`);
         }
 
         await loadDocuments();
-        setNotice(`Beleg geloescht: ${document.original_filename}`);
+        setNotice(`Beleg gelöscht: ${document.original_filename}`);
       } catch (deleteError) {
         setError(deleteError.message);
       } finally {
@@ -394,7 +394,7 @@ function UploadApp() {
                       onClick={() => deleteDocument(document)}
                       disabled={deletingIds.includes(document.id)}
                     >
-                      {deletingIds.includes(document.id) ? "Loescht..." : "Loeschen"}
+                      {deletingIds.includes(document.id) ? "Löscht..." : "Löschen"}
                     </button>
                   </div>
                 </div>
@@ -414,7 +414,7 @@ function UploadApp() {
                       <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
                       <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
                       <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                      <Field label="Bauvorhaben" value={document.extraction.raw_result?.project_code} />
+                      <Field label="Bauvorhaben" value={formatProjects(document.extraction.raw_result)} />
                       <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
                       <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
                       <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
@@ -474,9 +474,10 @@ function AllocationLines({ lines }) {
       <div className="allocation-table">
         {lines.map((line) => (
           <div key={`${line.delivery_address}-${line.amount}`} className="allocation-row">
-            <span>{line.project_code ? `BV ${line.project_code}` : "BV ungeklärt"}</span>
-            <strong>{line.address || line.delivery_address}</strong>
-            <span>{formatMoney(line.amount)}</span>
+            <span>
+              {line.project_code ? `BV ${line.project_code}` : "BV ungeklärt"}, {line.address || line.delivery_address},{" "}
+              {formatMoney(line.amount)} Netto
+            </span>
           </div>
         ))}
       </div>
@@ -514,6 +515,22 @@ function formatAssignment(rawResult) {
     project: "Bauvorhaben",
   };
   return labels[rawResult?.assignment_type] ?? null;
+}
+
+function formatProjects(rawResult) {
+  if (rawResult?.allocation_lines?.length) {
+    return rawResult.allocation_lines
+      .map((line) => {
+        const code = line.project_code ? `BV ${line.project_code}` : "BV ungeklärt";
+        const name = line.project_name || line.address || line.delivery_address;
+        return `${code}, ${name}`;
+      })
+      .join("; ");
+  }
+  if (rawResult?.project_code) {
+    return rawResult.project_name ? `BV ${rawResult.project_code}, ${rawResult.project_name}` : `BV ${rawResult.project_code}`;
+  }
+  return null;
 }
 
 function formatCostCategory(value) {
