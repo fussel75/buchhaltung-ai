@@ -5,6 +5,7 @@ const allowedHosts = (process.env.VITE_ALLOWED_HOSTS ?? "")
   .split(",")
   .map((host) => host.trim())
   .filter(Boolean);
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8000";
 
 export default defineConfig({
   plugins: [react()],
@@ -12,7 +13,7 @@ export default defineConfig({
     allowedHosts,
     proxy: {
       "/api": {
-        target: "http://api:8000",
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

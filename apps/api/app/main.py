@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes import documents, health
+from app.services.database import init_database
 
 app = FastAPI(
     title="buchhaltung-ai API",
@@ -19,3 +20,8 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_database()

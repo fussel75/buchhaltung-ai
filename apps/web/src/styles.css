@@ -101,33 +101,104 @@ input {
   margin-top: 32px;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.section-header h2 {
+  margin-bottom: 0;
+}
+
+.section-header span,
 .empty {
   color: #526154;
 }
 
-.table {
-  display: grid;
-  gap: 10px;
+.notice,
+.error {
+  margin: 18px 0 0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-weight: 700;
 }
 
-.row {
+.notice {
+  border: 1px solid #abd0b5;
+  color: #174e32;
+  background: #e9f6ec;
+}
+
+.error {
+  border: 1px solid #e4b5b5;
+  color: #7d2020;
+  background: #fff0f0;
+}
+
+.queue {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
+  gap: 12px;
+}
+
+.document-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid #d5ddd4;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.row div {
+.document-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.document-head div {
   display: grid;
   gap: 3px;
 }
 
-.row span {
+.document-card span {
   color: #526154;
+}
+
+.meta-grid,
+.extraction-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.meta-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.extraction-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e3e9e1;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfcfb;
+}
+
+.field small {
+  color: #657266;
+  font-weight: 800;
+}
+
+.field strong {
+  color: #17211b;
+  overflow-wrap: anywhere;
 }
 
 code {
@@ -136,14 +207,64 @@ code {
   background: #eef2ed;
 }
 
+.status {
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #174e32;
+  background: #e2f0e7;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.pending-extraction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #edf1ec;
+  padding-top: 14px;
+}
+
+button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #ffffff;
+  background: #176b45;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.warnings {
+  margin: 0;
+  border-radius: 8px;
+  padding: 10px 12px 10px 28px;
+  color: #705300;
+  background: #fff8df;
+}
+
 @media (max-width: 720px) {
   .toolbar,
-  .row {
+  .document-head,
+  .meta-grid,
+  .extraction-grid,
+  .pending-extraction {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
 
   .toolbar {
+    display: grid;
+  }
+
+  .document-head,
+  .pending-extraction {
     display: grid;
   }
 }

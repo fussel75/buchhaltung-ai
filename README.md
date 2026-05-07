@@ -44,6 +44,25 @@ Siehe [docs/deploy-vps.md](docs/deploy-vps.md) fuer die VPS-Schritte.
 1. Mandant auswaehlen.
 2. Beleg per Upload/Drag & Drop hochladen.
 3. Original unveraendert speichern.
-4. Hash bilden und Duplikat pruefen.
-5. Beleg in Review-Queue anzeigen.
+4. Hash bilden und Duplikat pro Mandant pruefen.
+5. Beleg persistent in PostgreSQL speichern und in der Review-Queue anzeigen.
 6. OCR/KI/Buchungsvorschlag als naechste Ausbaustufe anbinden.
+
+## Aktueller API-Schnitt
+
+- `GET /api/health`
+- `POST /api/documents/upload` mit `tenant_id` und `file`
+- `GET /api/documents?tenant_id=demo-mandant`
+- `POST /api/documents/{document_id}/extract`
+
+Uploads werden unter `STORAGE_ROOT` abgelegt und mit Metadaten in PostgreSQL gespeichert.
+Die Review-Queue liest die persistierten Belege je Mandant.
+Die Extraktion ist aktuell ein austauschbarer Mock-Adapter, der erste Rechnungsfelder erzeugt
+und Audit-Events fuer Upload, Dublette, Start und Abschluss schreibt.
+
+Die Extraktionsreihenfolge ist:
+
+1. Eingebettete E-Rechnungsdaten lesen, z.B. `xrechnung.xml`, ZUGFeRD/Factur-X.
+2. Fehlende Kontextdaten aus dem PDF-Text ergaenzen, z.B. Bauvorhaben aus Lieferanschrift.
+3. Wenn keine strukturierten Daten vorhanden sind, PDF-Textregeln verwenden.
+4. OCR erst als spaeterer Fallback fuer nicht textlesbare Scans.
