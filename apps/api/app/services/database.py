@@ -86,6 +86,42 @@ def init_database() -> None:
                     on audit_events (tenant_id, created_at desc)
                 """
             )
+            cursor.execute(
+                """
+                create table if not exists users (
+                    id uuid primary key,
+                    email text not null unique,
+                    password_hash text not null,
+                    display_name text not null,
+                    role text not null check (role in ('admin', 'user')),
+                    is_active boolean not null default true,
+                    created_at timestamptz not null,
+                    last_login_at timestamptz
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create unique index if not exists users_email_idx
+                    on users (lower(email))
+                """
+            )
+            cursor.execute(
+                """
+                create table if not exists sessions (
+                    id text primary key,
+                    user_id uuid not null references users(id) on delete cascade,
+                    expires_at timestamptz not null,
+                    created_at timestamptz not null
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists sessions_expires_at_idx
+                    on sessions (expires_at)
+                """
+            )
 
 
 def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict[str, Any], bool]:
@@ -329,6 +365,132 @@ def insert_audit_event(
             )
 
 
+def count_users() -> int:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("select count(*) as count from users")
+            return int(cursor.fetchone()["count"])
+
+
+def create_user(
+    email: str,
+    password_hash: str,
+    display_name: str,
+    role: str = "user",
+    is_active: bool = True,
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into users (
+                    id,
+                    email,
+                    password_hash,
+                    display_name,
+                    role,
+                    is_active,
+                    created_at,
+                    last_login_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, null)
+                returning *
+                """,
+                (
+                    uuid4(),
+                    email.strip().lower(),
+                    password_hash,
+                    display_name.strip() or email.strip().lower(),
+                    role,
+                    is_active,
+                    now,
+                ),
+            )
+            return _serialize_user(cursor.fetchone())
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from users
+                where lower(email) = lower(%s)
+                limit 1
+                """,
+                (email.strip(),),
+            )
+            row = cursor.fetchone()
+            return _serialize_user(row, include_password_hash=True) if row else None
+
+
+def get_user_by_session(session_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select u.*
+                from sessions s
+                join users u on u.id = s.user_id
+                where s.id = %s
+                    and s.expires_at > %s
+                    and u.is_active = true
+                limit 1
+                """,
+                (session_id, datetime.now(UTC)),
+            )
+            row = cursor.fetchone()
+            return _serialize_user(row) if row else None
+
+
+def create_session(session_id: str, user_id: UUID, expires_at: datetime) -> None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into sessions (id, user_id, expires_at, created_at)
+                values (%s, %s, %s, %s)
+                """,
+                (session_id, user_id, expires_at, now),
+            )
+            cursor.execute(
+                """
+                update users
+                set last_login_at = %s
+                where id = %s
+                """,
+                (now, user_id),
+            )
+
+
+def renew_session(session_id: str, expires_at: datetime) -> None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update sessions
+                set expires_at = %s
+                where id = %s
+                """,
+                (expires_at, session_id),
+            )
+
+
+def delete_session(session_id: str) -> None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("delete from sessions where id = %s", (session_id,))
+
+
+def delete_expired_sessions() -> None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("delete from sessions where expires_at <= %s", (datetime.now(UTC),))
+
+
 def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
@@ -366,6 +528,21 @@ def _serialize_extraction(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
     }
+
+
+def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) -> dict[str, Any]:
+    user = {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "display_name": row["display_name"],
+        "role": row["role"],
+        "is_active": row["is_active"],
+        "created_at": _serialize_date(row["created_at"]),
+        "last_login_at": _serialize_date(row["last_login_at"]),
+    }
+    if include_password_hash:
+        user["password_hash"] = row["password_hash"]
+    return user
 
 
 def _serialize_date(value: Any) -> str | None:

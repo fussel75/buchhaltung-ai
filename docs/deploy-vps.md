@@ -4,7 +4,7 @@ Zielsystem:
 
 - Hostinger VPS
 - Ubuntu 24.04
-- Cloudflare Access vor `buha.fristd-bau.net`
+- App-internes Login vor `buha.fristd-bau.net`
 - Cloudflare Tunnel:
   - `buha.fristd-bau.net` -> `127.0.0.1:5173`
   - `buha.fristd-bau.net/api/*` -> `127.0.0.1:8000`
@@ -35,6 +35,9 @@ sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${POSTGRES_PASSWORD_VALUE}/" .
 sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://buchhaltung:${POSTGRES_PASSWORD_VALUE}@db:5432/buchhaltung_ai#" .env
 sed -i "s#^WEB_API_BASE_URL=.*#WEB_API_BASE_URL=/api#" .env
 sed -i "s#^WEB_ALLOWED_HOSTS=.*#WEB_ALLOWED_HOSTS=buha.fristd-bau.net#" .env
+sed -i "s#^INITIAL_ADMIN_EMAIL=.*#INITIAL_ADMIN_EMAIL=admin@example.com#" .env
+sed -i "s#^INITIAL_ADMIN_PASSWORD=.*#INITIAL_ADMIN_PASSWORD=$(openssl rand -base64 36 | tr -d '\n')#" .env
+sed -i "s#^SESSION_COOKIE_SECURE=.*#SESSION_COOKIE_SECURE=true#" .env
 chmod 600 .env
 ```
 
@@ -57,7 +60,7 @@ curl -I http://127.0.0.1:5173
 Im Browser:
 
 1. `https://buha.fristd-bau.net` oeffnen.
-2. Cloudflare Access Login per E-Mail/Magic-Link abschliessen.
+2. Mit dem initialen Admin aus `.env` einloggen.
 3. Upload-Seite laden.
 4. Testbeleg hochladen.
 

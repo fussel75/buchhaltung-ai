@@ -28,6 +28,35 @@ body {
   margin-bottom: 28px;
 }
 
+.session-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.session-tools span {
+  color: #526154;
+  font-weight: 700;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.login-panel {
+  display: grid;
+  gap: 18px;
+  width: min(420px, 100%);
+  border: 1px solid #d5ddd4;
+  border-radius: 8px;
+  padding: 28px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgb(23 33 27 / 8%);
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: #526154;

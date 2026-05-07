@@ -29,7 +29,7 @@ Danach:
 
 ## Cloudflare Tunnel Setup
 
-Produktiv ist der Zugriff ueber Cloudflare Access geplant:
+Produktiv laeuft die App hinter dem Cloudflare Tunnel, die Anmeldung macht die App selbst:
 
 - `buha.fristd-bau.net` -> `127.0.0.1:5173`
 - `buha.fristd-bau.net/api/*` -> `127.0.0.1:8000`
@@ -38,6 +38,18 @@ Die Compose-Ports binden deshalb nur auf `127.0.0.1`. Das Frontend nutzt relativ
 Der erlaubte Vite-Host wird ueber `WEB_ALLOWED_HOSTS` in `.env` gesetzt.
 
 Siehe [docs/deploy-vps.md](docs/deploy-vps.md) fuer die VPS-Schritte.
+
+## App-Login
+
+Die API nutzt serverseitige Cookie-Sessions. Beim Start wird automatisch ein Admin angelegt,
+wenn noch kein User existiert und diese Variablen gesetzt sind:
+
+- `INITIAL_ADMIN_EMAIL`
+- `INITIAL_ADMIN_PASSWORD`
+- `SESSION_COOKIE_SECURE` (`false` lokal per HTTP, `true` produktiv per HTTPS)
+
+Alle `/api/*`-Routen sind geschuetzt, ausser `/api/health`, `/api/auth/login` und `/api/auth/logout`.
+Das Session-Cookie ist HTTP-only, SameSite=Lax und wird bei Aktivitaet verlaengert.
 
 ## Erster MVP-Flow
 

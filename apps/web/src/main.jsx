@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL ?? "/api");
+const AuthContext = createContext(null);
 
 function resolveApiBaseUrl(configuredUrl) {
   if (typeof window === "undefined") return configuredUrl;
@@ -23,7 +24,172 @@ function resolveApiBaseUrl(configuredUrl) {
   return configuredUrl;
 }
 
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [authState, setAuthState] = useState("loading");
+
+  const loadUser = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/me`, { credentials: "include" });
+      if (response.status === 401) {
+        setUser(null);
+        setAuthState("anonymous");
+        return null;
+      }
+      if (!response.ok) {
+        throw new Error(`Login-Status konnte nicht geladen werden: ${response.status}`);
+      }
+      const result = await response.json();
+      setUser(result.user);
+      setAuthState("authenticated");
+      return result.user;
+    } catch {
+      setUser(null);
+      setAuthState("anonymous");
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUser();
+  }, [loadUser]);
+
+  const login = useCallback(async (email, password) => {
+    const response = await fetch(`${apiBaseUrl}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ email, password }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.detail || "Login fehlgeschlagen");
+    }
+    const result = await response.json();
+    setUser(result.user);
+    setAuthState("authenticated");
+    window.history.replaceState(null, "", "/");
+  }, []);
+
+  const logout = useCallback(async () => {
+    await fetch(`${apiBaseUrl}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => null);
+    setUser(null);
+    setAuthState("anonymous");
+    window.history.pushState(null, "", "/login");
+  }, []);
+
+  const apiFetch = useCallback(
+    async (path, options = {}) => {
+      const response = await fetch(`${apiBaseUrl}${path}`, {
+        ...options,
+        credentials: "include",
+      });
+      if (response.status === 401) {
+        setUser(null);
+        setAuthState("anonymous");
+        window.history.pushState(null, "", "/login");
+      }
+      return response;
+    },
+    [],
+  );
+
+  const value = useMemo(
+    () => ({ apiFetch, authState, loadUser, login, logout, user }),
+    [apiFetch, authState, loadUser, login, logout, user],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function useAuth() {
+  return useContext(AuthContext);
+}
+
 function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
+  );
+}
+
+function AuthGate() {
+  const { authState } = useAuth();
+  const isLoginPath = window.location.pathname === "/login";
+
+  if (authState === "loading") {
+    return <main className="app"><p className="empty">Login wird geprueft ...</p></main>;
+  }
+
+  if (authState === "authenticated" && isLoginPath) {
+    window.history.replaceState(null, "", "/");
+    return <UploadApp />;
+  }
+
+  if (authState !== "authenticated") {
+    return <LoginPage />;
+  }
+
+  return <UploadApp />;
+}
+
+function LoginPage() {
+  const { login } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submitLogin(event) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+    try {
+      await login(email, password);
+    } catch (loginError) {
+      setError(loginError.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="app login-page">
+      <form className="login-panel" onSubmit={submitLogin}>
+        <p className="eyebrow">buchhaltung-ai</p>
+        <h1>Login</h1>
+        <label>
+          E-Mail
+          <input
+            autoComplete="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            type="email"
+          />
+        </label>
+        <label>
+          Passwort
+          <input
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            type="password"
+          />
+        </label>
+        {error ? <p className="error">{error}</p> : null}
+        <button disabled={isSubmitting} type="submit">
+          {isSubmitting ? "Pruefe ..." : "Einloggen"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function UploadApp() {
+  const { apiFetch, logout, user } = useAuth();
   const [tenantId, setTenantId] = useState("demo-mandant");
   const [isDragging, setIsDragging] = useState(false);
   const [documents, setDocuments] = useState([]);
@@ -40,9 +206,7 @@ function App() {
       return;
     }
 
-    const response = await fetch(
-      `${apiBaseUrl}/documents?tenant_id=${encodeURIComponent(activeTenantId)}`,
-    );
+    const response = await apiFetch(`/documents?tenant_id=${encodeURIComponent(activeTenantId)}`);
 
     if (!response.ok) {
       throw new Error(`Review-Queue konnte nicht geladen werden: ${response.status}`);
@@ -50,7 +214,7 @@ function App() {
 
     const result = await response.json();
     setDocuments(result.documents ?? []);
-  }, [activeTenantId]);
+  }, [activeTenantId, apiFetch]);
 
   useEffect(() => {
     loadDocuments().catch((loadError) => setError(loadError.message));
@@ -65,7 +229,7 @@ function App() {
       formData.append("tenant_id", activeTenantId);
       formData.append("file", file);
 
-      const response = await fetch(`${apiBaseUrl}/documents/upload`, {
+      const response = await apiFetch("/documents/upload", {
         method: "POST",
         body: formData,
       });
@@ -82,7 +246,7 @@ function App() {
           : `Beleg gespeichert: ${result.document.original_filename}`,
       );
     },
-    [activeTenantId, loadDocuments],
+    [activeTenantId, apiFetch, loadDocuments],
   );
 
   const handleFiles = useCallback(
@@ -106,7 +270,7 @@ function App() {
       setExtractingIds((current) => [...current, documentId]);
 
       try {
-        const response = await fetch(`${apiBaseUrl}/documents/${documentId}/extract`, {
+        const response = await apiFetch(`/documents/${documentId}/extract`, {
           method: "POST",
         });
 
@@ -116,14 +280,14 @@ function App() {
 
         const result = await response.json();
         await loadDocuments();
-        setNotice(`Mock-Extraktion erstellt: ${result.document.original_filename}`);
+        setNotice(`Extraktion erstellt: ${result.document.original_filename}`);
       } catch (extractError) {
         setError(extractError.message);
       } finally {
         setExtractingIds((current) => current.filter((id) => id !== documentId));
       }
     },
-    [loadDocuments],
+    [apiFetch, loadDocuments],
   );
 
   return (
@@ -132,6 +296,10 @@ function App() {
         <div>
           <p className="eyebrow">buchhaltung-ai</p>
           <h1>Beleg-Upload</h1>
+        </div>
+        <div className="session-tools">
+          <span>{user?.display_name || user?.email}</span>
+          <button type="button" onClick={logout}>Logout</button>
         </div>
         <label>
           Mandant
@@ -207,30 +375,12 @@ function App() {
                     <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
                     <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
                     <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
-                    <Field
-                      label="Zahlbar bis"
-                      value={formatDate(document.extraction.raw_result?.due_date)}
-                    />
-                    <Field
-                      label="Skonto bis"
-                      value={formatDate(document.extraction.raw_result?.discount_due_date)}
-                    />
-                    <Field
-                      label="Skonto-Basis"
-                      value={formatMoney(document.extraction.raw_result?.discount_base)}
-                    />
-                    <Field
-                      label="Skonto"
-                      value={formatMoney(document.extraction.raw_result?.discount_amount)}
-                    />
-                    <Field
-                      label="Zahlbetrag Skonto"
-                      value={formatMoney(discountedAmount(document.extraction.raw_result))}
-                    />
-                    <Field
-                      label="Confidence"
-                      value={`${Math.round(document.extraction.confidence * 100)} %`}
-                    />
+                    <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
+                    <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
+                    <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
+                    <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
+                    <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
+                    <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
                   </div>
                 ) : (
                   <div className="pending-extraction">
@@ -295,7 +445,7 @@ function formatAssignment(rawResult) {
   if (rawResult?.project_code) return `BV ${rawResult.project_code}`;
   const labels = {
     general_cost: "Allgemeine Kosten",
-    project_unresolved: "BV ungeklärt",
+    project_unresolved: "BV ungeklaert",
     project: "Bauvorhaben",
   };
   return labels[rawResult?.assignment_type] ?? null;
@@ -307,7 +457,7 @@ function formatCostCategory(value) {
     general_overhead: "Sonstige Gemeinkosten",
     material: "Material",
     materials_subcontractor: "Material/Fremdleistung",
-    security_subscription: "Überwachung/Abo",
+    security_subscription: "Ueberwachung/Abo",
     software_subscription: "Software/Abo",
     subcontractor: "Fremdleistung",
   };
