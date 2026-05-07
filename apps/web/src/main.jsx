@@ -469,13 +469,7 @@ function ProjectSummary({ rawResult }) {
   const lines = projectSummaryLines(rawResult);
   if (!lines.length) return "-";
 
-  return (
-    <span className="project-summary">
-      {lines.map((line) => (
-        <span className="project-summary-line" key={line}>{line}</span>
-      ))}
-    </span>
-  );
+  return <span className="project-summary">{lines.join("\n")}</span>;
 }
 
 function AllocationLines({ lines }) {
