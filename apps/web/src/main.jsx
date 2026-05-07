@@ -2,7 +2,26 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL ?? "/api");
+
+function resolveApiBaseUrl(configuredUrl) {
+  if (typeof window === "undefined") return configuredUrl;
+
+  const currentHost = window.location.hostname;
+  const isLocalPage = ["localhost", "127.0.0.1", "::1"].includes(currentHost);
+  if (isLocalPage) return configuredUrl;
+
+  try {
+    const url = new URL(configuredUrl, window.location.origin);
+    if (["localhost", "127.0.0.1", "::1"].includes(url.hostname)) {
+      return "/api";
+    }
+  } catch {
+    return configuredUrl;
+  }
+
+  return configuredUrl;
+}
 
 function App() {
   const [tenantId, setTenantId] = useState("demo-mandant");
