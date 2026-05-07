@@ -472,7 +472,7 @@ function ProjectSummary({ rawResult }) {
   return (
     <span className="project-summary">
       {lines.map((line) => (
-        <small key={line}>{line}</small>
+        <span className="project-summary-line" key={line}>{line}</span>
       ))}
     </span>
   );
@@ -535,29 +535,36 @@ function projectSummaryLines(rawResult) {
   if (rawResult?.allocation_lines?.length) {
     return rawResult.allocation_lines
       .map((line) => {
-        const code = line.project_code ? `BV ${displayProjectCode(line.project_code)}` : "BV ungeklärt";
-        return [line.project_number || projectNumberFallback(line.project_code), code].filter(Boolean).join(" ");
+        const code = line.project_code ? `BV ${displayProjectCode(line.project_code, { compact: true })}` : "BV ungeklärt";
+        return [displayProjectNumber(line), code].filter(Boolean).join(" ");
       });
   }
   if (rawResult?.project_code) {
-    const code = `BV ${displayProjectCode(rawResult.project_code)}`;
-    return [[rawResult.project_number || projectNumberFallback(rawResult.project_code), code].filter(Boolean).join(" ")];
+    const code = `BV ${displayProjectCode(rawResult.project_code, { compact: true })}`;
+    return [[displayProjectNumber(rawResult), code].filter(Boolean).join(" ")];
   }
   return [];
 }
 
-function displayProjectCode(projectCode) {
+function displayProjectCode(projectCode, options = {}) {
+  if (options.compact && projectCode === "Wewe20") return "Wewe";
   const labels = {
     Heu92: "Hk92",
   };
   return labels[projectCode] ?? projectCode;
 }
 
+function displayProjectNumber(project) {
+  const fallback = projectNumberFallback(project?.project_code);
+  if (project?.project_code === "Hk92" || project?.project_code === "Heu92") return fallback;
+  return project?.project_number || fallback;
+}
+
 function projectNumberFallback(projectCode) {
   const numbers = {
     Wewe20: "25-00008",
-    Heu92: "26-00007",
-    Hk92: "26-00007",
+    Heu92: "2026-00007",
+    Hk92: "2026-00007",
   };
   return numbers[projectCode] ?? null;
 }

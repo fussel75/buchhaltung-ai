@@ -243,16 +243,15 @@ input {
 }
 
 .project-summary {
-  display: flex;
-  flex-direction: column;
+  display: block;
   gap: 1px;
   line-height: 1.15;
 }
 
-.project-summary small {
+.project-summary-line {
   color: #17211b;
   display: block;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   white-space: nowrap;
 }
