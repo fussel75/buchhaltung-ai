@@ -211,6 +211,11 @@ input {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.extraction-panel {
+  display: grid;
+  gap: 14px;
+}
+
 .field {
   display: grid;
   gap: 4px;
@@ -243,6 +248,46 @@ code {
   background: #e2f0e7;
   font-size: 0.85rem;
   font-weight: 800;
+}
+
+.allocation-lines {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #dce5da;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f7faf7;
+}
+
+.allocation-lines h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.allocation-table {
+  display: grid;
+  gap: 8px;
+}
+
+.allocation-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1.6fr) minmax(110px, 0.7fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e3e9e1;
+  border-radius: 6px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.allocation-row strong {
+  overflow-wrap: anywhere;
+}
+
+.allocation-row span:last-child {
+  color: #17211b;
+  font-weight: 800;
+  text-align: right;
 }
 
 .pending-extraction {
@@ -283,9 +328,14 @@ button:disabled {
   .document-head,
   .meta-grid,
   .extraction-grid,
+  .allocation-row,
   .pending-extraction {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .allocation-row span:last-child {
+    text-align: left;
   }
 
   .toolbar {

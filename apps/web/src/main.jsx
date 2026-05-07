@@ -363,24 +363,27 @@ function UploadApp() {
                 </div>
 
                 {document.extraction ? (
-                  <div className="extraction-grid">
-                    <Field label="Lieferant" value={document.extraction.supplier_name} />
-                    <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
-                    <Field label="Rechnung" value={document.extraction.invoice_number} />
-                    <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
-                    <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
-                    <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
-                    <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                    <Field label="Bauvorhaben" value={document.extraction.raw_result?.project_code} />
-                    <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
-                    <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
-                    <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
-                    <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
-                    <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
-                    <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
-                    <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
-                    <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
-                    <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
+                  <div className="extraction-panel">
+                    <div className="extraction-grid">
+                      <Field label="Lieferant" value={document.extraction.supplier_name} />
+                      <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
+                      <Field label="Rechnung" value={document.extraction.invoice_number} />
+                      <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
+                      <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
+                      <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
+                      <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
+                      <Field label="Bauvorhaben" value={document.extraction.raw_result?.project_code} />
+                      <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
+                      <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
+                      <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
+                      <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
+                      <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
+                      <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
+                      <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
+                      <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
+                      <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
+                    </div>
+                    <AllocationLines lines={document.extraction.raw_result?.allocation_lines} />
                   </div>
                 ) : (
                   <div className="pending-extraction">
@@ -420,6 +423,25 @@ function Field({ label, value }) {
   );
 }
 
+function AllocationLines({ lines }) {
+  if (!lines?.length) return null;
+
+  return (
+    <div className="allocation-lines">
+      <h3>Aufteilung</h3>
+      <div className="allocation-table">
+        {lines.map((line) => (
+          <div key={`${line.delivery_address}-${line.amount}`} className="allocation-row">
+            <span>{line.project_code ? `BV ${line.project_code}` : "BV ungeklärt"}</span>
+            <strong>{line.address || line.delivery_address}</strong>
+            <span>{formatMoney(line.amount)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function formatSize(sizeBytes) {
   if (sizeBytes < 1024) return `${sizeBytes} B`;
   return `${Math.round(sizeBytes / 1024)} KB`;
@@ -445,6 +467,7 @@ function formatAssignment(rawResult) {
   if (rawResult?.project_code) return `BV ${rawResult.project_code}`;
   const labels = {
     general_cost: "Allgemeine Kosten",
+    project_split: "BV aufgeteilt",
     project_unresolved: "BV ungeklaert",
     project: "Bauvorhaben",
   };

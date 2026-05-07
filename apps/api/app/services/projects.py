@@ -17,6 +17,11 @@ PROJECTS = (
         name="Weseler Weg 20",
         aliases=("Weseler Weg 20, 22045 Hamburg", "Weseler Weg 20"),
     ),
+    ConstructionProject(
+        code="Heu92",
+        name="Heukoppel 92",
+        aliases=("Heukoppel 92, 22179 Hamburg", "Heukoppel 92"),
+    ),
 )
 
 

@@ -247,6 +247,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
     )
+    allocation_lines = _find_allocation_lines(text)
     visible_discount = _find_visible_discount_terms(text)
     discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent")
     discount_due_date = (
@@ -271,7 +272,10 @@ def _build_pdf_text_result(document: dict) -> dict:
     project_code = project.code if project else None
     supplier_name = _supplier_name(document, text)
     product_name = _product_name(text)
-    assignment_type = _assignment_type(delivery_address, project_code)
+    allocation_lines_resolved = bool(allocation_lines) and all(
+        allocation.get("project_code") for allocation in allocation_lines
+    )
+    assignment_type = "project_split" if len(allocation_lines) > 1 else _assignment_type(delivery_address, project_code)
     cost_category = _cost_category(supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
@@ -298,7 +302,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         warnings.append(
             "Mehrere Lieferadressen/Bauvorhaben erkannt: bitte Zuordnung oder Splittung pruefen."
         )
-    if delivery_address and not project_code:
+    if delivery_address and not project_code and not allocation_lines_resolved:
         warnings.append("Nicht sicher erkannt: Bauvorhaben-Code aus Partnerdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
@@ -313,6 +317,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "service_period": invoice_date[:7] if invoice_date else None,
         "delivery_address": delivery_address,
         "delivery_addresses": delivery_addresses,
+        "allocation_lines": allocation_lines,
         "project_code": project_code,
         "project_name": project.name if project else None,
         "assignment_type": assignment_type,
@@ -583,6 +588,30 @@ def _find_delivery_addresses(text: str) -> list[str]:
     return list(dict.fromkeys(addresses))
 
 
+def _find_allocation_lines(text: str) -> list[dict[str, str | None]]:
+    normalized_text = sub(r"\s+", " ", text)
+    allocations = []
+    for match in finditer(
+        r"Zwischensumme\s+f[üu]r\s+(.+?),\s*(.+?):\s+([0-9.]+,\d{2})\s+EUR",
+        normalized_text,
+    ):
+        recipient, address, amount_text = (part.strip() for part in match.groups())
+        full_address = f"{recipient}, {address}"
+        project = find_project_by_address(full_address)
+        allocations.append(
+            {
+                "recipient": recipient,
+                "address": address,
+                "delivery_address": full_address,
+                "project_code": project.code if project else None,
+                "project_name": project.name if project else None,
+                "amount": str(_money_to_decimal(amount_text)),
+                "currency": "EUR",
+            }
+        )
+    return allocations
+
+
 def _resolve_project_for_delivery_addresses(delivery_addresses: list[str]):
     projects = [find_project_by_address(address) for address in delivery_addresses]
     project_codes = {project.code for project in projects if project}
@@ -632,7 +661,7 @@ def _cost_category(
         return "subcontractor"
     if any(term in haystack for term in ["hobotec", "fermacell", "schalung", "gipsfaserplatte", "artikel", "material"]):
         return "material"
-    if assignment_type in {"project", "project_unresolved"}:
+    if assignment_type in {"project", "project_split", "project_unresolved"}:
         return "material"
     if any(term in haystack for term in ["tank", "diesel", "benzin", "kraftstoff", "shell", "aral"]):
         return "fuel_vehicle"
@@ -703,6 +732,8 @@ def _normalized_invoice_filename(
 def _filename_assignment_label(project_code: str | None, assignment_type: str) -> str:
     if project_code:
         return f"BV {project_code}"
+    if assignment_type == "project_split":
+        return "BV aufgeteilt"
     if assignment_type == "project_unresolved":
         return "BV ungeklärt"
     return "Allgemeine Kosten"
