@@ -196,6 +196,7 @@ function UploadApp() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [extractingIds, setExtractingIds] = useState([]);
+  const [deletingIds, setDeletingIds] = useState([]);
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -290,6 +291,37 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const deleteDocument = useCallback(
+    async (document) => {
+      const confirmed = window.confirm(
+        `Beleg "${document.original_filename}" wirklich aus der Review-Queue loeschen?`,
+      );
+      if (!confirmed) return;
+
+      setError("");
+      setNotice("");
+      setDeletingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Loeschen fehlgeschlagen: ${response.status}`);
+        }
+
+        await loadDocuments();
+        setNotice(`Beleg geloescht: ${document.original_filename}`);
+      } catch (deleteError) {
+        setError(deleteError.message);
+      } finally {
+        setDeletingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   return (
     <main className="app">
       <section className="toolbar">
@@ -354,7 +386,17 @@ function UploadApp() {
                     <strong>{document.original_filename}</strong>
                     <span>{document.normalized_filename || document.tenant_id}</span>
                   </div>
-                  <span className="status">{formatStatus(document.status)}</span>
+                  <div className="document-actions">
+                    <span className="status">{formatStatus(document.status)}</span>
+                    <button
+                      className="secondary-button danger-button"
+                      type="button"
+                      onClick={() => deleteDocument(document)}
+                      disabled={deletingIds.includes(document.id)}
+                    >
+                      {deletingIds.includes(document.id) ? "Loescht..." : "Loeschen"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="meta-grid">
