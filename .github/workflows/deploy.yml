@@ -15,11 +15,11 @@ jobs:
     steps:
       - name: SSH deploy trigger
         env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          printf '%s' "$SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
