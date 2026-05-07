@@ -4,6 +4,7 @@ from re import sub
 
 @dataclass(frozen=True)
 class ConstructionProject:
+    number: str
     code: str
     name: str
     aliases: tuple[str, ...]
@@ -13,11 +14,13 @@ class ConstructionProject:
 # central project source instead of keeping aliases in code.
 PROJECTS = (
     ConstructionProject(
+        number="25-00008",
         code="Wewe20",
         name="Weseler Weg 20",
         aliases=("Weseler Weg 20, 22045 Hamburg", "Weseler Weg 20"),
     ),
     ConstructionProject(
+        number="26-00007",
         code="Hk92",
         name="Heukoppel 92",
         aliases=("Heukoppel 92, 22179 Hamburg", "Heukoppel 92"),

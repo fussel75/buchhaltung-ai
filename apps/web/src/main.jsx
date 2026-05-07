@@ -414,7 +414,7 @@ function UploadApp() {
                       <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
                       <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
                       <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                      <Field label="Bauvorhaben" value={formatProjects(document.extraction.raw_result)} />
+                      <Field label="Bauvorhaben" value={<ProjectSummary rawResult={document.extraction.raw_result} />} />
                       <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
                       <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
                       <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
@@ -461,6 +461,19 @@ function Field({ label, value }) {
     <span className="field">
       <small>{label}</small>
       <strong>{value || "-"}</strong>
+    </span>
+  );
+}
+
+function ProjectSummary({ rawResult }) {
+  const lines = projectSummaryLines(rawResult);
+  if (!lines.length) return "-";
+
+  return (
+    <span className="project-summary">
+      {lines.map((line) => (
+        <small key={line}>{line}</small>
+      ))}
     </span>
   );
 }
@@ -517,20 +530,19 @@ function formatAssignment(rawResult) {
   return labels[rawResult?.assignment_type] ?? null;
 }
 
-function formatProjects(rawResult) {
+function projectSummaryLines(rawResult) {
   if (rawResult?.allocation_lines?.length) {
     return rawResult.allocation_lines
       .map((line) => {
         const code = line.project_code ? `BV ${line.project_code}` : "BV ungeklärt";
-        const name = line.project_name || line.address || line.delivery_address;
-        return `${code}, ${name}`;
-      })
-      .join("; ");
+        return [line.project_number, code].filter(Boolean).join(" ");
+      });
   }
   if (rawResult?.project_code) {
-    return rawResult.project_name ? `BV ${rawResult.project_code}, ${rawResult.project_name}` : `BV ${rawResult.project_code}`;
+    const code = `BV ${rawResult.project_code}`;
+    return [[rawResult.project_number, code].filter(Boolean).join(" ")];
   }
-  return null;
+  return [];
 }
 
 function formatCostCategory(value) {

@@ -241,6 +241,17 @@ input {
   overflow-wrap: anywhere;
 }
 
+.project-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.project-summary small {
+  color: #17211b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 code {
   border-radius: 6px;
   padding: 6px 8px;
