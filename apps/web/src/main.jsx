@@ -488,7 +488,8 @@ function AllocationLines({ lines }) {
         {lines.map((line) => (
           <div key={`${line.delivery_address}-${line.amount}`} className="allocation-row">
             <span>
-              {line.project_code ? `BV ${line.project_code}` : "BV ungeklärt"}, {line.address || line.delivery_address},{" "}
+              {line.project_code ? `BV ${displayProjectCode(line.project_code)}` : "BV ungeklärt"},{" "}
+              {line.address || line.delivery_address},{" "}
               {formatMoney(line.amount)} Netto
             </span>
           </div>
@@ -534,15 +535,31 @@ function projectSummaryLines(rawResult) {
   if (rawResult?.allocation_lines?.length) {
     return rawResult.allocation_lines
       .map((line) => {
-        const code = line.project_code ? `BV ${line.project_code}` : "BV ungeklärt";
-        return [line.project_number, code].filter(Boolean).join(" ");
+        const code = line.project_code ? `BV ${displayProjectCode(line.project_code)}` : "BV ungeklärt";
+        return [line.project_number || projectNumberFallback(line.project_code), code].filter(Boolean).join(" ");
       });
   }
   if (rawResult?.project_code) {
-    const code = `BV ${rawResult.project_code}`;
-    return [[rawResult.project_number, code].filter(Boolean).join(" ")];
+    const code = `BV ${displayProjectCode(rawResult.project_code)}`;
+    return [[rawResult.project_number || projectNumberFallback(rawResult.project_code), code].filter(Boolean).join(" ")];
   }
   return [];
+}
+
+function displayProjectCode(projectCode) {
+  const labels = {
+    Heu92: "Hk92",
+  };
+  return labels[projectCode] ?? projectCode;
+}
+
+function projectNumberFallback(projectCode) {
+  const numbers = {
+    Wewe20: "25-00008",
+    Heu92: "26-00007",
+    Hk92: "26-00007",
+  };
+  return numbers[projectCode] ?? null;
 }
 
 function formatCostCategory(value) {
