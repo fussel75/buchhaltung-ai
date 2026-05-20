@@ -1,6 +1,7 @@
+from decimal import Decimal
 from io import BytesIO
 from re import sub
-from typing import Any
+from typing import Any, Literal
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from uuid import UUID
@@ -16,6 +17,8 @@ from app.services.database import (
     get_document,
     list_documents,
     list_documents_for_month,
+    prepare_document_review,
+    update_booking_suggestion,
 )
 from app.services.extraction import run_mock_extraction
 from app.services.storage import (
@@ -31,6 +34,48 @@ router = APIRouter()
 class DocumentExportRequest(BaseModel):
     document_ids: list[UUID] = Field(min_length=1, max_length=200)
     tenant_id: str | None = None
+
+
+class BookingSuggestionUpdate(BaseModel):
+    booking_type: Literal["incoming_invoice", "credit_note"]
+    cost_category: Literal[
+        "material",
+        "subcontractor",
+        "fuel_vehicle",
+        "software_subscription",
+        "security_subscription",
+        "general_overhead",
+    ] | None = None
+    assignment_code: str | None = Field(default=None, max_length=80)
+    assignment_kind: Literal[
+        "construction_project",
+        "construction_or_dropoff_site",
+        "location",
+        "cost_object",
+        "vehicle",
+        "subscription",
+        "department",
+    ] | None = None
+    description: str | None = Field(default=None, max_length=500)
+    net_amount: Decimal | None = None
+    tax_amount: Decimal | None = None
+    gross_amount: Decimal | None = None
+    currency: str = Field(default="EUR", pattern="^[A-Z]{3}$", max_length=3)
+
+    def normalized(self) -> dict[str, Any]:
+        assignment_code = self.assignment_code.strip() if self.assignment_code else None
+        description = self.description.strip() if self.description else None
+        return {
+            "booking_type": self.booking_type,
+            "cost_category": self.cost_category,
+            "assignment_code": assignment_code or None,
+            "assignment_kind": self.assignment_kind,
+            "description": description or None,
+            "net_amount": self.net_amount,
+            "tax_amount": self.tax_amount,
+            "gross_amount": self.gross_amount,
+            "currency": self.currency,
+        }
 
 
 def _normalize_tenant_id(tenant_id: str) -> str:
@@ -163,6 +208,16 @@ def extract_document(document_id: UUID) -> dict[str, Any]:
     return {"document": run_mock_extraction(document_id)}
 
 
+@router.post("/{document_id}/review")
+def prepare_review(document_id: UUID, request: Request) -> dict[str, Any]:
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("email") or "system"
+    document = prepare_document_review(document_id, actor=actor)
+    if document is None:
+        raise HTTPException(status_code=404, detail="document with extraction not found")
+    return {"document": document}
+
+
 @router.post("/{document_id}/approve")
 def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
     user = getattr(request.state, "user", None) or {}
@@ -170,6 +225,29 @@ def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
     document = approve_document_review(document_id, actor=actor)
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
+    return {"document": document}
+
+
+@router.patch("/{document_id}/booking-suggestions/{suggestion_id}")
+def update_document_booking_suggestion(
+    document_id: UUID,
+    suggestion_id: UUID,
+    payload: BookingSuggestionUpdate,
+    request: Request,
+) -> dict[str, Any]:
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("email") or "system"
+    try:
+        document = update_booking_suggestion(
+            document_id=document_id,
+            suggestion_id=suggestion_id,
+            values=payload.normalized(),
+            actor=actor,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if document is None:
+        raise HTTPException(status_code=404, detail="booking suggestion not found")
     return {"document": document}
 
 

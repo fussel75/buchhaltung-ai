@@ -663,19 +663,56 @@ code {
   padding: 10px 12px;
 }
 
+.booking-edit-row {
+  display: grid;
+  grid-template-columns: 46px minmax(180px, 1.2fr) minmax(170px, 1fr) minmax(145px, 0.9fr) repeat(3, minmax(92px, 0.65fr)) minmax(104px, 0.65fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  border-top: 1px solid #edf0f3;
+  padding: 10px 12px;
+}
+
 .booking-row:first-child {
   border-top: 0;
 }
 
+.booking-edit-row:first-child {
+  border-top: 0;
+}
+
 .booking-row span,
-.booking-row strong {
+.booking-row strong,
+.booking-edit-row span,
+.booking-edit-row strong {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .booking-row strong,
-.booking-row span:nth-last-child(-n + 3) {
+.booking-row span:nth-last-child(-n + 3),
+.booking-edit-row strong,
+.booking-edit-row input {
   font-variant-numeric: tabular-nums;
+}
+
+.booking-edit-row input,
+.booking-edit-row select {
+  min-height: 36px;
+  padding: 7px 9px;
+  font-size: 0.86rem;
+}
+
+.booking-edit-row button {
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+.assignment-edit {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.8fr) minmax(110px, 1fr);
+  gap: 8px;
+  min-width: 0;
 }
 
 .booking-head,
@@ -957,6 +994,8 @@ code {
   .assignment-table .data-row,
   .supplier-table .data-row,
   .booking-row,
+  .booking-edit-row,
+  .assignment-edit,
   .table-row,
   .compact-form {
     grid-template-columns: 1fr;

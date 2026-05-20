@@ -58,23 +58,30 @@ Das Session-Cookie ist HTTP-only, SameSite=Lax und wird bei Aktivitaet verlaenge
 3. Original unveraendert speichern.
 4. Hash bilden und Duplikat pro Mandant pruefen.
 5. Beleg persistent in PostgreSQL speichern und in der Review-Queue anzeigen.
-6. Extraktion pruefen und Beleg freigeben.
-7. Freigabe erzeugt erste Buchungsvorschlagszeilen; bei erkannten Splits je Zuordnung eine eigene Zeile.
+6. Extraktion pruefen und Buchungsvorschlag erzeugen.
+7. Vorschlagszeilen korrigieren: Beschreibung, Zuordnung, Kostenart, Netto, USt und Brutto.
+8. Beleg final freigeben; danach sind die Vorschlagszeilen gesperrt.
 
 ## Aktueller API-Schnitt
 
 - `GET /api/health`
 - `POST /api/documents/upload` mit `tenant_id` und `file`
 - `GET /api/documents?tenant_id=demo-mandant`
+- `GET /api/documents/{document_id}/file?disposition=inline|attachment`
+- `POST /api/documents/export` fuer Auswahl-ZIP
+- `GET /api/documents/export/month?tenant_id=...&year=2026&month=5`
 - `POST /api/documents/{document_id}/extract`
+- `POST /api/documents/{document_id}/review`
+- `PATCH /api/documents/{document_id}/booking-suggestions/{suggestion_id}`
 - `POST /api/documents/{document_id}/approve`
 
 Uploads werden unter `STORAGE_ROOT` abgelegt und mit Metadaten in PostgreSQL gespeichert.
 Die Review-Queue liest die persistierten Belege je Mandant.
 Die Extraktion ist aktuell ein austauschbarer Mock-Adapter, der erste Rechnungsfelder erzeugt
 und Audit-Events fuer Upload, Dublette, Start und Abschluss schreibt.
-Die Review-Freigabe schreibt Buchungsvorschlaege in `document_booking_suggestions`;
+Der Review-Schritt schreibt Buchungsvorschlaege in `document_booking_suggestions`;
 bei Aufteilungen werden die Netto- und Steuerwerte anteilig je Zuordnung verteilt.
+Die Vorschlagszeilen sind vor der finalen Freigabe editierbar und werden bei finaler Freigabe auf `approved` gesetzt.
 
 Die Extraktionsreihenfolge ist:
 
@@ -101,3 +108,19 @@ Branchenprofile fuer den MVP:
 - Baubranche: Zuordnung heisst `Bauvorhaben`, Kuerzel `BV`.
 - Sportstudio: Zuordnung heisst `Standort`, z.B. fuer Kostenstellen je Studio.
 - Container/Transport: Zuordnung heisst `Bauvorhaben / Stellplatz`, weil Container sowohl auf Baustellen als auch an anderen Stellplaetzen stehen koennen.
+
+## Tests und Sicherheitschecks
+
+Aktuelle lokale Checks:
+
+```powershell
+cd apps/api
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+
+cd ..\web
+npm run build
+npm audit --omit=dev
+```
+
+Die Tests decken aktuell die Buchungsvorschlagslogik fuer Splits, Gutschriften und Eingabevalidierung ab.
+API-Routen fuer Dateien und Buchungszeilen loesen Daten serverseitig ueber IDs auf; freie Dateipfade werden nicht vom Frontend akzeptiert.

@@ -509,6 +509,46 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
     if document is None or not document.get("extraction"):
         return None
 
+    if not document.get("booking_suggestions"):
+        document = prepare_document_review(document_id, actor=actor)
+        if document is None:
+            return None
+
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_booking_suggestions
+                set status = 'approved', updated_at = %s
+                where document_id = %s
+                """,
+                (now, document_id),
+            )
+            cursor.execute(
+                """
+                update documents
+                set status = 'review_approved', updated_at = %s
+                where id = %s
+                """,
+                (now, document_id),
+            )
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.review_approved",
+        document_id=document_id,
+        actor=actor,
+        details={"suggestion_count": len(document.get("booking_suggestions") or [])},
+    )
+    return get_document(document_id)
+
+
+def prepare_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None or not document.get("extraction"):
+        return None
+
     extraction = document["extraction"]
     suggestions = _booking_suggestions_from_extraction(document, extraction)
     now = datetime.now(UTC)
@@ -547,7 +587,7 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
             cursor.execute(
                 """
                 update documents
-                set status = 'review_approved', updated_at = %s
+                set status = 'review_ready', updated_at = %s
                 where id = %s
                 """,
                 (now, document_id),
@@ -555,10 +595,79 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
 
     insert_audit_event(
         tenant_id=document["tenant_id"],
-        event_type="document.review_approved",
+        event_type="document.review_prepared",
         document_id=document_id,
         actor=actor,
         details={"suggestion_count": len(suggestions)},
+    )
+    return get_document(document_id)
+
+
+def update_booking_suggestion(
+    document_id: UUID,
+    suggestion_id: UUID,
+    values: dict[str, Any],
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None:
+        return None
+    if document["status"] == "review_approved":
+        raise ValueError("approved document cannot be edited")
+
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_booking_suggestions
+                set
+                    booking_type = %s,
+                    cost_category = %s,
+                    assignment_code = %s,
+                    assignment_kind = %s,
+                    description = %s,
+                    net_amount = %s,
+                    tax_amount = %s,
+                    gross_amount = %s,
+                    currency = %s,
+                    status = 'reviewed',
+                    updated_at = %s
+                where id = %s and document_id = %s
+                returning *
+                """,
+                (
+                    values.get("booking_type"),
+                    values.get("cost_category"),
+                    values.get("assignment_code"),
+                    values.get("assignment_kind"),
+                    values.get("description"),
+                    values.get("net_amount"),
+                    values.get("tax_amount"),
+                    values.get("gross_amount"),
+                    values.get("currency", "EUR"),
+                    now,
+                    suggestion_id,
+                    document_id,
+                ),
+            )
+            updated = cursor.fetchone()
+
+    if updated is None:
+        return None
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.booking_suggestion_updated",
+        document_id=document_id,
+        actor=actor,
+        details={
+            "suggestion_id": str(suggestion_id),
+            "line_no": updated["line_no"],
+            "net_amount": str(updated["net_amount"]) if updated["net_amount"] is not None else None,
+            "tax_amount": str(updated["tax_amount"]) if updated["tax_amount"] is not None else None,
+            "gross_amount": str(updated["gross_amount"]) if updated["gross_amount"] is not None else None,
+        },
     )
     return get_document(document_id)
 

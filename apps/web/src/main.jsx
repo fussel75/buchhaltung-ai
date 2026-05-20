@@ -203,6 +203,7 @@ function UploadApp() {
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
   const [approvingIds, setApprovingIds] = useState([]);
+  const [savingSuggestionIds, setSavingSuggestionIds] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [exporting, setExporting] = useState("");
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -358,8 +359,40 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const prepareReview = useCallback(
+    async (document) => {
+      setError("");
+      setNotice("");
+      setApprovingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/review`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Buchungsvorschlag fehlgeschlagen: ${response.status}`);
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Buchungsvorschlag erstellt: ${result.document.original_filename}`);
+      } catch (prepareError) {
+        setError(prepareError.message);
+      } finally {
+        setApprovingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   const approveDocument = useCallback(
     async (document) => {
+      const confirmed = window.confirm(
+        `Beleg "${document.original_filename}" final freigeben? Danach sind die Vorschlagszeilen gesperrt.`,
+      );
+      if (!confirmed) return;
+
       setError("");
       setNotice("");
       setApprovingIds((current) => [...current, document.id]);
@@ -370,16 +403,44 @@ function UploadApp() {
         });
 
         if (!response.ok) {
-          throw new Error(`Freigabe fehlgeschlagen: ${response.status}`);
+          throw new Error(`Finale Freigabe fehlgeschlagen: ${response.status}`);
         }
 
         const result = await response.json();
         await loadDocuments();
-        setNotice(`Buchungsvorschlag erstellt: ${result.document.original_filename}`);
+        setNotice(`Beleg final freigegeben: ${result.document.original_filename}`);
       } catch (approveError) {
         setError(approveError.message);
       } finally {
         setApprovingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
+  const saveBookingSuggestion = useCallback(
+    async (document, suggestion, values) => {
+      setError("");
+      setNotice("");
+      setSavingSuggestionIds((current) => [...current, suggestion.id]);
+      try {
+        const response = await apiFetch(`/documents/${document.id}/booking-suggestions/${suggestion.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(normalizeBookingSuggestion(values)),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Buchungszeile konnte nicht gespeichert werden: ${response.status}`);
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Buchungszeile gespeichert: ${result.document.original_filename}`);
+      } catch (saveError) {
+        setError(saveError.message);
+      } finally {
+        setSavingSuggestionIds((current) => current.filter((id) => id !== suggestion.id));
       }
     },
     [apiFetch, loadDocuments],
@@ -606,13 +667,22 @@ function UploadApp() {
                     >
                       {exporting === document.id ? "Lädt..." : "Download"}
                     </button>
-                    {document.extraction && document.status !== "review_approved" ? (
+                    {document.extraction && !document.booking_suggestions?.length ? (
+                      <button
+                        type="button"
+                        onClick={() => prepareReview(document)}
+                        disabled={approvingIds.includes(document.id)}
+                      >
+                        {approvingIds.includes(document.id) ? "Erstellt..." : "Vorschlag"}
+                      </button>
+                    ) : null}
+                    {document.booking_suggestions?.length && document.status !== "review_approved" ? (
                       <button
                         type="button"
                         onClick={() => approveDocument(document)}
                         disabled={approvingIds.includes(document.id)}
                       >
-                        {approvingIds.includes(document.id) ? "Gibt frei..." : "Freigeben"}
+                        {approvingIds.includes(document.id) ? "Gibt frei..." : "Final freigeben"}
                       </button>
                     ) : null}
                     <button
@@ -654,7 +724,13 @@ function UploadApp() {
                       <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
                     </div>
                     <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
-                    <BookingSuggestions suggestions={document.booking_suggestions} tenantProfile={tenantProfile} />
+                    <BookingSuggestions
+                      document={document}
+                      suggestions={document.booking_suggestions}
+                      tenantProfile={tenantProfile}
+                      onSave={saveBookingSuggestion}
+                      savingIds={savingSuggestionIds}
+                    />
                   </div>
                 ) : (
                   <div className="pending-extraction">
@@ -1188,20 +1264,42 @@ function AllocationLines({ lines, tenantProfile }) {
   );
 }
 
-function BookingSuggestions({ suggestions, tenantProfile }) {
+function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savingIds = [] }) {
+  const [drafts, setDrafts] = useState({});
+
+  useEffect(() => {
+    setDrafts(
+      Object.fromEntries(
+        (suggestions ?? []).map((suggestion) => [suggestion.id, bookingSuggestionDraft(suggestion)]),
+      ),
+    );
+  }, [suggestions]);
+
   if (!suggestions?.length) return null;
+
+  const isLocked = document.status === "review_approved";
+
+  function updateDraft(suggestionId, patch) {
+    setDrafts((current) => ({
+      ...current,
+      [suggestionId]: {
+        ...current[suggestionId],
+        ...patch,
+      },
+    }));
+  }
 
   return (
     <div className="booking-suggestions">
       <div className="card-header">
         <div>
           <p className="eyebrow">Freigabe</p>
-          <h3>Buchungsvorschlag</h3>
+          <h3>{isLocked ? "Final freigegeben" : "Buchungsvorschlag prüfen"}</h3>
         </div>
         <StatusPill value={`${suggestions.length} Zeilen`} />
       </div>
       <div className="booking-table">
-        <div className="booking-row booking-head">
+        <div className="booking-edit-row booking-head">
           <span>Zeile</span>
           <span>Beschreibung</span>
           <span>Zuordnung</span>
@@ -1209,21 +1307,142 @@ function BookingSuggestions({ suggestions, tenantProfile }) {
           <span>Netto</span>
           <span>USt</span>
           <span>Brutto</span>
+          <span>Aktion</span>
         </div>
-        {suggestions.map((suggestion) => (
-          <div className="booking-row" key={suggestion.id}>
-            <strong>{suggestion.line_no}</strong>
-            <span>{suggestion.description || "-"}</span>
-            <span>{formatAssignmentCode(suggestion.assignment_code, suggestion.assignment_kind, tenantProfile) || "-"}</span>
-            <span>{formatCostCategory(suggestion.cost_category)}</span>
-            <span>{formatMoney(suggestion.net_amount)}</span>
-            <span>{formatMoney(suggestion.tax_amount)}</span>
-            <span>{formatMoney(suggestion.gross_amount)}</span>
-          </div>
-        ))}
+        {suggestions.map((suggestion) => {
+          const draft = drafts[suggestion.id] ?? bookingSuggestionDraft(suggestion);
+          return (
+            <div className="booking-edit-row" key={suggestion.id}>
+              <strong>{suggestion.line_no}</strong>
+              <input
+                value={draft.description}
+                onChange={(event) => updateDraft(suggestion.id, { description: event.target.value })}
+                disabled={isLocked}
+                aria-label={`Beschreibung Zeile ${suggestion.line_no}`}
+              />
+              <div className="assignment-edit">
+                <input
+                  value={draft.assignment_code}
+                  onChange={(event) => updateDraft(suggestion.id, { assignment_code: event.target.value })}
+                  disabled={isLocked}
+                  aria-label={`Zuordnung Zeile ${suggestion.line_no}`}
+                />
+                <select
+                  value={draft.assignment_kind}
+                  onChange={(event) => updateDraft(suggestion.id, { assignment_kind: event.target.value })}
+                  disabled={isLocked}
+                  aria-label={`Zuordnungsart Zeile ${suggestion.line_no}`}
+                >
+                  <option value="">-</option>
+                  <option value="construction_project">Bauvorhaben</option>
+                  <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+                  <option value="location">Standort</option>
+                  <option value="cost_object">Kostenobjekt</option>
+                  <option value="vehicle">Fahrzeug</option>
+                  <option value="subscription">Abo/Vertrag</option>
+                  <option value="department">Bereich</option>
+                </select>
+              </div>
+              <select
+                value={draft.cost_category}
+                onChange={(event) => updateDraft(suggestion.id, { cost_category: event.target.value })}
+                disabled={isLocked}
+                aria-label={`Kostenart Zeile ${suggestion.line_no}`}
+              >
+                <option value="">-</option>
+                <option value="material">Material</option>
+                <option value="subcontractor">Fremdleistung</option>
+                <option value="fuel_vehicle">Fahrzeug/Tanken</option>
+                <option value="software_subscription">Software/Abo</option>
+                <option value="security_subscription">Überwachung/Abo</option>
+                <option value="general_overhead">Sonstige Gemeinkosten</option>
+              </select>
+              <MoneyInput
+                value={draft.net_amount}
+                onChange={(value) => updateDraft(suggestion.id, { net_amount: value })}
+                disabled={isLocked}
+                label={`Netto Zeile ${suggestion.line_no}`}
+              />
+              <MoneyInput
+                value={draft.tax_amount}
+                onChange={(value) => updateDraft(suggestion.id, { tax_amount: value })}
+                disabled={isLocked}
+                label={`USt Zeile ${suggestion.line_no}`}
+              />
+              <MoneyInput
+                value={draft.gross_amount}
+                onChange={(value) => updateDraft(suggestion.id, { gross_amount: value })}
+                disabled={isLocked}
+                label={`Brutto Zeile ${suggestion.line_no}`}
+              />
+              {isLocked ? (
+                <StatusPill value={formatBookingStatus(suggestion.status)} tone="gray" />
+              ) : (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => onSave(document, suggestion, draft)}
+                  disabled={savingIds.includes(suggestion.id)}
+                >
+                  {savingIds.includes(suggestion.id) ? "Speichert..." : "Speichern"}
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function MoneyInput({ value, onChange, disabled, label }) {
+  return (
+    <input
+      inputMode="decimal"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled}
+      aria-label={label}
+    />
+  );
+}
+
+function bookingSuggestionDraft(suggestion) {
+  return {
+    booking_type: suggestion.booking_type || "incoming_invoice",
+    cost_category: suggestion.cost_category || "",
+    assignment_code: suggestion.assignment_code || "",
+    assignment_kind: suggestion.assignment_kind || "",
+    description: suggestion.description || "",
+    net_amount: moneyDraftValue(suggestion.net_amount),
+    tax_amount: moneyDraftValue(suggestion.tax_amount),
+    gross_amount: moneyDraftValue(suggestion.gross_amount),
+    currency: suggestion.currency || "EUR",
+  };
+}
+
+function normalizeBookingSuggestion(values) {
+  return {
+    booking_type: values.booking_type || "incoming_invoice",
+    cost_category: values.cost_category || null,
+    assignment_code: values.assignment_code?.trim() || null,
+    assignment_kind: values.assignment_kind || null,
+    description: values.description?.trim() || null,
+    net_amount: decimalOrNull(values.net_amount),
+    tax_amount: decimalOrNull(values.tax_amount),
+    gross_amount: decimalOrNull(values.gross_amount),
+    currency: values.currency || "EUR",
+  };
+}
+
+function moneyDraftValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value).replace(".", ",");
+}
+
+function decimalOrNull(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  return String(value).trim().replace(",", ".");
 }
 
 async function downloadResponse(response, fallbackFilename) {
@@ -1256,7 +1475,17 @@ function formatStatus(status) {
   const labels = {
     review_pending: "Prüfen",
     extracted: "Extrahiert",
+    review_ready: "Vorschlag",
     review_approved: "Freigegeben",
+  };
+  return labels[status] ?? status;
+}
+
+function formatBookingStatus(status) {
+  const labels = {
+    approved: "freigegeben",
+    reviewed: "geprüft",
+    suggested: "Vorschlag",
   };
   return labels[status] ?? status;
 }
