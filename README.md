@@ -58,7 +58,8 @@ Das Session-Cookie ist HTTP-only, SameSite=Lax und wird bei Aktivitaet verlaenge
 3. Original unveraendert speichern.
 4. Hash bilden und Duplikat pro Mandant pruefen.
 5. Beleg persistent in PostgreSQL speichern und in der Review-Queue anzeigen.
-6. OCR/KI/Buchungsvorschlag als naechste Ausbaustufe anbinden.
+6. Extraktion pruefen und Beleg freigeben.
+7. Freigabe erzeugt erste Buchungsvorschlagszeilen; bei erkannten Splits je Zuordnung eine eigene Zeile.
 
 ## Aktueller API-Schnitt
 
@@ -66,11 +67,14 @@ Das Session-Cookie ist HTTP-only, SameSite=Lax und wird bei Aktivitaet verlaenge
 - `POST /api/documents/upload` mit `tenant_id` und `file`
 - `GET /api/documents?tenant_id=demo-mandant`
 - `POST /api/documents/{document_id}/extract`
+- `POST /api/documents/{document_id}/approve`
 
 Uploads werden unter `STORAGE_ROOT` abgelegt und mit Metadaten in PostgreSQL gespeichert.
 Die Review-Queue liest die persistierten Belege je Mandant.
 Die Extraktion ist aktuell ein austauschbarer Mock-Adapter, der erste Rechnungsfelder erzeugt
 und Audit-Events fuer Upload, Dublette, Start und Abschluss schreibt.
+Die Review-Freigabe schreibt Buchungsvorschlaege in `document_booking_suggestions`;
+bei Aufteilungen werden die Netto- und Steuerwerte anteilig je Zuordnung verteilt.
 
 Die Extraktionsreihenfolge ist:
 

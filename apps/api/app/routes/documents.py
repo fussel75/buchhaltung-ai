@@ -2,9 +2,9 @@ from typing import Any
 
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
-from app.services.database import create_document_record, delete_document, list_documents
+from app.services.database import approve_document_review, create_document_record, delete_document, list_documents
 from app.services.extraction import run_mock_extraction
 from app.services.storage import delete_stored_document, delete_stored_document_path, store_original_document
 
@@ -47,6 +47,16 @@ def get_documents(
 @router.post("/{document_id}/extract")
 def extract_document(document_id: UUID) -> dict[str, Any]:
     return {"document": run_mock_extraction(document_id)}
+
+
+@router.post("/{document_id}/approve")
+def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("email") or "system"
+    document = approve_document_review(document_id, actor=actor)
+    if document is None:
+        raise HTTPException(status_code=404, detail="document with extraction not found")
+    return {"document": document}
 
 
 @router.delete("/{document_id}")

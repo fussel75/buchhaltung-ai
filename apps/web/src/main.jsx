@@ -198,6 +198,7 @@ function UploadApp() {
   const [extractingIds, setExtractingIds] = useState([]);
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
+  const [approvingIds, setApprovingIds] = useState([]);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -336,6 +337,33 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const approveDocument = useCallback(
+    async (document) => {
+      setError("");
+      setNotice("");
+      setApprovingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/approve`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Freigabe fehlgeschlagen: ${response.status}`);
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Buchungsvorschlag erstellt: ${result.document.original_filename}`);
+      } catch (approveError) {
+        setError(approveError.message);
+      } finally {
+        setApprovingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   return (
     <main className="app">
       <section className="toolbar">
@@ -420,6 +448,15 @@ function UploadApp() {
                   </div>
                   <div className="document-actions">
                     <span className="status">{formatStatus(document.status)}</span>
+                    {document.extraction && document.status !== "review_approved" ? (
+                      <button
+                        type="button"
+                        onClick={() => approveDocument(document)}
+                        disabled={approvingIds.includes(document.id)}
+                      >
+                        {approvingIds.includes(document.id) ? "Gibt frei..." : "Freigeben"}
+                      </button>
+                    ) : null}
                     <button
                       className="secondary-button danger-button"
                       type="button"
@@ -459,6 +496,7 @@ function UploadApp() {
                       <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
                     </div>
                     <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
+                    <BookingSuggestions suggestions={document.booking_suggestions} tenantProfile={tenantProfile} />
                   </div>
                 ) : (
                   <div className="pending-extraction">
@@ -967,6 +1005,44 @@ function AllocationLines({ lines, tenantProfile }) {
   );
 }
 
+function BookingSuggestions({ suggestions, tenantProfile }) {
+  if (!suggestions?.length) return null;
+
+  return (
+    <div className="booking-suggestions">
+      <div className="card-header">
+        <div>
+          <p className="eyebrow">Freigabe</p>
+          <h3>Buchungsvorschlag</h3>
+        </div>
+        <StatusPill value={`${suggestions.length} Zeilen`} />
+      </div>
+      <div className="booking-table">
+        <div className="booking-row booking-head">
+          <span>Zeile</span>
+          <span>Beschreibung</span>
+          <span>Zuordnung</span>
+          <span>Kostenart</span>
+          <span>Netto</span>
+          <span>USt</span>
+          <span>Brutto</span>
+        </div>
+        {suggestions.map((suggestion) => (
+          <div className="booking-row" key={suggestion.id}>
+            <strong>{suggestion.line_no}</strong>
+            <span>{suggestion.description || "-"}</span>
+            <span>{formatAssignmentCode(suggestion.assignment_code, suggestion.assignment_kind, tenantProfile) || "-"}</span>
+            <span>{formatCostCategory(suggestion.cost_category)}</span>
+            <span>{formatMoney(suggestion.net_amount)}</span>
+            <span>{formatMoney(suggestion.tax_amount)}</span>
+            <span>{formatMoney(suggestion.gross_amount)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function formatSize(sizeBytes) {
   if (sizeBytes < 1024) return `${sizeBytes} B`;
   return `${Math.round(sizeBytes / 1024)} KB`;
@@ -976,6 +1052,7 @@ function formatStatus(status) {
   const labels = {
     review_pending: "Prüfen",
     extracted: "Extrahiert",
+    review_approved: "Freigegeben",
   };
   return labels[status] ?? status;
 }

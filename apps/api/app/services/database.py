@@ -82,6 +82,35 @@ def init_database() -> None:
             )
             cursor.execute(
                 """
+                create table if not exists document_booking_suggestions (
+                    id uuid primary key,
+                    document_id uuid not null references documents(id) on delete cascade,
+                    tenant_id text not null,
+                    line_no integer not null,
+                    booking_type text not null,
+                    cost_category text,
+                    assignment_code text,
+                    assignment_kind text,
+                    description text,
+                    net_amount numeric(12, 2),
+                    tax_amount numeric(12, 2),
+                    gross_amount numeric(12, 2),
+                    currency text not null default 'EUR',
+                    status text not null default 'suggested',
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null,
+                    unique (document_id, line_no)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists document_booking_suggestions_document_idx
+                    on document_booking_suggestions (document_id, line_no)
+                """
+            )
+            cursor.execute(
+                """
                 create index if not exists audit_events_tenant_created_idx
                     on audit_events (tenant_id, created_at desc)
                 """
@@ -265,7 +294,15 @@ def list_documents(tenant_id: str) -> list[dict[str, Any]]:
                 """
                 select
                     d.*,
-                    to_jsonb(e.*) as extraction
+                    to_jsonb(e.*) as extraction,
+                    coalesce(
+                        (
+                            select jsonb_agg(to_jsonb(s.*) order by s.line_no)
+                            from document_booking_suggestions s
+                            where s.document_id = d.id
+                        ),
+                        '[]'::jsonb
+                    ) as booking_suggestions
                 from documents d
                 left join document_extractions e on e.document_id = d.id
                 where d.tenant_id = %s
@@ -284,7 +321,15 @@ def get_document(document_id: UUID) -> dict[str, Any] | None:
                 """
                 select
                     d.*,
-                    to_jsonb(e.*) as extraction
+                    to_jsonb(e.*) as extraction,
+                    coalesce(
+                        (
+                            select jsonb_agg(to_jsonb(s.*) order by s.line_no)
+                            from document_booking_suggestions s
+                            where s.document_id = d.id
+                        ),
+                        '[]'::jsonb
+                    ) as booking_suggestions
                 from documents d
                 left join document_extractions e on e.document_id = d.id
                 where d.id = %s
@@ -394,6 +439,7 @@ def save_document_extraction(
                 ),
             )
             saved = cursor.fetchone()
+            cursor.execute("delete from document_booking_suggestions where document_id = %s", (document_id,))
             cursor.execute(
                 """
                 update documents
@@ -423,6 +469,112 @@ def save_document_extraction(
     serialized = _serialize_document(document)
     serialized["extraction"] = _serialize_extraction(saved)
     return serialized
+
+
+def approve_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None or not document.get("extraction"):
+        return None
+
+    extraction = document["extraction"]
+    suggestions = _booking_suggestions_from_extraction(document, extraction)
+    now = datetime.now(UTC)
+
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("delete from document_booking_suggestions where document_id = %s", (document_id,))
+            for line_no, suggestion in enumerate(suggestions, start=1):
+                cursor.execute(
+                    """
+                    insert into document_booking_suggestions (
+                        id, document_id, tenant_id, line_no, booking_type, cost_category,
+                        assignment_code, assignment_kind, description, net_amount, tax_amount,
+                        gross_amount, currency, status, created_at, updated_at
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'suggested', %s, %s)
+                    """,
+                    (
+                        uuid4(),
+                        document_id,
+                        document["tenant_id"],
+                        line_no,
+                        suggestion["booking_type"],
+                        suggestion.get("cost_category"),
+                        suggestion.get("assignment_code"),
+                        suggestion.get("assignment_kind"),
+                        suggestion.get("description"),
+                        suggestion.get("net_amount"),
+                        suggestion.get("tax_amount"),
+                        suggestion.get("gross_amount"),
+                        suggestion.get("currency", "EUR"),
+                        now,
+                        now,
+                    ),
+                )
+            cursor.execute(
+                """
+                update documents
+                set status = 'review_approved', updated_at = %s
+                where id = %s
+                """,
+                (now, document_id),
+            )
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.review_approved",
+        document_id=document_id,
+        actor=actor,
+        details={"suggestion_count": len(suggestions)},
+    )
+    return get_document(document_id)
+
+
+def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_result = extraction.get("raw_result") or {}
+    booking_type = raw_result.get("document_type") or "incoming_invoice"
+    currency = extraction.get("currency") or "EUR"
+    cost_category = raw_result.get("cost_category")
+    description = raw_result.get("item_summary") or extraction.get("supplier_name") or document["original_filename"]
+    allocation_lines = raw_result.get("allocation_lines") or []
+    total_net = _decimal_or_none(extraction.get("net_amount"))
+    total_tax = _decimal_or_none(extraction.get("tax_amount"))
+    tax_ratio = (total_tax / total_net) if total_net and total_tax is not None else Decimal("0")
+
+    if allocation_lines:
+        suggestions = []
+        for line in allocation_lines:
+            net_amount = _decimal_or_none(line.get("amount"))
+            tax_amount = _round_money(net_amount * tax_ratio) if net_amount is not None else None
+            gross_amount = _round_money(net_amount + tax_amount) if net_amount is not None and tax_amount is not None else None
+            suggestions.append(
+                {
+                    "booking_type": booking_type,
+                    "cost_category": line.get("cost_category") or cost_category,
+                    "assignment_code": line.get("assignment_code") or line.get("project_code"),
+                    "assignment_kind": line.get("assignment_kind") or raw_result.get("assignment_kind"),
+                    "description": line.get("description") or description,
+                    "net_amount": net_amount,
+                    "tax_amount": tax_amount,
+                    "gross_amount": gross_amount,
+                    "currency": currency,
+                }
+            )
+        return suggestions
+
+    return [
+        {
+            "booking_type": booking_type,
+            "cost_category": cost_category,
+            "assignment_code": raw_result.get("assignment_code") or raw_result.get("project_code"),
+            "assignment_kind": raw_result.get("assignment_kind"),
+            "description": description,
+            "net_amount": total_net,
+            "tax_amount": total_tax,
+            "gross_amount": _decimal_or_none(extraction.get("gross_amount")),
+            "currency": currency,
+        }
+    ]
 
 
 def insert_audit_event(
@@ -1032,6 +1184,10 @@ def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": row["created_at"].isoformat(),
         "updated_at": row["updated_at"].isoformat(),
         "extraction": _serialize_extraction(row["extraction"]) if row.get("extraction") else None,
+        "booking_suggestions": [
+            _serialize_booking_suggestion(suggestion)
+            for suggestion in row.get("booking_suggestions", [])
+        ],
     }
 
 
@@ -1117,6 +1273,27 @@ def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _serialize_booking_suggestion(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "document_id": str(row["document_id"]),
+        "tenant_id": row["tenant_id"],
+        "line_no": row["line_no"],
+        "booking_type": row["booking_type"],
+        "cost_category": row["cost_category"],
+        "assignment_code": row["assignment_code"],
+        "assignment_kind": row["assignment_kind"],
+        "description": row["description"],
+        "net_amount": str(row["net_amount"]) if row["net_amount"] is not None else None,
+        "tax_amount": str(row["tax_amount"]) if row["tax_amount"] is not None else None,
+        "gross_amount": str(row["gross_amount"]) if row["gross_amount"] is not None else None,
+        "currency": row["currency"],
+        "status": row["status"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
 def _normalize_match_text(value: str) -> str:
     return " ".join(value.casefold().split())
 
@@ -1134,3 +1311,13 @@ def _json_safe_extraction(extraction: dict[str, Any]) -> dict[str, Any]:
         key: str(value) if isinstance(value, Decimal) else value
         for key, value in extraction.items()
     }
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value))
+
+
+def _round_money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))

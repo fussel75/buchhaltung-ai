@@ -392,6 +392,52 @@ code {
   overflow-wrap: anywhere;
 }
 
+.booking-suggestions {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #cbdcec;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f7fbff;
+}
+
+.booking-table {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #d8e4ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.booking-row {
+  display: grid;
+  grid-template-columns: 54px minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(130px, 1fr) repeat(3, minmax(90px, 0.7fr));
+  gap: 10px;
+  align-items: center;
+  min-height: 46px;
+  border-top: 1px solid #edf3f8;
+  padding: 9px 10px;
+}
+
+.booking-row:first-child {
+  border-top: 0;
+}
+
+.booking-row span,
+.booking-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.booking-head {
+  min-height: 38px;
+  color: #4f6374;
+  background: #eef6fc;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .pending-extraction {
   display: flex;
   align-items: center;
@@ -586,11 +632,13 @@ code {
 
   .assignment-table .data-row,
   .supplier-table .data-row,
+  .booking-row,
   .table-row {
     grid-template-columns: 1fr;
   }
 
-  .data-head {
+  .data-head,
+  .booking-head {
     display: none;
   }
 }
