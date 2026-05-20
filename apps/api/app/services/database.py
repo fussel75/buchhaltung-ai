@@ -122,6 +122,52 @@ def init_database() -> None:
                     on sessions (expires_at)
                 """
             )
+            cursor.execute(
+                """
+                create table if not exists tenant_assignment_units (
+                    id uuid primary key,
+                    tenant_id text not null,
+                    code text not null,
+                    label text not null,
+                    kind text not null,
+                    revenue_relevant boolean not null default false,
+                    aliases jsonb not null default '[]'::jsonb,
+                    is_active boolean not null default true,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null,
+                    unique (tenant_id, code)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists tenant_assignment_units_tenant_idx
+                    on tenant_assignment_units (tenant_id, is_active, kind)
+                """
+            )
+            cursor.execute(
+                """
+                create table if not exists tenant_supplier_rules (
+                    id uuid primary key,
+                    tenant_id text not null,
+                    match_text text not null,
+                    supplier_name text not null,
+                    customer_number text,
+                    default_cost_category text,
+                    default_assignment_code text,
+                    is_active boolean not null default true,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists tenant_supplier_rules_tenant_idx
+                    on tenant_supplier_rules (tenant_id, is_active)
+                """
+            )
+    seed_demo_masterdata()
 
 
 def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict[str, Any], bool]:
@@ -410,6 +456,59 @@ def create_user(
             return _serialize_user(cursor.fetchone())
 
 
+def list_users() -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from users
+                order by created_at desc
+                """
+            )
+            return [_serialize_user(row) for row in cursor.fetchall()]
+
+
+def update_user(
+    user_id: UUID,
+    display_name: str | None = None,
+    role: str | None = None,
+    is_active: bool | None = None,
+    password_hash: str | None = None,
+) -> dict[str, Any] | None:
+    assignments = []
+    values: list[Any] = []
+    if display_name is not None:
+        assignments.append("display_name = %s")
+        values.append(display_name.strip())
+    if role is not None:
+        assignments.append("role = %s")
+        values.append(role)
+    if is_active is not None:
+        assignments.append("is_active = %s")
+        values.append(is_active)
+    if password_hash is not None:
+        assignments.append("password_hash = %s")
+        values.append(password_hash)
+    if not assignments:
+        return None
+
+    values.append(user_id)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                update users
+                set {", ".join(assignments)}
+                where id = %s
+                returning *
+                """,
+                values,
+            )
+            row = cursor.fetchone()
+            return _serialize_user(row) if row else None
+
+
 def get_user_by_email(email: str) -> dict[str, Any] | None:
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -491,6 +590,267 @@ def delete_expired_sessions() -> None:
             cursor.execute("delete from sessions where expires_at <= %s", (datetime.now(UTC),))
 
 
+def seed_demo_masterdata() -> None:
+    existing = list_assignment_units("demo-mandant")
+    if existing:
+        return
+    create_assignment_unit(
+        tenant_id="demo-mandant",
+        code="Wewe20",
+        label="Weseler Weg 20",
+        kind="construction_project",
+        revenue_relevant=True,
+        aliases=["Weseler Weg 20", "Weseler Weg 20, 22045 Hamburg"],
+    )
+    create_supplier_rule(
+        tenant_id="demo-mandant",
+        match_text="Holz Junge",
+        supplier_name="Holz Junge GmbH",
+        customer_number="109324",
+        default_cost_category="material",
+        default_assignment_code="Wewe20",
+    )
+    create_supplier_rule(
+        tenant_id="demo-mandant",
+        match_text="Georg Klindworth",
+        supplier_name="Georg Klindworth oHG",
+        customer_number="0113042/504",
+        default_cost_category="material",
+    )
+
+
+def list_assignment_units(tenant_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_assignment_units
+                where tenant_id = %s
+                order by is_active desc, label asc
+                """,
+                (tenant_id,),
+            )
+            return [_serialize_assignment_unit(row) for row in cursor.fetchall()]
+
+
+def create_assignment_unit(
+    tenant_id: str,
+    code: str,
+    label: str,
+    kind: str,
+    revenue_relevant: bool,
+    aliases: list[str],
+    is_active: bool = True,
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into tenant_assignment_units (
+                    id, tenant_id, code, label, kind, revenue_relevant,
+                    aliases, is_active, created_at, updated_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                on conflict (tenant_id, code) do update set
+                    label = excluded.label,
+                    kind = excluded.kind,
+                    revenue_relevant = excluded.revenue_relevant,
+                    aliases = excluded.aliases,
+                    is_active = excluded.is_active,
+                    updated_at = excluded.updated_at
+                returning *
+                """,
+                (
+                    uuid4(),
+                    tenant_id,
+                    code.strip(),
+                    label.strip(),
+                    kind,
+                    revenue_relevant,
+                    Jsonb([alias.strip() for alias in aliases if alias.strip()]),
+                    is_active,
+                    now,
+                    now,
+                ),
+            )
+            return _serialize_assignment_unit(cursor.fetchone())
+
+
+def update_assignment_unit(
+    assignment_id: UUID,
+    label: str,
+    kind: str,
+    revenue_relevant: bool,
+    aliases: list[str],
+    is_active: bool,
+) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update tenant_assignment_units
+                set
+                    label = %s,
+                    kind = %s,
+                    revenue_relevant = %s,
+                    aliases = %s,
+                    is_active = %s,
+                    updated_at = %s
+                where id = %s
+                returning *
+                """,
+                (
+                    label.strip(),
+                    kind,
+                    revenue_relevant,
+                    Jsonb([alias.strip() for alias in aliases if alias.strip()]),
+                    is_active,
+                    datetime.now(UTC),
+                    assignment_id,
+                ),
+            )
+            row = cursor.fetchone()
+            return _serialize_assignment_unit(row) if row else None
+
+
+def find_assignment_unit_by_text(tenant_id: str, text: str | None) -> dict[str, Any] | None:
+    if not text:
+        return None
+    normalized_text = _normalize_match_text(text)
+    for assignment in list_assignment_units(tenant_id):
+        if not assignment["is_active"]:
+            continue
+        candidates = [assignment["code"], assignment["label"], *assignment["aliases"]]
+        if any(_normalize_match_text(candidate) in normalized_text for candidate in candidates if candidate):
+            return assignment
+    return None
+
+
+def get_assignment_unit_by_code(tenant_id: str, code: str | None) -> dict[str, Any] | None:
+    if not code:
+        return None
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_assignment_units
+                where tenant_id = %s and lower(code) = lower(%s)
+                limit 1
+                """,
+                (tenant_id, code.strip()),
+            )
+            row = cursor.fetchone()
+            return _serialize_assignment_unit(row) if row else None
+
+
+def list_supplier_rules(tenant_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_supplier_rules
+                where tenant_id = %s
+                order by is_active desc, supplier_name asc
+                """,
+                (tenant_id,),
+            )
+            return [_serialize_supplier_rule(row) for row in cursor.fetchall()]
+
+
+def create_supplier_rule(
+    tenant_id: str,
+    match_text: str,
+    supplier_name: str,
+    customer_number: str | None = None,
+    default_cost_category: str | None = None,
+    default_assignment_code: str | None = None,
+    is_active: bool = True,
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into tenant_supplier_rules (
+                    id, tenant_id, match_text, supplier_name, customer_number,
+                    default_cost_category, default_assignment_code, is_active,
+                    created_at, updated_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                returning *
+                """,
+                (
+                    uuid4(),
+                    tenant_id,
+                    match_text.strip(),
+                    supplier_name.strip(),
+                    customer_number.strip() if customer_number else None,
+                    default_cost_category or None,
+                    default_assignment_code.strip() if default_assignment_code else None,
+                    is_active,
+                    now,
+                    now,
+                ),
+            )
+            return _serialize_supplier_rule(cursor.fetchone())
+
+
+def update_supplier_rule(
+    rule_id: UUID,
+    match_text: str,
+    supplier_name: str,
+    customer_number: str | None,
+    default_cost_category: str | None,
+    default_assignment_code: str | None,
+    is_active: bool,
+) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update tenant_supplier_rules
+                set
+                    match_text = %s,
+                    supplier_name = %s,
+                    customer_number = %s,
+                    default_cost_category = %s,
+                    default_assignment_code = %s,
+                    is_active = %s,
+                    updated_at = %s
+                where id = %s
+                returning *
+                """,
+                (
+                    match_text.strip(),
+                    supplier_name.strip(),
+                    customer_number.strip() if customer_number else None,
+                    default_cost_category or None,
+                    default_assignment_code.strip() if default_assignment_code else None,
+                    is_active,
+                    datetime.now(UTC),
+                    rule_id,
+                ),
+            )
+            row = cursor.fetchone()
+            return _serialize_supplier_rule(row) if row else None
+
+
+def find_supplier_rule(tenant_id: str, *texts: str | None) -> dict[str, Any] | None:
+    haystack = _normalize_match_text(" ".join(text or "" for text in texts))
+    if not haystack:
+        return None
+    for rule in list_supplier_rules(tenant_id):
+        if not rule["is_active"]:
+            continue
+        if _normalize_match_text(rule["match_text"]) in haystack:
+            return rule
+    return None
+
+
 def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
@@ -543,6 +903,40 @@ def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) ->
     if include_password_hash:
         user["password_hash"] = row["password_hash"]
     return user
+
+
+def _serialize_assignment_unit(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "tenant_id": row["tenant_id"],
+        "code": row["code"],
+        "label": row["label"],
+        "kind": row["kind"],
+        "revenue_relevant": row["revenue_relevant"],
+        "aliases": row["aliases"] or [],
+        "is_active": row["is_active"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "tenant_id": row["tenant_id"],
+        "match_text": row["match_text"],
+        "supplier_name": row["supplier_name"],
+        "customer_number": row["customer_number"],
+        "default_cost_category": row["default_cost_category"],
+        "default_assignment_code": row["default_assignment_code"],
+        "is_active": row["is_active"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _normalize_match_text(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 def _serialize_date(value: Any) -> str | None:

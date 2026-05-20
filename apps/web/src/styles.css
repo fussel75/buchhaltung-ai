@@ -96,6 +96,78 @@ input {
   background: #ffffff;
 }
 
+select {
+  min-height: 42px;
+  border: 1px solid #b7c2b8;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #17211b;
+  background: #ffffff;
+}
+
+.view-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 20px;
+}
+
+.view-tabs button {
+  color: #174e32;
+  background: #e2f0e7;
+}
+
+.view-tabs button.active {
+  color: #ffffff;
+  background: #176b45;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.admin-panel h3 {
+  margin: 8px 0 0;
+}
+
+.compact-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d5ddd4;
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-check input {
+  min-height: auto;
+}
+
+.table-list {
+  display: grid;
+  gap: 8px;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr 1fr 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d5ddd4;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
 .dropzone {
   display: grid;
   place-items: center;
@@ -280,10 +352,12 @@ button:disabled {
 
 @media (max-width: 720px) {
   .toolbar,
+  .compact-form,
   .document-head,
   .meta-grid,
   .extraction-grid,
-  .pending-extraction {
+  .pending-extraction,
+  .table-row {
     grid-template-columns: 1fr;
     align-items: stretch;
   }

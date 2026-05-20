@@ -78,3 +78,14 @@ Die Extraktionsreihenfolge ist:
 2. Fehlende Kontextdaten aus dem PDF-Text ergaenzen, z.B. Bauvorhaben aus Lieferanschrift.
 3. Wenn keine strukturierten Daten vorhanden sind, PDF-Textregeln verwenden.
 4. OCR erst als spaeterer Fallback fuer nicht textlesbare Scans.
+
+## Mandanten-Stammdaten
+
+Admin-Benutzer koennen in der App einfache Stammdaten pflegen:
+
+- Benutzer mit Rolle `admin` oder `user`.
+- Zuordnungseinheiten pro Mandant, z.B. Bauvorhaben, Kostenobjekt, Fahrzeug, Abo/Vertrag oder Bereich.
+- Lieferantenregeln mit Erkennungstext, korrektem Firmennamen, unserer Kunden-Nr., Standard-Kostenart und optionaler Standard-Zuordnung.
+
+Die Extraktion nutzt diese Stammdaten vor Heuristiken. Ein Bauvorhaben ist damit nur eine moegliche Zuordnungsart;
+andere Mandanten koennen dieselbe Logik fuer andere Kosten- oder Umsatzobjekte verwenden.

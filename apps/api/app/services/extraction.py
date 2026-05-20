@@ -10,8 +10,14 @@ from fastapi import HTTPException
 from pypdf import PdfReader
 
 from app.config import get_settings
-from app.services.database import get_document, insert_audit_event, save_document_extraction
-from app.services.projects import find_project_by_address
+from app.services.database import (
+    find_assignment_unit_by_text,
+    find_supplier_rule,
+    get_assignment_unit_by_code,
+    get_document,
+    insert_audit_event,
+    save_document_extraction,
+)
 
 
 def run_mock_extraction(document_id: UUID) -> dict:
@@ -137,13 +143,17 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
     visible_discount_due_date = _find_date(text, r"verrechnen bis zum\s+(\d{2}\.\d{2}\.\d{2})")
     if visible_discount_due_date or visible_discount.get("discount_due_date"):
         discount_due_date = visible_discount_due_date or visible_discount.get("discount_due_date")
-    project = find_project_by_address(delivery_address)
-    project_code = project.code if project else None
-    assignment_type = _assignment_type(delivery_address, project_code)
-    cost_category = _cost_category(supplier_name, product_name, text, assignment_type)
+    supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
+    if supplier_rule:
+        supplier_name = supplier_rule["supplier_name"]
+        customer_number = supplier_rule["customer_number"] or customer_number
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    assignment_type = _assignment_type(delivery_address, assignment)
+    cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
+    cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
-        project_code=project_code,
+        assignment=assignment,
         assignment_type=assignment_type,
         supplier_name=supplier_name or _supplier_from_filename(Path(document["original_filename"]).stem),
         product_name=_filename_product_name(product_name or "Eingangsrechnung"),
@@ -163,8 +173,8 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         if not value
     ]
     warnings = []
-    if delivery_address and not project_code:
-        warnings.append("Nicht sicher erkannt: Bauvorhaben-Code aus Partnerdaten.")
+    if delivery_address and not assignment:
+        warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if visible_discount_base is not None and xml_discount_base is not None and visible_discount_base != xml_discount_base:
         warnings.append(
             f"Skonto-Basis aus sichtbarem Beleg ({visible_discount_base}) weicht von XML ({xml_discount_base}) ab."
@@ -181,8 +191,12 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         "discount_due_date": discount_due_date,
         "service_period": invoice_date[:7] if invoice_date else None,
         "delivery_address": delivery_address,
-        "project_code": project_code,
-        "project_name": project.name if project else None,
+        "assignment_code": assignment["code"] if assignment else None,
+        "assignment_label": assignment["label"] if assignment else None,
+        "assignment_kind": assignment["kind"] if assignment else None,
+        "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "project_code": _legacy_project_code(assignment),
+        "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
         "cost_category": cost_category,
         "product_name": product_name,
@@ -246,15 +260,19 @@ def _build_pdf_text_result(document: dict) -> dict:
     if discount_amount is None and discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
     delivery_address = _find_delivery_address(text)
-    project = find_project_by_address(delivery_address)
-    project_code = project.code if project else None
     supplier_name = _supplier_name(document, text)
+    supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
+    if supplier_rule:
+        supplier_name = supplier_rule["supplier_name"]
+        customer_number = supplier_rule["customer_number"] or customer_number
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
     product_name = _product_name(text)
-    assignment_type = _assignment_type(delivery_address, project_code)
-    cost_category = _cost_category(supplier_name, product_name, text, assignment_type)
+    assignment_type = _assignment_type(delivery_address, assignment)
+    cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
+    cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
-        project_code=project_code,
+        assignment=assignment,
         assignment_type=assignment_type,
         supplier_name=supplier_name,
         product_name=_filename_product_name(product_name),
@@ -273,8 +291,8 @@ def _build_pdf_text_result(document: dict) -> dict:
         if not value
     ]
     warnings = []
-    if delivery_address and not project_code:
-        warnings.append("Nicht sicher erkannt: Bauvorhaben-Code aus Partnerdaten.")
+    if delivery_address and not assignment:
+        warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
 
@@ -287,8 +305,12 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_due_date": discount_due_date,
         "service_period": invoice_date[:7] if invoice_date else None,
         "delivery_address": delivery_address,
-        "project_code": project_code,
-        "project_name": project.name if project else None,
+        "assignment_code": assignment["code"] if assignment else None,
+        "assignment_label": assignment["label"] if assignment else None,
+        "assignment_kind": assignment["kind"] if assignment else None,
+        "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "project_code": _legacy_project_code(assignment),
+        "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
         "cost_category": cost_category,
         "product_name": product_name,
@@ -536,11 +558,30 @@ def _normalize_supplier_name(value: str | None) -> str | None:
     return value
 
 
-def _assignment_type(delivery_address: str | None, project_code: str | None) -> str:
-    if project_code:
-        return "project"
+def _assignment_unit(
+    tenant_id: str,
+    delivery_address: str | None,
+    text: str,
+    supplier_rule: dict | None,
+) -> dict | None:
+    if supplier_rule and supplier_rule.get("default_assignment_code"):
+        assignment = get_assignment_unit_by_code(tenant_id, supplier_rule["default_assignment_code"])
+        if assignment and assignment["is_active"]:
+            return assignment
+    return find_assignment_unit_by_text(tenant_id, delivery_address or text[:4000])
+
+
+def _legacy_project_code(assignment: dict | None) -> str | None:
+    if assignment and assignment["kind"] == "construction_project":
+        return assignment["code"]
+    return None
+
+
+def _assignment_type(delivery_address: str | None, assignment: dict | None) -> str:
+    if assignment:
+        return "assigned"
     if delivery_address:
-        return "project_unresolved"
+        return "assignment_unresolved"
     return "general_cost"
 
 
@@ -555,7 +596,7 @@ def _cost_category(
         return "subcontractor"
     if any(term in haystack for term in ["hobotec", "fermacell", "schalung", "gipsfaserplatte", "artikel", "material"]):
         return "material"
-    if assignment_type in {"project", "project_unresolved"}:
+    if assignment_type in {"assigned", "assignment_unresolved"}:
         return "material"
     if any(term in haystack for term in ["tank", "diesel", "benzin", "kraftstoff", "shell", "aral"]):
         return "fuel_vehicle"
@@ -605,7 +646,7 @@ def _product_name(text: str) -> str:
 
 def _normalized_invoice_filename(
     invoice_number: str | None,
-    project_code: str | None,
+    assignment: dict | None,
     assignment_type: str,
     supplier_name: str,
     product_name: str,
@@ -613,7 +654,7 @@ def _normalized_invoice_filename(
 ) -> str:
     parts = [
         f"ERg {invoice_number or 'ohne Nummer'}",
-        _filename_assignment_label(project_code, assignment_type),
+        _filename_assignment_label(assignment, assignment_type),
         supplier_name,
         product_name,
         invoice_date or "ohne Datum",
@@ -621,11 +662,13 @@ def _normalized_invoice_filename(
     return ", ".join(parts) + ".pdf"
 
 
-def _filename_assignment_label(project_code: str | None, assignment_type: str) -> str:
-    if project_code:
-        return f"BV {project_code}"
-    if assignment_type == "project_unresolved":
-        return "BV ungeklärt"
+def _filename_assignment_label(assignment: dict | None, assignment_type: str) -> str:
+    if assignment:
+        if assignment["kind"] == "construction_project":
+            return f"BV {assignment['code']}"
+        return f"Zuordnung {assignment['code']}"
+    if assignment_type == "assignment_unresolved":
+        return "Zuordnung ungeklaert"
     return "Allgemeine Kosten"
 
 

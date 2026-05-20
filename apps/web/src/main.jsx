@@ -196,6 +196,7 @@ function UploadApp() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [extractingIds, setExtractingIds] = useState([]);
+  const [activeView, setActiveView] = useState("review");
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -311,34 +312,52 @@ function UploadApp() {
         </label>
       </section>
 
-      <section
-        className={isDragging ? "dropzone active" : "dropzone"}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setIsDragging(false);
-          handleFiles(event.dataTransfer.files);
-        }}
-      >
-        <strong>Belege hier ablegen</strong>
-        <span>PDFs, Bilder oder exportierte Rechnungen fuer den ausgewaehlten Mandanten.</span>
-        <input
-          type="file"
-          multiple
-          disabled={!canUpload}
-          onChange={(event) => handleFiles(event.target.files)}
-        />
-      </section>
+      <nav className="view-tabs">
+        <button type="button" className={activeView === "review" ? "active" : ""} onClick={() => setActiveView("review")}>
+          Review
+        </button>
+        {user?.role === "admin" ? (
+          <>
+            <button type="button" className={activeView === "masterdata" ? "active" : ""} onClick={() => setActiveView("masterdata")}>
+              Stammdaten
+            </button>
+            <button type="button" className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>
+              Benutzer
+            </button>
+          </>
+        ) : null}
+      </nav>
 
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <section className="uploads">
+      {activeView === "review" ? (
+        <>
+          <section
+            className={isDragging ? "dropzone active" : "dropzone"}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setIsDragging(false);
+              handleFiles(event.dataTransfer.files);
+            }}
+          >
+            <strong>Belege hier ablegen</strong>
+            <span>PDFs, Bilder oder exportierte Rechnungen fuer den ausgewaehlten Mandanten.</span>
+            <input
+              type="file"
+              multiple
+              disabled={!canUpload}
+              onChange={(event) => handleFiles(event.target.files)}
+            />
+          </section>
+
+          <section className="uploads">
         <div className="section-header">
           <h2>Review-Queue</h2>
           <span>{documents.length} Belege</span>
@@ -371,7 +390,8 @@ function UploadApp() {
                     <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
                     <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
                     <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                    <Field label="Bauvorhaben" value={document.extraction.raw_result?.project_code} />
+                    <Field label="Zuordnungs-Code" value={document.extraction.raw_result?.assignment_code || document.extraction.raw_result?.project_code} />
+                    <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind)} />
                     <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
                     <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
                     <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
@@ -406,8 +426,248 @@ function UploadApp() {
             ))}
           </div>
         )}
-      </section>
+          </section>
+        </>
+      ) : null}
+
+      {activeView === "masterdata" && user?.role === "admin" ? (
+        <MasterdataAdmin apiFetch={apiFetch} tenantId={activeTenantId} />
+      ) : null}
+
+      {activeView === "users" && user?.role === "admin" ? (
+        <UserAdmin apiFetch={apiFetch} currentUser={user} />
+      ) : null}
     </main>
+  );
+}
+
+function UserAdmin({ apiFetch, currentUser }) {
+  const [users, setUsers] = useState([]);
+  const [form, setForm] = useState({ email: "", password: "", display_name: "", role: "user" });
+  const [message, setMessage] = useState("");
+
+  const loadUsers = useCallback(async () => {
+    const response = await apiFetch("/users");
+    if (!response.ok) throw new Error(`Benutzer konnten nicht geladen werden: ${response.status}`);
+    const result = await response.json();
+    setUsers(result.users ?? []);
+  }, [apiFetch]);
+
+  useEffect(() => {
+    loadUsers().catch((error) => setMessage(error.message));
+  }, [loadUsers]);
+
+  async function createUser(event) {
+    event.preventDefault();
+    setMessage("");
+    const response = await apiFetch("/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setMessage(result.detail || `Benutzer konnte nicht angelegt werden: ${response.status}`);
+      return;
+    }
+    setForm({ email: "", password: "", display_name: "", role: "user" });
+    await loadUsers();
+    setMessage("Benutzer angelegt.");
+  }
+
+  async function updateUser(userId, payload) {
+    const response = await apiFetch(`/users/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setMessage(result.detail || `Benutzer konnte nicht aktualisiert werden: ${response.status}`);
+      return;
+    }
+    await loadUsers();
+  }
+
+  return (
+    <section className="admin-panel">
+      <div className="section-header">
+        <h2>Benutzer</h2>
+        <span>{users.length} Konten</span>
+      </div>
+      <form className="compact-form" onSubmit={createUser}>
+        <input placeholder="E-Mail" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
+        <input placeholder="Name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} required />
+        <input placeholder="Initiales Passwort" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+        <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="submit">Anlegen</button>
+      </form>
+      {message ? <p className="notice">{message}</p> : null}
+      <div className="table-list">
+        {users.map((account) => (
+          <div className="table-row" key={account.id}>
+            <strong>{account.display_name}</strong>
+            <span>{account.email}</span>
+            <select value={account.role} onChange={(event) => updateUser(account.id, { role: event.target.value })}>
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={account.is_active}
+                disabled={account.id === currentUser.id}
+                onChange={(event) => updateUser(account.id, { is_active: event.target.checked })}
+              />
+              aktiv
+            </label>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MasterdataAdmin({ apiFetch, tenantId }) {
+  const [assignmentUnits, setAssignmentUnits] = useState([]);
+  const [supplierRules, setSupplierRules] = useState([]);
+  const [assignmentForm, setAssignmentForm] = useState({
+    code: "",
+    label: "",
+    kind: "cost_object",
+    revenue_relevant: false,
+    aliases: "",
+  });
+  const [supplierForm, setSupplierForm] = useState({
+    match_text: "",
+    supplier_name: "",
+    customer_number: "",
+    default_cost_category: "material",
+    default_assignment_code: "",
+  });
+  const [message, setMessage] = useState("");
+
+  const loadMasterdata = useCallback(async () => {
+    const [assignmentsResponse, suppliersResponse] = await Promise.all([
+      apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`),
+      apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`),
+    ]);
+    if (!assignmentsResponse.ok || !suppliersResponse.ok) {
+      throw new Error("Stammdaten konnten nicht geladen werden.");
+    }
+    const assignmentsResult = await assignmentsResponse.json();
+    const suppliersResult = await suppliersResponse.json();
+    setAssignmentUnits(assignmentsResult.assignment_units ?? []);
+    setSupplierRules(suppliersResult.supplier_rules ?? []);
+  }, [apiFetch, tenantId]);
+
+  useEffect(() => {
+    loadMasterdata().catch((error) => setMessage(error.message));
+  }, [loadMasterdata]);
+
+  async function createAssignment(event) {
+    event.preventDefault();
+    const response = await apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...assignmentForm,
+        aliases: splitAliases(assignmentForm.aliases),
+      }),
+    });
+    if (!response.ok) {
+      setMessage(`Zuordnung konnte nicht angelegt werden: ${response.status}`);
+      return;
+    }
+    setAssignmentForm({ code: "", label: "", kind: "cost_object", revenue_relevant: false, aliases: "" });
+    await loadMasterdata();
+    setMessage("Zuordnung angelegt.");
+  }
+
+  async function createSupplierRule(event) {
+    event.preventDefault();
+    const response = await apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emptyToNull(supplierForm)),
+    });
+    if (!response.ok) {
+      setMessage(`Lieferantenregel konnte nicht angelegt werden: ${response.status}`);
+      return;
+    }
+    setSupplierForm({ match_text: "", supplier_name: "", customer_number: "", default_cost_category: "material", default_assignment_code: "" });
+    await loadMasterdata();
+    setMessage("Lieferantenregel angelegt.");
+  }
+
+  return (
+    <section className="admin-panel">
+      <div className="section-header">
+        <h2>Stammdaten</h2>
+        <span>{tenantId}</span>
+      </div>
+      {message ? <p className="notice">{message}</p> : null}
+
+      <h3>Zuordnungen</h3>
+      <form className="compact-form" onSubmit={createAssignment}>
+        <input placeholder="Code, z.B. Wewe20" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
+        <input placeholder="Name" value={assignmentForm.label} onChange={(event) => setAssignmentForm({ ...assignmentForm, label: event.target.value })} required />
+        <select value={assignmentForm.kind} onChange={(event) => setAssignmentForm({ ...assignmentForm, kind: event.target.value })}>
+          <option value="construction_project">Bauvorhaben</option>
+          <option value="cost_object">Kostenobjekt</option>
+          <option value="vehicle">Fahrzeug</option>
+          <option value="subscription">Abo/Vertrag</option>
+          <option value="department">Bereich</option>
+        </select>
+        <input placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
+        <label className="inline-check">
+          <input type="checkbox" checked={assignmentForm.revenue_relevant} onChange={(event) => setAssignmentForm({ ...assignmentForm, revenue_relevant: event.target.checked })} />
+          umsatzrelevant
+        </label>
+        <button type="submit">Zuordnung anlegen</button>
+      </form>
+      <div className="table-list">
+        {assignmentUnits.map((assignment) => (
+          <div className="table-row" key={assignment.id}>
+            <strong>{assignment.code}</strong>
+            <span>{assignment.label}</span>
+            <span>{formatAssignmentKind(assignment.kind)}</span>
+            <span>{assignment.revenue_relevant ? "umsatzrelevant" : "intern/allgemein"}</span>
+          </div>
+        ))}
+      </div>
+
+      <h3>Lieferantenregeln</h3>
+      <form className="compact-form" onSubmit={createSupplierRule}>
+        <input placeholder="Erkennungstext" value={supplierForm.match_text} onChange={(event) => setSupplierForm({ ...supplierForm, match_text: event.target.value })} required />
+        <input placeholder="Lieferantenname" value={supplierForm.supplier_name} onChange={(event) => setSupplierForm({ ...supplierForm, supplier_name: event.target.value })} required />
+        <input placeholder="Unsere Kunden-Nr." value={supplierForm.customer_number} onChange={(event) => setSupplierForm({ ...supplierForm, customer_number: event.target.value })} />
+        <select value={supplierForm.default_cost_category} onChange={(event) => setSupplierForm({ ...supplierForm, default_cost_category: event.target.value })}>
+          <option value="material">Material</option>
+          <option value="subcontractor">Fremdleistung</option>
+          <option value="fuel_vehicle">Fahrzeug/Tanken</option>
+          <option value="software_subscription">Software/Abo</option>
+          <option value="security_subscription">Ueberwachung/Abo</option>
+          <option value="general_overhead">Sonstige Gemeinkosten</option>
+        </select>
+        <input placeholder="Zuordnungs-Code optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
+        <button type="submit">Regel anlegen</button>
+      </form>
+      <div className="table-list">
+        {supplierRules.map((rule) => (
+          <div className="table-row" key={rule.id}>
+            <strong>{rule.supplier_name}</strong>
+            <span>{rule.match_text}</span>
+            <span>{rule.customer_number || "-"}</span>
+            <span>{formatCostCategory(rule.default_cost_category)}</span>
+            <span>{rule.default_assignment_code || "-"}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -442,13 +702,26 @@ function formatDocumentType(value) {
 }
 
 function formatAssignment(rawResult) {
+  if (rawResult?.assignment_code) return `${formatAssignmentKind(rawResult.assignment_kind)} ${rawResult.assignment_code}`;
   if (rawResult?.project_code) return `BV ${rawResult.project_code}`;
   const labels = {
     general_cost: "Allgemeine Kosten",
+    assignment_unresolved: "Zuordnung ungeklaert",
     project_unresolved: "BV ungeklaert",
-    project: "Bauvorhaben",
+    assigned: "Zugeordnet",
   };
   return labels[rawResult?.assignment_type] ?? null;
+}
+
+function formatAssignmentKind(value) {
+  const labels = {
+    construction_project: "Bauvorhaben",
+    cost_object: "Kostenobjekt",
+    vehicle: "Fahrzeug",
+    subscription: "Abo/Vertrag",
+    department: "Bereich",
+  };
+  return labels[value] ?? value;
 }
 
 function formatCostCategory(value) {
@@ -456,7 +729,6 @@ function formatCostCategory(value) {
     fuel_vehicle: "Fahrzeug/Tanken",
     general_overhead: "Sonstige Gemeinkosten",
     material: "Material",
-    materials_subcontractor: "Material/Fremdleistung",
     security_subscription: "Ueberwachung/Abo",
     software_subscription: "Software/Abo",
     subcontractor: "Fremdleistung",
@@ -481,6 +753,19 @@ function discountedAmount(rawResult) {
   if (rawResult?.discounted_payable_amount) return rawResult.discounted_payable_amount;
   if (!rawResult?.gross_amount || !rawResult?.discount_amount) return null;
   return Number(rawResult.gross_amount) - Math.abs(Number(rawResult.discount_amount));
+}
+
+function splitAliases(value) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function emptyToNull(value) {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, entry === "" ? null : entry]),
+  );
 }
 
 createRoot(document.getElementById("root")).render(<App />);
