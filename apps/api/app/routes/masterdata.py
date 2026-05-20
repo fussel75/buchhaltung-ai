@@ -7,10 +7,14 @@ from app.routes.users import require_admin
 from app.services.database import (
     create_assignment_unit,
     create_supplier_rule,
+    ensure_tenant_profile,
+    get_tenant_profile,
     list_assignment_units,
     list_supplier_rules,
+    tenant_profile_template,
     update_assignment_unit,
     update_supplier_rule,
+    upsert_tenant_profile,
 )
 
 router = APIRouter()
@@ -42,11 +46,62 @@ class SupplierRuleRequest(BaseModel):
     is_active: bool = True
 
 
+class TenantProfileRequest(BaseModel):
+    display_name: str
+    industry: str = "general"
+    assignment_label_singular: str | None = None
+    assignment_label_plural: str | None = None
+    assignment_code_label: str | None = None
+    assignment_code_prefix: str | None = None
+    default_assignment_kind: str | None = None
+    allow_multiple_assignments: bool | None = None
+
+
 def _normalize_tenant_id(tenant_id: str) -> str:
     normalized = tenant_id.strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="tenant_id is required")
     return normalized
+
+
+@router.get("/tenant-profile")
+def get_profile(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    if not getattr(request.state, "user", None):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    return {"tenant_profile": get_tenant_profile(normalized_tenant_id) or ensure_tenant_profile(normalized_tenant_id)}
+
+
+@router.put("/tenant-profile")
+def put_profile(
+    payload: TenantProfileRequest,
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    require_admin(request)
+    normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    template = tenant_profile_template(payload.industry)
+    profile = upsert_tenant_profile(
+        tenant_id=normalized_tenant_id,
+        display_name=payload.display_name,
+        industry=payload.industry,
+        assignment_label_singular=payload.assignment_label_singular or template["assignment_label_singular"],
+        assignment_label_plural=payload.assignment_label_plural or template["assignment_label_plural"],
+        assignment_code_label=payload.assignment_code_label or template["assignment_code_label"],
+        assignment_code_prefix=payload.assignment_code_prefix
+        if payload.assignment_code_prefix is not None
+        else template["assignment_code_prefix"],
+        default_assignment_kind=payload.default_assignment_kind or template["default_assignment_kind"],
+        allow_multiple_assignments=(
+            payload.allow_multiple_assignments
+            if payload.allow_multiple_assignments is not None
+            else template["allow_multiple_assignments"]
+        ),
+    )
+    return {"tenant_profile": profile}
 
 
 @router.get("/assignment-units")

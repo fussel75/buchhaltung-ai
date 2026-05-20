@@ -14,6 +14,7 @@ from app.services.database import (
     find_assignment_unit_by_text,
     find_supplier_rule,
     get_assignment_unit_by_code,
+    ensure_tenant_profile,
     get_document,
     insert_audit_event,
     save_document_extraction,
@@ -148,6 +149,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
     assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
     cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
@@ -155,6 +157,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         invoice_number=invoice_number,
         assignment=assignment,
         assignment_type=assignment_type,
+        tenant_profile=tenant_profile,
         supplier_name=supplier_name or _supplier_from_filename(Path(document["original_filename"]).stem),
         product_name=_filename_product_name(product_name or "Eingangsrechnung"),
         invoice_date=invoice_date,
@@ -195,6 +198,10 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
         "project_code": _legacy_project_code(assignment),
         "project_number": None,
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
@@ -292,6 +299,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     if not assignment and delivery_addresses:
         assignment = _resolve_assignment_for_delivery_addresses(document["tenant_id"], delivery_addresses)
     product_name = _product_name(text)
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
     allocation_lines_resolved = bool(allocation_lines) and all(
         allocation.get("assignment_code") for allocation in allocation_lines
     )
@@ -302,6 +310,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         invoice_number=invoice_number,
         assignment=assignment,
         assignment_type=assignment_type,
+        tenant_profile=tenant_profile,
         supplier_name=supplier_name,
         product_name=_filename_product_name(product_name),
         invoice_date=invoice_date,
@@ -343,6 +352,10 @@ def _build_pdf_text_result(document: dict) -> dict:
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
         "project_code": _legacy_project_code(assignment),
         "project_number": None,
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
@@ -764,13 +777,14 @@ def _normalized_invoice_filename(
     invoice_number: str | None,
     assignment: dict | None,
     assignment_type: str,
+    tenant_profile: dict,
     supplier_name: str,
     product_name: str,
     invoice_date: str | None,
 ) -> str:
     parts = [
         f"ERg {invoice_number or 'ohne Nummer'}",
-        _filename_assignment_label(assignment, assignment_type),
+        _filename_assignment_label(assignment, assignment_type, tenant_profile),
         supplier_name,
         product_name,
         invoice_date or "ohne Datum",
@@ -778,15 +792,16 @@ def _normalized_invoice_filename(
     return ", ".join(parts) + ".pdf"
 
 
-def _filename_assignment_label(assignment: dict | None, assignment_type: str) -> str:
+def _filename_assignment_label(assignment: dict | None, assignment_type: str, tenant_profile: dict) -> str:
     if assignment:
-        if assignment["kind"] == "construction_project":
-            return f"BV {assignment['code']}"
-        return f"Zuordnung {assignment['code']}"
+        prefix = tenant_profile.get("assignment_code_prefix")
+        if prefix:
+            return f"{prefix} {assignment['code']}"
+        return f"{tenant_profile['assignment_label_singular']} {assignment['code']}"
     if assignment_type == "assignment_split":
-        return "Zuordnung aufgeteilt"
+        return f"{tenant_profile['assignment_label_plural']} aufgeteilt"
     if assignment_type == "assignment_unresolved":
-        return "Zuordnung ungeklaert"
+        return f"{tenant_profile['assignment_label_singular']} ungeklaert"
     return "Allgemeine Kosten"
 
 

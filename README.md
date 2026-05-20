@@ -84,8 +84,15 @@ Die Extraktionsreihenfolge ist:
 Admin-Benutzer koennen in der App einfache Stammdaten pflegen:
 
 - Benutzer mit Rolle `admin` oder `user`.
+- Mandantenprofil mit Branche und fachlicher Bezeichnung fuer Zuordnungscodes.
 - Zuordnungseinheiten pro Mandant, z.B. Bauvorhaben, Kostenobjekt, Fahrzeug, Abo/Vertrag oder Bereich.
 - Lieferantenregeln mit Erkennungstext, korrektem Firmennamen, unserer Kunden-Nr., Standard-Kostenart und optionaler Standard-Zuordnung.
 
 Die Extraktion nutzt diese Stammdaten vor Heuristiken. Ein Bauvorhaben ist damit nur eine moegliche Zuordnungsart;
 andere Mandanten koennen dieselbe Logik fuer andere Kosten- oder Umsatzobjekte verwenden.
+
+Branchenprofile fuer den MVP:
+
+- Baubranche: Zuordnung heisst `Bauvorhaben`, Kuerzel `BV`.
+- Sportstudio: Zuordnung heisst `Standort`, z.B. fuer Kostenstellen je Studio.
+- Container/Transport: Zuordnung heisst `Bauvorhaben / Stellplatz`, weil Container sowohl auf Baustellen als auch an anderen Stellplaetzen stehen koennen.

@@ -198,6 +198,7 @@ function UploadApp() {
   const [extractingIds, setExtractingIds] = useState([]);
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
+  const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -221,6 +222,18 @@ function UploadApp() {
   useEffect(() => {
     loadDocuments().catch((loadError) => setError(loadError.message));
   }, [loadDocuments]);
+
+  const loadTenantProfile = useCallback(async () => {
+    if (!activeTenantId) return;
+    const response = await apiFetch(`/masterdata/tenant-profile?tenant_id=${encodeURIComponent(activeTenantId)}`);
+    if (!response.ok) return;
+    const result = await response.json();
+    setTenantProfile(result.tenant_profile ?? defaultTenantProfile("general"));
+  }, [activeTenantId, apiFetch]);
+
+  useEffect(() => {
+    loadTenantProfile();
+  }, [loadTenantProfile]);
 
   const uploadFile = useCallback(
     async (file) => {
@@ -431,10 +444,10 @@ function UploadApp() {
                       <Field label="Rechnung" value={document.extraction.invoice_number} />
                       <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
                       <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
-                      <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
+                      <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result, tenantProfile)} />
                       <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                      <Field label="Zuordnungs-Code" value={<ProjectSummary rawResult={document.extraction.raw_result} />} />
-                      <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind)} />
+                      <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />} />
+                      <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind, tenantProfile)} />
                       <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
                       <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
                       <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
@@ -445,7 +458,7 @@ function UploadApp() {
                       <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
                       <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
                     </div>
-                    <AllocationLines lines={document.extraction.raw_result?.allocation_lines} />
+                    <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
                   </div>
                 ) : (
                   <div className="pending-extraction">
@@ -476,7 +489,7 @@ function UploadApp() {
       ) : null}
 
       {activeView === "masterdata" && user?.role === "admin" ? (
-        <MasterdataAdmin apiFetch={apiFetch} tenantId={activeTenantId} />
+        <MasterdataAdmin apiFetch={apiFetch} tenantId={activeTenantId} tenantProfile={tenantProfile} onProfileSaved={setTenantProfile} />
       ) : null}
 
       {activeView === "users" && user?.role === "admin" ? (
@@ -576,9 +589,10 @@ function UserAdmin({ apiFetch, currentUser }) {
   );
 }
 
-function MasterdataAdmin({ apiFetch, tenantId }) {
+function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
+  const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
     label: "",
@@ -594,6 +608,14 @@ function MasterdataAdmin({ apiFetch, tenantId }) {
     default_assignment_code: "",
   });
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setProfileForm(tenantProfile);
+    setAssignmentForm((current) => ({
+      ...current,
+      kind: tenantProfile.default_assignment_kind || current.kind,
+    }));
+  }, [tenantProfile]);
 
   const loadMasterdata = useCallback(async () => {
     const [assignmentsResponse, suppliersResponse] = await Promise.all([
@@ -632,6 +654,22 @@ function MasterdataAdmin({ apiFetch, tenantId }) {
     setMessage("Zuordnung angelegt.");
   }
 
+  async function saveTenantProfile(event) {
+    event.preventDefault();
+    const response = await apiFetch(`/masterdata/tenant-profile?tenant_id=${encodeURIComponent(tenantId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profileForm),
+    });
+    if (!response.ok) {
+      setMessage(`Mandantenprofil konnte nicht gespeichert werden: ${response.status}`);
+      return;
+    }
+    const result = await response.json();
+    onProfileSaved(result.tenant_profile);
+    setMessage("Mandantenprofil gespeichert.");
+  }
+
   async function createSupplierRule(event) {
     event.preventDefault();
     const response = await apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`, {
@@ -656,12 +694,40 @@ function MasterdataAdmin({ apiFetch, tenantId }) {
       </div>
       {message ? <p className="notice">{message}</p> : null}
 
-      <h3>Zuordnungen</h3>
+      <h3>Mandantenprofil</h3>
+      <form className="compact-form profile-form" onSubmit={saveTenantProfile}>
+        <input placeholder="Mandantenname" value={profileForm.display_name || ""} onChange={(event) => setProfileForm({ ...profileForm, display_name: event.target.value })} required />
+        <select
+          value={profileForm.industry || "general"}
+          onChange={(event) => {
+            const nextTemplate = defaultTenantProfile(event.target.value);
+            setProfileForm({ ...profileForm, ...nextTemplate, display_name: profileForm.display_name || tenantId });
+          }}
+        >
+          <option value="construction">Baubranche</option>
+          <option value="fitness_studio">Sportstudio</option>
+          <option value="container_transport">Container/Transport</option>
+          <option value="general">Allgemein</option>
+        </select>
+        <input placeholder="Bezeichnung Singular" value={profileForm.assignment_label_singular || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_singular: event.target.value })} required />
+        <input placeholder="Bezeichnung Plural" value={profileForm.assignment_label_plural || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_plural: event.target.value })} required />
+        <input placeholder="Spaltenname" value={profileForm.assignment_code_label || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_label: event.target.value })} required />
+        <input placeholder="Kuerzel, z.B. BV" value={profileForm.assignment_code_prefix || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_prefix: event.target.value })} />
+        <label className="inline-check">
+          <input type="checkbox" checked={profileForm.allow_multiple_assignments ?? true} onChange={(event) => setProfileForm({ ...profileForm, allow_multiple_assignments: event.target.checked })} />
+          mehrere pro Beleg
+        </label>
+        <button type="submit">Profil speichern</button>
+      </form>
+
+      <h3>{tenantProfile.assignment_label_plural}</h3>
       <form className="compact-form" onSubmit={createAssignment}>
-        <input placeholder="Code, z.B. Wewe20" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
+        <input placeholder="Code" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
         <input placeholder="Name" value={assignmentForm.label} onChange={(event) => setAssignmentForm({ ...assignmentForm, label: event.target.value })} required />
         <select value={assignmentForm.kind} onChange={(event) => setAssignmentForm({ ...assignmentForm, kind: event.target.value })}>
           <option value="construction_project">Bauvorhaben</option>
+          <option value="location">Standort</option>
+          <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
           <option value="cost_object">Kostenobjekt</option>
           <option value="vehicle">Fahrzeug</option>
           <option value="subscription">Abo/Vertrag</option>
@@ -672,14 +738,14 @@ function MasterdataAdmin({ apiFetch, tenantId }) {
           <input type="checkbox" checked={assignmentForm.revenue_relevant} onChange={(event) => setAssignmentForm({ ...assignmentForm, revenue_relevant: event.target.checked })} />
           umsatzrelevant
         </label>
-        <button type="submit">Zuordnung anlegen</button>
+        <button type="submit">{tenantProfile.assignment_label_singular} anlegen</button>
       </form>
       <div className="table-list">
         {assignmentUnits.map((assignment) => (
           <div className="table-row" key={assignment.id}>
             <strong>{assignment.code}</strong>
             <span>{assignment.label}</span>
-            <span>{formatAssignmentKind(assignment.kind)}</span>
+            <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
             <span>{assignment.revenue_relevant ? "umsatzrelevant" : "intern/allgemein"}</span>
           </div>
         ))}
@@ -698,7 +764,7 @@ function MasterdataAdmin({ apiFetch, tenantId }) {
           <option value="security_subscription">Ueberwachung/Abo</option>
           <option value="general_overhead">Sonstige Gemeinkosten</option>
         </select>
-        <input placeholder="Zuordnungs-Code optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
+        <input placeholder={`${tenantProfile.assignment_code_label} optional`} value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
         <button type="submit">Regel anlegen</button>
       </form>
       <div className="table-list">
@@ -725,14 +791,14 @@ function Field({ label, value }) {
   );
 }
 
-function ProjectSummary({ rawResult }) {
-  const lines = projectSummaryLines(rawResult);
+function ProjectSummary({ rawResult, tenantProfile }) {
+  const lines = projectSummaryLines(rawResult, tenantProfile);
   if (!lines.length) return "-";
 
   return <span className="project-summary">{lines.join("\n")}</span>;
 }
 
-function AllocationLines({ lines }) {
+function AllocationLines({ lines, tenantProfile }) {
   if (!lines?.length) return null;
 
   return (
@@ -743,10 +809,10 @@ function AllocationLines({ lines }) {
           <div key={`${line.delivery_address}-${line.amount}`} className="allocation-row">
             <span>
               {line.assignment_code
-                ? `${formatAssignmentKind(line.assignment_kind)} ${line.assignment_code}`
+                ? formatAssignmentCode(line.assignment_code, line.assignment_kind, tenantProfile)
                 : line.project_code
                   ? `BV ${displayProjectCode(line.project_code)}`
-                  : "Zuordnung ungeklaert"},{" "}
+                  : `${tenantProfile.assignment_label_singular} ungeklaert`},{" "}
               {line.address || line.delivery_address},{" "}
               {formatMoney(line.amount)} Netto
             </span>
@@ -778,13 +844,13 @@ function formatDocumentType(value) {
   return labels[value] ?? value;
 }
 
-function formatAssignment(rawResult) {
-  if (rawResult?.assignment_code) return `${formatAssignmentKind(rawResult.assignment_kind)} ${rawResult.assignment_code}`;
+function formatAssignment(rawResult, tenantProfile = assignmentProfileFromRaw(rawResult)) {
+  if (rawResult?.assignment_code) return formatAssignmentCode(rawResult.assignment_code, rawResult.assignment_kind, tenantProfile);
   if (rawResult?.project_code) return `BV ${rawResult.project_code}`;
   const labels = {
     general_cost: "Allgemeine Kosten",
-    assignment_unresolved: "Zuordnung ungeklaert",
-    assignment_split: "Zuordnung aufgeteilt",
+    assignment_unresolved: `${tenantProfile.assignment_label_singular} ungeklaert`,
+    assignment_split: `${tenantProfile.assignment_label_plural} aufgeteilt`,
     project_split: "BV aufgeteilt",
     project_unresolved: "BV ungeklaert",
     assigned: "Zugeordnet",
@@ -792,29 +858,31 @@ function formatAssignment(rawResult) {
   return labels[rawResult?.assignment_type] ?? null;
 }
 
-function formatAssignmentKind(value) {
+function formatAssignmentKind(value, tenantProfile = defaultTenantProfile("general")) {
   const labels = {
     construction_project: "Bauvorhaben",
+    construction_or_dropoff_site: "Bauvorhaben / Stellplatz",
+    location: "Standort",
     cost_object: "Kostenobjekt",
     vehicle: "Fahrzeug",
     subscription: "Abo/Vertrag",
     department: "Bereich",
   };
-  return labels[value] ?? value;
+  return labels[value] ?? tenantProfile.assignment_label_singular ?? value;
 }
 
-function projectSummaryLines(rawResult) {
+function projectSummaryLines(rawResult, tenantProfile = defaultTenantProfile("general")) {
   if (rawResult?.assignment_code) {
-    return [`${formatAssignmentKind(rawResult.assignment_kind)} ${rawResult.assignment_code}`];
+    return [formatAssignmentCode(rawResult.assignment_code, rawResult.assignment_kind, tenantProfile)];
   }
   if (rawResult?.allocation_lines?.length) {
     return rawResult.allocation_lines
       .map((line) => {
         const code = line.assignment_code
-          ? `${formatAssignmentKind(line.assignment_kind)} ${line.assignment_code}`
+          ? formatAssignmentCode(line.assignment_code, line.assignment_kind, tenantProfile)
           : line.project_code
             ? `BV ${displayProjectCode(line.project_code, { compact: true })}`
-            : "Zuordnung ungeklaert";
+            : `${tenantProfile.assignment_label_singular} ungeklaert`;
         return [displayProjectNumber(line), code].filter(Boolean).join(" ");
       });
   }
@@ -846,6 +914,22 @@ function projectNumberFallback(projectCode) {
     Hk92: "2026-00007",
   };
   return numbers[projectCode] ?? null;
+}
+
+function formatAssignmentCode(code, kind, tenantProfile) {
+  if (!code) return null;
+  if (tenantProfile.assignment_code_prefix) return `${tenantProfile.assignment_code_prefix} ${code}`;
+  return `${formatAssignmentKind(kind, tenantProfile)} ${code}`;
+}
+
+function assignmentProfileFromRaw(rawResult) {
+  return {
+    ...defaultTenantProfile("general"),
+    assignment_label_singular: rawResult?.assignment_label_singular || defaultTenantProfile("general").assignment_label_singular,
+    assignment_label_plural: rawResult?.assignment_label_plural || defaultTenantProfile("general").assignment_label_plural,
+    assignment_code_label: rawResult?.assignment_code_label || defaultTenantProfile("general").assignment_code_label,
+    assignment_code_prefix: rawResult?.assignment_code_prefix ?? defaultTenantProfile("general").assignment_code_prefix,
+  };
 }
 
 function formatCostCategory(value) {
@@ -890,6 +974,52 @@ function emptyToNull(value) {
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [key, entry === "" ? null : entry]),
   );
+}
+
+function defaultTenantProfile(industry) {
+  const templates = {
+    construction: {
+      industry: "construction",
+      display_name: "demo-mandant",
+      assignment_label_singular: "Bauvorhaben",
+      assignment_label_plural: "Bauvorhaben",
+      assignment_code_label: "Bauvorhaben",
+      assignment_code_prefix: "BV",
+      default_assignment_kind: "construction_project",
+      allow_multiple_assignments: true,
+    },
+    fitness_studio: {
+      industry: "fitness_studio",
+      display_name: "",
+      assignment_label_singular: "Standort",
+      assignment_label_plural: "Standorte",
+      assignment_code_label: "Standort",
+      assignment_code_prefix: "",
+      default_assignment_kind: "location",
+      allow_multiple_assignments: false,
+    },
+    container_transport: {
+      industry: "container_transport",
+      display_name: "",
+      assignment_label_singular: "Bauvorhaben / Stellplatz",
+      assignment_label_plural: "Bauvorhaben / Stellplaetze",
+      assignment_code_label: "Bauvorhaben / Stellplatz",
+      assignment_code_prefix: "",
+      default_assignment_kind: "construction_or_dropoff_site",
+      allow_multiple_assignments: true,
+    },
+    general: {
+      industry: "general",
+      display_name: "",
+      assignment_label_singular: "Kostenstelle",
+      assignment_label_plural: "Kostenstellen",
+      assignment_code_label: "Kostenstelle",
+      assignment_code_prefix: "",
+      default_assignment_kind: "cost_object",
+      allow_multiple_assignments: true,
+    },
+  };
+  return templates[industry] ?? templates.general;
 }
 
 createRoot(document.getElementById("root")).render(<App />);

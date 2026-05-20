@@ -124,6 +124,23 @@ def init_database() -> None:
             )
             cursor.execute(
                 """
+                create table if not exists tenant_profiles (
+                    tenant_id text primary key,
+                    display_name text not null,
+                    industry text not null,
+                    assignment_label_singular text not null,
+                    assignment_label_plural text not null,
+                    assignment_code_label text not null,
+                    assignment_code_prefix text,
+                    default_assignment_kind text not null,
+                    allow_multiple_assignments boolean not null default true,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null
+                )
+                """
+            )
+            cursor.execute(
+                """
                 create table if not exists tenant_assignment_units (
                     id uuid primary key,
                     tenant_id text not null,
@@ -614,6 +631,7 @@ def delete_expired_sessions() -> None:
 
 
 def seed_demo_masterdata() -> None:
+    ensure_tenant_profile("demo-mandant")
     existing = list_assignment_units("demo-mandant")
     if existing:
         return
@@ -640,6 +658,131 @@ def seed_demo_masterdata() -> None:
         customer_number="0113042/504",
         default_cost_category="material",
     )
+
+
+TENANT_PROFILE_TEMPLATES = {
+    "construction": {
+        "assignment_label_singular": "Bauvorhaben",
+        "assignment_label_plural": "Bauvorhaben",
+        "assignment_code_label": "Bauvorhaben",
+        "assignment_code_prefix": "BV",
+        "default_assignment_kind": "construction_project",
+        "allow_multiple_assignments": True,
+    },
+    "fitness_studio": {
+        "assignment_label_singular": "Standort",
+        "assignment_label_plural": "Standorte",
+        "assignment_code_label": "Standort",
+        "assignment_code_prefix": None,
+        "default_assignment_kind": "location",
+        "allow_multiple_assignments": False,
+    },
+    "container_transport": {
+        "assignment_label_singular": "Bauvorhaben / Stellplatz",
+        "assignment_label_plural": "Bauvorhaben / Stellplaetze",
+        "assignment_code_label": "Bauvorhaben / Stellplatz",
+        "assignment_code_prefix": None,
+        "default_assignment_kind": "construction_or_dropoff_site",
+        "allow_multiple_assignments": True,
+    },
+    "general": {
+        "assignment_label_singular": "Kostenstelle",
+        "assignment_label_plural": "Kostenstellen",
+        "assignment_code_label": "Kostenstelle",
+        "assignment_code_prefix": None,
+        "default_assignment_kind": "cost_object",
+        "allow_multiple_assignments": True,
+    },
+}
+
+
+def tenant_profile_template(industry: str) -> dict[str, Any]:
+    return TENANT_PROFILE_TEMPLATES.get(industry, TENANT_PROFILE_TEMPLATES["general"])
+
+
+def ensure_tenant_profile(tenant_id: str) -> dict[str, Any]:
+    existing = get_tenant_profile(tenant_id)
+    if existing:
+        return existing
+    template = tenant_profile_template("construction" if tenant_id == "demo-mandant" else "general")
+    return upsert_tenant_profile(
+        tenant_id=tenant_id,
+        display_name=tenant_id,
+        industry="construction" if tenant_id == "demo-mandant" else "general",
+        assignment_label_singular=template["assignment_label_singular"],
+        assignment_label_plural=template["assignment_label_plural"],
+        assignment_code_label=template["assignment_code_label"],
+        assignment_code_prefix=template["assignment_code_prefix"],
+        default_assignment_kind=template["default_assignment_kind"],
+        allow_multiple_assignments=template["allow_multiple_assignments"],
+    )
+
+
+def get_tenant_profile(tenant_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_profiles
+                where tenant_id = %s
+                limit 1
+                """,
+                (tenant_id,),
+            )
+            row = cursor.fetchone()
+            return _serialize_tenant_profile(row) if row else None
+
+
+def upsert_tenant_profile(
+    tenant_id: str,
+    display_name: str,
+    industry: str,
+    assignment_label_singular: str,
+    assignment_label_plural: str,
+    assignment_code_label: str,
+    assignment_code_prefix: str | None,
+    default_assignment_kind: str,
+    allow_multiple_assignments: bool,
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into tenant_profiles (
+                    tenant_id, display_name, industry, assignment_label_singular,
+                    assignment_label_plural, assignment_code_label, assignment_code_prefix,
+                    default_assignment_kind, allow_multiple_assignments, created_at, updated_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                on conflict (tenant_id) do update set
+                    display_name = excluded.display_name,
+                    industry = excluded.industry,
+                    assignment_label_singular = excluded.assignment_label_singular,
+                    assignment_label_plural = excluded.assignment_label_plural,
+                    assignment_code_label = excluded.assignment_code_label,
+                    assignment_code_prefix = excluded.assignment_code_prefix,
+                    default_assignment_kind = excluded.default_assignment_kind,
+                    allow_multiple_assignments = excluded.allow_multiple_assignments,
+                    updated_at = excluded.updated_at
+                returning *
+                """,
+                (
+                    tenant_id.strip(),
+                    display_name.strip() or tenant_id.strip(),
+                    industry,
+                    assignment_label_singular.strip(),
+                    assignment_label_plural.strip(),
+                    assignment_code_label.strip(),
+                    assignment_code_prefix.strip() if assignment_code_prefix else None,
+                    default_assignment_kind,
+                    allow_multiple_assignments,
+                    now,
+                    now,
+                ),
+            )
+            return _serialize_tenant_profile(cursor.fetchone())
 
 
 def list_assignment_units(tenant_id: str) -> list[dict[str, Any]]:
@@ -926,6 +1069,22 @@ def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) ->
     if include_password_hash:
         user["password_hash"] = row["password_hash"]
     return user
+
+
+def _serialize_tenant_profile(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tenant_id": row["tenant_id"],
+        "display_name": row["display_name"],
+        "industry": row["industry"],
+        "assignment_label_singular": row["assignment_label_singular"],
+        "assignment_label_plural": row["assignment_label_plural"],
+        "assignment_code_label": row["assignment_code_label"],
+        "assignment_code_prefix": row["assignment_code_prefix"],
+        "default_assignment_kind": row["default_assignment_kind"],
+        "allow_multiple_assignments": row["allow_multiple_assignments"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
 
 
 def _serialize_assignment_unit(row: dict[str, Any]) -> dict[str, Any]:
