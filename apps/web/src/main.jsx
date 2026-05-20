@@ -838,16 +838,16 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                 <option value="general">Allgemein</option>
               </select>
             </FormField>
-            <FormField label="Einzahl">
+            <FormField label="Begriff einzeln">
               <input placeholder="Bauvorhaben" value={profileForm.assignment_label_singular || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_singular: event.target.value })} required />
             </FormField>
-            <FormField label="Mehrzahl">
+            <FormField label="Begriff mehrfach">
               <input placeholder="Bauvorhaben" value={profileForm.assignment_label_plural || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_plural: event.target.value })} required />
             </FormField>
-            <FormField label="Spaltenname">
+            <FormField label="Feldname in Belegen">
               <input placeholder="Zuordnung" value={profileForm.assignment_code_label || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_label: event.target.value })} required />
             </FormField>
-            <FormField label="Kürzel">
+            <FormField label="Kürzel vor Code">
               <input placeholder="z.B. BV" value={profileForm.assignment_code_prefix || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_prefix: event.target.value })} />
             </FormField>
             <label className="toggle-field">
