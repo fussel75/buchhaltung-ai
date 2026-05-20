@@ -90,6 +90,7 @@ Admin-Benutzer koennen in der App einfache Stammdaten pflegen:
 - Benutzer mit Rolle `admin` oder `user`.
 - Mandantenprofil mit Branche und fachlicher Bezeichnung fuer Zuordnungscodes.
 - Zuordnungseinheiten pro Mandant, z.B. Bauvorhaben, Kostenobjekt, Fahrzeug, Abo/Vertrag oder Bereich.
+  Bei Bauvorhaben kann zusaetzlich die Projektnummer gespeichert werden, z.B. `25-00008` neben dem Code `Wewe20`.
 - Lieferantenregeln mit Erkennungstext, korrektem Firmennamen, unserer Kunden-Nr., Standard-Kostenart und optionaler Standard-Zuordnung.
 
 Die Extraktion nutzt diese Stammdaten vor Heuristiken. Ein Bauvorhaben ist damit nur eine moegliche Zuordnungsart;

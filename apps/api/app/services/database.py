@@ -176,6 +176,7 @@ def init_database() -> None:
                     code text not null,
                     label text not null,
                     kind text not null,
+                    project_number text,
                     revenue_relevant boolean not null default false,
                     aliases jsonb not null default '[]'::jsonb,
                     is_active boolean not null default true,
@@ -185,6 +186,7 @@ def init_database() -> None:
                 )
                 """
             )
+            cursor.execute("alter table tenant_assignment_units add column if not exists project_number text")
             cursor.execute(
                 """
                 create index if not exists tenant_assignment_units_tenant_idx
@@ -792,6 +794,7 @@ def seed_demo_masterdata() -> None:
         code="Wewe20",
         label="Weseler Weg 20",
         kind="construction_project",
+        project_number="25-00008",
         revenue_relevant=True,
         aliases=["Weseler Weg 20", "Weseler Weg 20, 22045 Hamburg"],
     )
@@ -957,6 +960,7 @@ def create_assignment_unit(
     code: str,
     label: str,
     kind: str,
+    project_number: str | None,
     revenue_relevant: bool,
     aliases: list[str],
     is_active: bool = True,
@@ -967,13 +971,14 @@ def create_assignment_unit(
             cursor.execute(
                 """
                 insert into tenant_assignment_units (
-                    id, tenant_id, code, label, kind, revenue_relevant,
+                    id, tenant_id, code, label, kind, project_number, revenue_relevant,
                     aliases, is_active, created_at, updated_at
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (tenant_id, code) do update set
                     label = excluded.label,
                     kind = excluded.kind,
+                    project_number = excluded.project_number,
                     revenue_relevant = excluded.revenue_relevant,
                     aliases = excluded.aliases,
                     is_active = excluded.is_active,
@@ -986,6 +991,7 @@ def create_assignment_unit(
                     code.strip(),
                     label.strip(),
                     kind,
+                    project_number.strip() if project_number else None,
                     revenue_relevant,
                     Jsonb([alias.strip() for alias in aliases if alias.strip()]),
                     is_active,
@@ -1000,6 +1006,7 @@ def update_assignment_unit(
     assignment_id: UUID,
     label: str,
     kind: str,
+    project_number: str | None,
     revenue_relevant: bool,
     aliases: list[str],
     is_active: bool,
@@ -1012,6 +1019,7 @@ def update_assignment_unit(
                 set
                     label = %s,
                     kind = %s,
+                    project_number = %s,
                     revenue_relevant = %s,
                     aliases = %s,
                     is_active = %s,
@@ -1022,6 +1030,7 @@ def update_assignment_unit(
                 (
                     label.strip(),
                     kind,
+                    project_number.strip() if project_number else None,
                     revenue_relevant,
                     Jsonb([alias.strip() for alias in aliases if alias.strip()]),
                     is_active,
@@ -1040,7 +1049,7 @@ def find_assignment_unit_by_text(tenant_id: str, text: str | None) -> dict[str, 
     for assignment in list_assignment_units(tenant_id):
         if not assignment["is_active"]:
             continue
-        candidates = [assignment["code"], assignment["label"], *assignment["aliases"]]
+        candidates = [assignment["code"], assignment["label"], assignment.get("project_number"), *assignment["aliases"]]
         if any(_normalize_match_text(candidate) in normalized_text for candidate in candidates if candidate):
             return assignment
     return None
@@ -1250,6 +1259,7 @@ def _serialize_assignment_unit(row: dict[str, Any]) -> dict[str, Any]:
         "code": row["code"],
         "label": row["label"],
         "kind": row["kind"],
+        "project_number": row.get("project_number"),
         "revenue_relevant": row["revenue_relevant"],
         "aliases": row["aliases"] or [],
         "is_active": row["is_active"],

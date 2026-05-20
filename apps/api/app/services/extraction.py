@@ -203,7 +203,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         "assignment_label_plural": tenant_profile["assignment_label_plural"],
         "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
         "project_code": _legacy_project_code(assignment),
-        "project_number": None,
+        "project_number": _project_number(assignment),
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
         "cost_category": cost_category,
@@ -357,7 +357,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "assignment_label_plural": tenant_profile["assignment_label_plural"],
         "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
         "project_code": _legacy_project_code(assignment),
-        "project_number": None,
+        "project_number": _project_number(assignment),
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
         "cost_category": cost_category,
@@ -645,7 +645,7 @@ def _find_allocation_lines(tenant_id: str, text: str) -> list[dict[str, str | No
                 "assignment_code": assignment["code"] if assignment else None,
                 "assignment_label": assignment["label"] if assignment else None,
                 "assignment_kind": assignment["kind"] if assignment else None,
-                "project_number": None,
+                "project_number": _project_number(assignment),
                 "project_code": _legacy_project_code(assignment),
                 "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
                 "amount": str(_money_to_decimal(amount_text)),
@@ -701,6 +701,12 @@ def _assignment_unit(
 def _legacy_project_code(assignment: dict | None) -> str | None:
     if assignment and assignment["kind"] == "construction_project":
         return assignment["code"]
+    return None
+
+
+def _project_number(assignment: dict | None) -> str | None:
+    if assignment and assignment.get("kind") in {"construction_project", "construction_or_dropoff_site"}:
+        return assignment.get("project_number")
     return None
 
 

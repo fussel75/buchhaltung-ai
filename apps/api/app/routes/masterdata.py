@@ -24,6 +24,7 @@ class AssignmentUnitRequest(BaseModel):
     code: str
     label: str
     kind: str = "cost_object"
+    project_number: str | None = None
     revenue_relevant: bool = False
     aliases: list[str] = []
     is_active: bool = True
@@ -32,6 +33,7 @@ class AssignmentUnitRequest(BaseModel):
 class AssignmentUnitUpdateRequest(BaseModel):
     label: str
     kind: str = "cost_object"
+    project_number: str | None = None
     revenue_relevant: bool = False
     aliases: list[str] = []
     is_active: bool = True
@@ -125,6 +127,7 @@ def post_assignment_unit(
         code=payload.code,
         label=payload.label,
         kind=payload.kind,
+        project_number=payload.project_number,
         revenue_relevant=payload.revenue_relevant,
         aliases=payload.aliases,
         is_active=payload.is_active,
@@ -143,6 +146,7 @@ def patch_assignment_unit(
         assignment_id=assignment_id,
         label=payload.label,
         kind=payload.kind,
+        project_number=payload.project_number,
         revenue_relevant=payload.revenue_relevant,
         aliases=payload.aliases,
         is_active=payload.is_active,

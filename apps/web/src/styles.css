@@ -725,6 +725,25 @@ code {
   grid-column: span 1;
 }
 
+.assignment-form > .form-field:nth-child(1),
+.assignment-form > .form-field:nth-child(4) {
+  grid-column: span 2;
+}
+
+.assignment-form > .form-field:nth-child(2) {
+  grid-column: span 3;
+}
+
+.assignment-form > .form-field:nth-child(3),
+.assignment-form > .form-field:nth-child(5) {
+  grid-column: span 2;
+}
+
+.assignment-form > .toggle-field,
+.assignment-form > button {
+  grid-column: span 1;
+}
+
 .form-field {
   min-width: 0;
 }
@@ -780,7 +799,7 @@ code {
 }
 
 .assignment-table .data-row {
-  grid-template-columns: minmax(130px, 1fr) minmax(190px, 1.4fr) minmax(170px, 1fr) minmax(130px, 0.8fr) minmax(110px, 0.7fr);
+  grid-template-columns: minmax(130px, 1fr) minmax(140px, 0.9fr) minmax(190px, 1.4fr) minmax(170px, 1fr) minmax(130px, 0.8fr) minmax(110px, 0.7fr);
 }
 
 .supplier-table .data-row {
@@ -884,6 +903,9 @@ code {
   .profile-form > .form-field:nth-child(n),
   .profile-form > .toggle-field,
   .profile-form > button,
+  .assignment-form > .form-field:nth-child(n),
+  .assignment-form > .toggle-field,
+  .assignment-form > button,
   .supplier-form > .form-field:nth-child(n),
   .supplier-form > button,
   .assignment-table .data-row,

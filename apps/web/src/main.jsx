@@ -661,6 +661,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     code: "",
     label: "",
     kind: "cost_object",
+    project_number: "",
     revenue_relevant: false,
     aliases: "",
   });
@@ -713,7 +714,14 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       setMessage(`Zuordnung konnte nicht angelegt werden: ${response.status}`);
       return;
     }
-    setAssignmentForm({ code: "", label: "", kind: "cost_object", revenue_relevant: false, aliases: "" });
+    setAssignmentForm({
+      code: "",
+      label: "",
+      kind: tenantProfile.default_assignment_kind || "cost_object",
+      project_number: "",
+      revenue_relevant: false,
+      aliases: "",
+    });
     await loadMasterdata();
     setMessage("Zuordnung angelegt.");
   }
@@ -725,6 +733,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       body: JSON.stringify({
         label: assignment.label,
         kind: assignment.kind,
+        project_number: assignment.project_number,
         revenue_relevant: assignment.revenue_relevant,
         aliases: assignment.aliases ?? [],
         is_active: assignment.is_active,
@@ -857,7 +866,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
             </div>
             <StatusPill value={`${assignmentUnits.length} Einträge`} />
           </div>
-          <form className="form-grid" onSubmit={createAssignment}>
+          <form className="form-grid assignment-form" onSubmit={createAssignment}>
             <FormField label="Code">
               <input placeholder="Wewe20" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
             </FormField>
@@ -875,6 +884,11 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                 <option value="department">Bereich</option>
               </select>
             </FormField>
+            {usesProjectNumber(assignmentForm.kind) ? (
+              <FormField label="Projektnummer">
+                <input placeholder="25-00008" value={assignmentForm.project_number || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, project_number: event.target.value })} />
+              </FormField>
+            ) : null}
             <FormField label="Aliase">
               <input placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
             </FormField>
@@ -887,6 +901,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
           <div className="data-table assignment-table">
             <div className="data-row data-head">
               <span>Code</span>
+              <span>Projektnummer</span>
               <span>Name</span>
               <span>Art</span>
               <span>Status</span>
@@ -895,6 +910,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
             {assignmentUnits.map((assignment) => (
               <div className="data-row" key={assignment.id}>
                 <strong>{formatAssignmentCode(assignment.code, assignment.kind, tenantProfile)}</strong>
+                <span>{usesProjectNumber(assignment.kind) ? assignment.project_number || "-" : "-"}</span>
                 <span>{assignment.label}</span>
                 <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
                 <StatusPill value={assignment.revenue_relevant ? "umsatzrelevant" : "intern"} tone={assignment.revenue_relevant ? "green" : "gray"} />
@@ -1118,9 +1134,18 @@ function formatAssignmentKind(value, tenantProfile = defaultTenantProfile("gener
   return labels[value] ?? tenantProfile.assignment_label_singular ?? value;
 }
 
+function usesProjectNumber(kind) {
+  return ["construction_project", "construction_or_dropoff_site"].includes(kind);
+}
+
 function projectSummaryLines(rawResult, tenantProfile = defaultTenantProfile("general")) {
   if (rawResult?.assignment_code) {
-    return [formatAssignmentCode(rawResult.assignment_code, rawResult.assignment_kind, tenantProfile)];
+    const number = displayProjectNumber({
+      project_number: rawResult.project_number,
+      project_code: rawResult.project_code || rawResult.assignment_code,
+    });
+    const code = formatAssignmentCode(rawResult.assignment_code, rawResult.assignment_kind, tenantProfile);
+    return [[number, code].filter(Boolean).join(" ")];
   }
   if (rawResult?.allocation_lines?.length) {
     return rawResult.allocation_lines
