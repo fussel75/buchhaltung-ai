@@ -203,6 +203,14 @@ function UploadApp() {
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
+  const queueStats = useMemo(
+    () => ({
+      pending: documents.filter((document) => document.status === "review_pending").length,
+      extracted: documents.filter((document) => document.status === "extracted").length,
+      approved: documents.filter((document) => document.status === "review_approved").length,
+    }),
+    [documents],
+  );
 
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
@@ -365,27 +373,29 @@ function UploadApp() {
   );
 
   return (
-    <main className="app">
-      <section className="toolbar">
-        <div>
+    <main className="app app-shell">
+      <header className="app-header">
+        <div className="brand-block">
           <p className="eyebrow">buchhaltung-ai</p>
-          <h1>Beleg-Upload</h1>
+          <h1>Belege</h1>
         </div>
-        <div className="session-tools">
-          <span>{user?.display_name || user?.email}</span>
-          <button type="button" onClick={logout}>Logout</button>
+        <div className="header-controls">
+          <label className="tenant-control">
+            <span>Mandant</span>
+            <input
+              value={tenantId}
+              onChange={(event) => setTenantId(event.target.value)}
+              placeholder="mandant"
+            />
+          </label>
+          <div className="session-tools">
+            <span>{user?.display_name || user?.email}</span>
+            <button className="secondary-button" type="button" onClick={logout}>Logout</button>
+          </div>
         </div>
-        <label>
-          Mandant
-          <input
-            value={tenantId}
-            onChange={(event) => setTenantId(event.target.value)}
-            placeholder="mandant"
-          />
-        </label>
-      </section>
+      </header>
 
-      <nav className="view-tabs">
+      <nav className="view-tabs" aria-label="Arbeitsbereiche">
         <button type="button" className={activeView === "review" ? "active" : ""} onClick={() => setActiveView("review")}>
           Review
         </button>
@@ -401,11 +411,18 @@ function UploadApp() {
         ) : null}
       </nav>
 
+      <section className="metric-strip">
+        <Metric label="Offen" value={queueStats.pending} />
+        <Metric label="Extrahiert" value={queueStats.extracted} />
+        <Metric label="Freigegeben" value={queueStats.approved} />
+        <Metric label="Zuordnung" value={tenantProfile.assignment_label_singular} />
+      </section>
+
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
       {activeView === "review" ? (
-        <>
+        <section className="review-board">
           <section
             className={isDragging ? "dropzone active" : "dropzone"}
             onDragEnter={(event) => {
@@ -523,7 +540,7 @@ function UploadApp() {
           </div>
         )}
           </section>
-        </>
+        </section>
       ) : null}
 
       {activeView === "masterdata" && user?.role === "admin" ? (
@@ -534,6 +551,15 @@ function UploadApp() {
         <UserAdmin apiFetch={apiFetch} currentUser={user} />
       ) : null}
     </main>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
