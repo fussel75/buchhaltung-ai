@@ -24,6 +24,10 @@ function resolveApiBaseUrl(configuredUrl) {
   return configuredUrl;
 }
 
+function apiUrl(path) {
+  return `${apiBaseUrl}${path}`;
+}
+
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authState, setAuthState] = useState("loading");
@@ -199,6 +203,9 @@ function UploadApp() {
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
   const [approvingIds, setApprovingIds] = useState([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
+  const [exporting, setExporting] = useState("");
+  const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -231,6 +238,12 @@ function UploadApp() {
   useEffect(() => {
     loadDocuments().catch((loadError) => setError(loadError.message));
   }, [loadDocuments]);
+
+  useEffect(() => {
+    setSelectedDocumentIds((current) =>
+      current.filter((id) => documents.some((document) => document.id === id)),
+    );
+  }, [documents]);
 
   const loadTenantProfile = useCallback(async () => {
     if (!activeTenantId) return;
@@ -372,6 +385,89 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const toggleDocumentSelection = useCallback((documentId) => {
+    setSelectedDocumentIds((current) =>
+      current.includes(documentId)
+        ? current.filter((id) => id !== documentId)
+        : [...current, documentId],
+    );
+  }, []);
+
+  const openDocument = useCallback((document) => {
+    window.open(apiUrl(`/documents/${document.id}/file?disposition=inline`), "_blank", "noopener");
+  }, []);
+
+  const downloadDocument = useCallback(
+    async (document) => {
+      setError("");
+      setNotice("");
+      setExporting(document.id);
+      try {
+        const response = await apiFetch(`/documents/${document.id}/file?disposition=attachment`);
+        if (!response.ok) {
+          throw new Error(`Download fehlgeschlagen: ${response.status}`);
+        }
+        await downloadResponse(response, document.normalized_filename || document.original_filename);
+      } catch (downloadError) {
+        setError(downloadError.message);
+      } finally {
+        setExporting("");
+      }
+    },
+    [apiFetch],
+  );
+
+  const exportSelectedDocuments = useCallback(async () => {
+    if (!selectedDocumentIds.length) {
+      setError("Bitte zuerst Belege auswählen.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setExporting("selected");
+    try {
+      const response = await apiFetch("/documents/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenant_id: activeTenantId, document_ids: selectedDocumentIds }),
+      });
+      if (!response.ok) {
+        throw new Error(`ZIP-Export fehlgeschlagen: ${response.status}`);
+      }
+      await downloadResponse(response, `belege-${activeTenantId}-auswahl.zip`);
+      setNotice(`${selectedDocumentIds.length} Belege als ZIP erstellt.`);
+    } catch (exportError) {
+      setError(exportError.message);
+    } finally {
+      setExporting("");
+    }
+  }, [activeTenantId, apiFetch, selectedDocumentIds]);
+
+  const exportMonthDocuments = useCallback(async () => {
+    const [year, month] = exportMonth.split("-").map((value) => Number(value));
+    if (!year || !month) {
+      setError("Bitte einen Monat auswählen.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setExporting("month");
+    try {
+      const response = await apiFetch(
+        `/documents/export/month?tenant_id=${encodeURIComponent(activeTenantId)}&year=${year}&month=${month}`,
+      );
+      if (!response.ok) {
+        throw new Error(response.status === 404 ? "Keine Belege für diesen Monat gefunden." : `Monats-Export fehlgeschlagen: ${response.status}`);
+      }
+      await downloadResponse(response, `belege-${activeTenantId}-${exportMonth}.zip`);
+      setNotice(`Monats-ZIP erstellt: ${exportMonth}`);
+    } catch (exportError) {
+      setError(exportError.message);
+    } finally {
+      setExporting("");
+    }
+  }, [activeTenantId, apiFetch, exportMonth]);
+
   return (
     <main className="app app-shell">
       <header className="app-header">
@@ -449,8 +545,32 @@ function UploadApp() {
 
           <section className="uploads">
         <div className="section-header">
-          <h2>Review-Queue</h2>
-          <span>{documents.length} Belege</span>
+          <div>
+            <h2>Review-Queue</h2>
+            <span>{documents.length} Belege</span>
+          </div>
+          <div className="queue-tools">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={exportSelectedDocuments}
+              disabled={!selectedDocumentIds.length || exporting === "selected"}
+            >
+              {exporting === "selected" ? "Erstellt..." : `Auswahl ZIP (${selectedDocumentIds.length})`}
+            </button>
+            <label className="month-export">
+              <span>Monat</span>
+              <input type="month" value={exportMonth} onChange={(event) => setExportMonth(event.target.value)} />
+            </label>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={exportMonthDocuments}
+              disabled={exporting === "month"}
+            >
+              {exporting === "month" ? "Erstellt..." : "Monat ZIP"}
+            </button>
+          </div>
         </div>
         {documents.length === 0 ? (
           <p className="empty">Noch keine Belege für diesen Mandanten.</p>
@@ -459,12 +579,33 @@ function UploadApp() {
             {documents.map((document) => (
               <article key={document.id} className="document-card">
                 <div className="document-head">
-                  <div>
-                    <strong>{document.original_filename}</strong>
-                    <span>{document.normalized_filename || document.tenant_id}</span>
+                  <div className="document-title">
+                    <label className="document-select">
+                      <input
+                        type="checkbox"
+                        checked={selectedDocumentIds.includes(document.id)}
+                        onChange={() => toggleDocumentSelection(document.id)}
+                      />
+                      <span>Auswählen</span>
+                    </label>
+                    <div>
+                      <strong>{document.original_filename}</strong>
+                      <span>{document.normalized_filename || document.tenant_id}</span>
+                    </div>
                   </div>
                   <div className="document-actions">
                     <span className="status">{formatStatus(document.status)}</span>
+                    <button className="secondary-button" type="button" onClick={() => openDocument(document)}>
+                      Ansehen
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => downloadDocument(document)}
+                      disabled={exporting === document.id}
+                    >
+                      {exporting === document.id ? "Lädt..." : "Download"}
+                    </button>
                     {document.extraction && document.status !== "review_approved" ? (
                       <button
                         type="button"
@@ -1083,6 +1224,27 @@ function BookingSuggestions({ suggestions, tenantProfile }) {
       </div>
     </div>
   );
+}
+
+async function downloadResponse(response, fallbackFilename) {
+  const blob = await response.blob();
+  const filename = filenameFromDisposition(response.headers.get("content-disposition")) || fallbackFilename || "belege.zip";
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function filenameFromDisposition(disposition) {
+  if (!disposition) return null;
+  const utfMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch) return decodeURIComponent(utfMatch[1]);
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  return plainMatch?.[1] || null;
 }
 
 function formatSize(sizeBytes) {

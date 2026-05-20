@@ -61,14 +61,14 @@ def delete_stored_document(stored: StoredDocument) -> None:
 
 def delete_stored_document_path(storage_path: str) -> None:
     settings = get_settings()
-    target = settings.storage_root / storage_path
+    target = resolve_stored_document_path(storage_path)
     if target.exists():
         target.unlink()
 
 
 def rename_stored_document(storage_path: str, normalized_filename: str) -> Path:
     settings = get_settings()
-    source = settings.storage_root / storage_path
+    source = resolve_stored_document_path(storage_path)
     if not source.exists():
         return Path(storage_path)
 
@@ -88,6 +88,15 @@ def rename_stored_document(storage_path: str, normalized_filename: str) -> Path:
         except PermissionError:
             copy2(source, target)
     return target.relative_to(settings.storage_root)
+
+
+def resolve_stored_document_path(storage_path: str) -> Path:
+    settings = get_settings()
+    root = settings.storage_root.resolve()
+    target = (root / storage_path).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError("storage path escapes storage root")
+    return target
 
 
 def _safe_filename(filename: str, fallback_suffix: str) -> str:

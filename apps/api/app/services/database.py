@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -312,6 +312,37 @@ def list_documents(tenant_id: str) -> list[dict[str, Any]]:
                 limit 100
                 """,
                 (tenant_id,),
+            )
+            return [_serialize_document(row) for row in cursor.fetchall()]
+
+
+def list_documents_for_month(tenant_id: str, year: int, month: int) -> list[dict[str, Any]]:
+    start_date = date(year, month, 1)
+    end_date = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select
+                    d.*,
+                    to_jsonb(e.*) as extraction,
+                    coalesce(
+                        (
+                            select jsonb_agg(to_jsonb(s.*) order by s.line_no)
+                            from document_booking_suggestions s
+                            where s.document_id = d.id
+                        ),
+                        '[]'::jsonb
+                    ) as booking_suggestions
+                from documents d
+                left join document_extractions e on e.document_id = d.id
+                where d.tenant_id = %s
+                    and coalesce(e.invoice_date, d.created_at::date) >= %s
+                    and coalesce(e.invoice_date, d.created_at::date) < %s
+                order by coalesce(e.invoice_date, d.created_at::date) desc, d.created_at desc
+                limit 500
+                """,
+                (tenant_id, start_date, end_date),
             )
             return [_serialize_document(row) for row in cursor.fetchall()]
 
