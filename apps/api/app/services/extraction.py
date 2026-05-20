@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from re import MULTILINE, search, sub
+from re import MULTILINE, finditer, search, sub
 from xml.etree import ElementTree
 from uuid import UUID
 
@@ -196,6 +196,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
         "project_code": _legacy_project_code(assignment),
+        "project_number": None,
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
         "cost_category": cost_category,
@@ -232,42 +233,69 @@ def _build_pdf_text_result(document: dict) -> dict:
     invoice_number = _find_text(text, r"Rechnungs-Nr\.:\s*(\d+)") or _find_text(
         text,
         r"Nr\.\s*\(S\)\s*:\s*([0-9-]+)",
+    ) or _find_text(
+        text,
+        r"Belegnummer:\s*([A-Z]{1,5}\d+)",
     )
     customer_number = _find_text(text, r"Kunden-Nr\.:\s*(\d+)") or _find_text(
         text,
         r"Kundennummer\s*:\s*([0-9/.-]+)",
+    ) or _find_text(
+        text,
+        r"([0-9/.-]+)\s*Kundennummer:",
+    ) or _find_text(
+        text,
+        r"Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*([0-9/.-]+)",
     )
     invoice_date = _find_date(text, r"Datum:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"Datum\s*-\s*Zeit\s*:\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Belegdatum:\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Belegdatum:\s*\n\s*Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
     )
     due_date = (
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
+        or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
     )
-    discount_percent = _find_discount_percent(text)
+    allocation_lines = _find_allocation_lines(document["tenant_id"], text)
+    visible_discount = _find_visible_discount_terms(text)
+    discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent")
     discount_due_date = (
         _find_date(text, r"(\d{2}\.\d{2}\.\d{4})\s+3,00%\s+Skonto")
         or _discount_due_date_from_days(invoice_date, _find_discount_days(text))
+        or visible_discount.get("discount_due_date")
     )
     totals = _find_invoice_totals(text)
-    discount_base = totals.get("discount_base")
+    discount_base = totals.get("discount_base") or visible_discount.get("discount_base")
     net_amount = totals.get("net_amount")
     tax_amount = totals.get("tax_amount")
     gross_amount = totals.get("gross_amount")
     discount_base = discount_base or gross_amount
-    discount_amount = _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})")
+    discount_amount = _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})") or visible_discount.get(
+        "discount_amount"
+    )
     if discount_amount is None and discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
-    delivery_address = _find_delivery_address(text)
+    delivery_addresses = _find_delivery_addresses(text)
+    delivery_address = delivery_addresses[0] if delivery_addresses else _find_delivery_address(text)
     supplier_name = _supplier_name(document, text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
     assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    if not assignment and delivery_addresses:
+        assignment = _resolve_assignment_for_delivery_addresses(document["tenant_id"], delivery_addresses)
     product_name = _product_name(text)
-    assignment_type = _assignment_type(delivery_address, assignment)
+    allocation_lines_resolved = bool(allocation_lines) and all(
+        allocation.get("assignment_code") for allocation in allocation_lines
+    )
+    assignment_type = "assignment_split" if len(allocation_lines) > 1 else _assignment_type(delivery_address, assignment)
     cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
     cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
@@ -291,7 +319,11 @@ def _build_pdf_text_result(document: dict) -> dict:
         if not value
     ]
     warnings = []
-    if delivery_address and not assignment:
+    if len(delivery_addresses) > 1:
+        warnings.append(
+            "Mehrere Lieferadressen/Zuordnungen erkannt: bitte Zuordnung oder Splittung pruefen."
+        )
+    if delivery_address and not assignment and not allocation_lines_resolved:
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
@@ -305,11 +337,14 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_due_date": discount_due_date,
         "service_period": invoice_date[:7] if invoice_date else None,
         "delivery_address": delivery_address,
+        "delivery_addresses": delivery_addresses,
+        "allocation_lines": allocation_lines,
         "assignment_code": assignment["code"] if assignment else None,
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
         "project_code": _legacy_project_code(assignment),
+        "project_number": None,
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
         "cost_category": cost_category,
@@ -320,6 +355,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_base": discount_base,
         "discount_percent": discount_percent,
         "discount_amount": discount_amount,
+        "discounted_payable_amount": visible_discount.get("discounted_payable_amount"),
         "document_type": "incoming_invoice",
         "currency": "EUR",
         "confidence": Decimal("0.88") if not missing else Decimal("0.72"),
@@ -434,7 +470,7 @@ def _xml_delivery_address(root: ElementTree.Element, ns: dict[str, str]) -> str 
 def _find_visible_discount_base(text: str) -> Decimal | None:
     return _find_money(
         text,
-        r"(?:davon\s+skontofähig|Skontofähiger\s+Betrag)\s*:?\s*([0-9.]+,\d{2})",
+        r"(?:davon\s+skontofähig|Skontofähiger\s+Betrag|skontierfähiger\s+Betrag\s+EUR)\s*:?\s*([0-9.]+,\d{2})",
     )
 
 
@@ -451,12 +487,24 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
     discounted_payable_amount = _find_money(
         text,
         r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+[0-9]+,[0-9]{2}%\s+Skt=\s*([0-9.]+,\d{2})",
+    ) or _find_money(
+        text,
+        r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+[0-9.]+,\d{2}\s+=\s+EUR\s+([0-9.]+,\d{2})",
+    )
+    if discount_due_date is None:
+        discount_due_date = _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
+    if percent_text is None:
+        percent_text = _find_text(text, r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+([0-9]+(?:,\d{1,2})?)\s*%\s+Skonto")
+    discount_amount = _find_money(
+        text,
+        r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+([0-9.]+,\d{2})",
     )
     return {
         "discount_due_date": discount_due_date,
         "due_date": due_date,
         "discount_percent": _money_to_decimal(percent_text) if percent_text else None,
         "discount_base": _find_visible_discount_base(text),
+        "discount_amount": discount_amount,
         "discounted_payable_amount": discounted_payable_amount,
     }
 
@@ -482,6 +530,17 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    luechau_total = search(
+        r"\b\d{1,2}%\s+MwSt\.:\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})",
+        text,
+    )
+    if luechau_total:
+        return {
+            "discount_base": _find_visible_discount_base(text),
+            "net_amount": _money_to_decimal(luechau_total.group(1)),
+            "tax_amount": _money_to_decimal(luechau_total.group(2)),
+            "gross_amount": _money_to_decimal(luechau_total.group(3)),
+        }
     match = search(
         r"skontofähiger Betrag\s+Netto\s+MwSt-%\s+MwSt\s+Endbetrag EUR\s*\n\s*"
         r"([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})",
@@ -512,7 +571,10 @@ def _find_money(text: str, pattern: str) -> Decimal | None:
 
 
 def _find_discount_percent(text: str) -> Decimal | None:
-    percent = _find_text(text, r"\b\d+\s+Tage\s+([0-9]+(?:,\d{1,2})?)%\s+Skonto")
+    percent = _find_text(text, r"\b\d+\s+Tage\s+([0-9]+(?:,\d{1,2})?)%\s+Skonto") or _find_text(
+        text,
+        r"abzgl\.\s+([0-9]+(?:,\d{1,2})?)\s*%\s+Skonto",
+    )
     if not percent:
         return None
     return _money_to_decimal(f"{percent},00" if "," not in percent else percent)
@@ -536,12 +598,64 @@ def _money_to_decimal(value: str) -> Decimal:
 def _find_delivery_address(text: str) -> str | None:
     match = search(r"Lieferanschrift:\s*(.+?)\s*\n\s*(\d{5}\s+[^\n]+)", text)
     if not match:
-        return None
+        addresses = _find_delivery_addresses(text)
+        return addresses[0] if addresses else None
     return f"{match.group(1).strip()}, {match.group(2).strip()}"
+
+
+def _find_delivery_addresses(text: str) -> list[str]:
+    addresses = []
+    for match in finditer(
+        r"An:\s*(.+?),\s*([^\n]*?\d+[^\n]*)\s*\n\s*(\d{5}\s+[^\n]+)",
+        text,
+    ):
+        recipient, street, city = (part.strip() for part in match.groups())
+        addresses.append(f"{recipient}, {street}, {city}")
+    return list(dict.fromkeys(addresses))
+
+
+def _find_allocation_lines(tenant_id: str, text: str) -> list[dict[str, str | None]]:
+    normalized_text = sub(r"\s+", " ", text)
+    allocations = []
+    for match in finditer(
+        r"Zwischensumme\s+f[üu]r\s+(.+?),\s*(.+?):\s+([0-9.]+,\d{2})\s+EUR",
+        normalized_text,
+    ):
+        recipient, address, amount_text = (part.strip() for part in match.groups())
+        full_address = f"{recipient}, {address}"
+        assignment = find_assignment_unit_by_text(tenant_id, full_address)
+        allocations.append(
+            {
+                "recipient": recipient,
+                "address": address,
+                "delivery_address": full_address,
+                "assignment_code": assignment["code"] if assignment else None,
+                "assignment_label": assignment["label"] if assignment else None,
+                "assignment_kind": assignment["kind"] if assignment else None,
+                "project_number": None,
+                "project_code": _legacy_project_code(assignment),
+                "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
+                "amount": str(_money_to_decimal(amount_text)),
+                "currency": "EUR",
+            }
+        )
+    return allocations
+
+
+def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresses: list[str]) -> dict | None:
+    assignments = [find_assignment_unit_by_text(tenant_id, address) for address in delivery_addresses]
+    assignment_codes = {assignment["code"] for assignment in assignments if assignment}
+    if len(delivery_addresses) == 1 and assignments[0]:
+        return assignments[0]
+    if len(assignment_codes) == 1 and len(assignments) == len([assignment for assignment in assignments if assignment]):
+        return next(assignment for assignment in assignments if assignment)
+    return None
 
 
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
+    if "lüchau baustoffe gmbh" in text.lower():
+        return "Lüchau Baustoffe GmbH"
     if "rechnungar" in original and "0113042/504" in text:
         return "Georg Klindworth oHG"
     if "kreditrechnung" in original and "fermacell" in text.lower():
@@ -596,7 +710,7 @@ def _cost_category(
         return "subcontractor"
     if any(term in haystack for term in ["hobotec", "fermacell", "schalung", "gipsfaserplatte", "artikel", "material"]):
         return "material"
-    if assignment_type in {"assigned", "assignment_unresolved"}:
+    if assignment_type in {"assigned", "assignment_split", "assignment_unresolved", "project", "project_split", "project_unresolved"}:
         return "material"
     if any(term in haystack for term in ["tank", "diesel", "benzin", "kraftstoff", "shell", "aral"]):
         return "fuel_vehicle"
@@ -636,6 +750,8 @@ def _find_first_position_product_name(text: str) -> str | None:
 
 
 def _product_name(text: str) -> str:
+    if "PE-Folie 200 my" in text:
+        return "PE-Folie 200 my / Baustoffe"
     if "FERMACELL" in text and "10mm Gipsfaserplatte" in text:
         return "FERMACELL 10mm Gipsfaserplatte"
     match = search(r"Pos\. 1:\s*\n(.+?)\n(.+?)(?:\s{2,}|\n)", text)
@@ -667,6 +783,8 @@ def _filename_assignment_label(assignment: dict | None, assignment_type: str) ->
         if assignment["kind"] == "construction_project":
             return f"BV {assignment['code']}"
         return f"Zuordnung {assignment['code']}"
+    if assignment_type == "assignment_split":
+        return "Zuordnung aufgeteilt"
     if assignment_type == "assignment_unresolved":
         return "Zuordnung ungeklaert"
     return "Allgemeine Kosten"

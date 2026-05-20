@@ -197,6 +197,7 @@ function UploadApp() {
   const [error, setError] = useState("");
   const [extractingIds, setExtractingIds] = useState([]);
   const [activeView, setActiveView] = useState("review");
+  const [deletingIds, setDeletingIds] = useState([]);
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -291,6 +292,37 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const deleteDocument = useCallback(
+    async (document) => {
+      const confirmed = window.confirm(
+        `Beleg "${document.original_filename}" wirklich aus der Review-Queue löschen?`,
+      );
+      if (!confirmed) return;
+
+      setError("");
+      setNotice("");
+      setDeletingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Löschen fehlgeschlagen: ${response.status}`);
+        }
+
+        await loadDocuments();
+        setNotice(`Beleg gelöscht: ${document.original_filename}`);
+      } catch (deleteError) {
+        setError(deleteError.message);
+      } finally {
+        setDeletingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   return (
     <main className="app">
       <section className="toolbar">
@@ -373,7 +405,17 @@ function UploadApp() {
                     <strong>{document.original_filename}</strong>
                     <span>{document.normalized_filename || document.tenant_id}</span>
                   </div>
-                  <span className="status">{formatStatus(document.status)}</span>
+                  <div className="document-actions">
+                    <span className="status">{formatStatus(document.status)}</span>
+                    <button
+                      className="secondary-button danger-button"
+                      type="button"
+                      onClick={() => deleteDocument(document)}
+                      disabled={deletingIds.includes(document.id)}
+                    >
+                      {deletingIds.includes(document.id) ? "Löscht..." : "Löschen"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="meta-grid">
@@ -382,25 +424,28 @@ function UploadApp() {
                 </div>
 
                 {document.extraction ? (
-                  <div className="extraction-grid">
-                    <Field label="Lieferant" value={document.extraction.supplier_name} />
-                    <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
-                    <Field label="Rechnung" value={document.extraction.invoice_number} />
-                    <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
-                    <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
-                    <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
-                    <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                    <Field label="Zuordnungs-Code" value={document.extraction.raw_result?.assignment_code || document.extraction.raw_result?.project_code} />
-                    <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind)} />
-                    <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
-                    <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
-                    <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
-                    <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
-                    <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
-                    <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
-                    <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
-                    <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
-                    <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
+                  <div className="extraction-panel">
+                    <div className="extraction-grid">
+                      <Field label="Lieferant" value={document.extraction.supplier_name} />
+                      <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
+                      <Field label="Rechnung" value={document.extraction.invoice_number} />
+                      <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
+                      <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
+                      <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result)} />
+                      <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
+                      <Field label="Zuordnungs-Code" value={<ProjectSummary rawResult={document.extraction.raw_result} />} />
+                      <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind)} />
+                      <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
+                      <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
+                      <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
+                      <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
+                      <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
+                      <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
+                      <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
+                      <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
+                      <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
+                    </div>
+                    <AllocationLines lines={document.extraction.raw_result?.allocation_lines} />
                   </div>
                 ) : (
                   <div className="pending-extraction">
@@ -680,6 +725,38 @@ function Field({ label, value }) {
   );
 }
 
+function ProjectSummary({ rawResult }) {
+  const lines = projectSummaryLines(rawResult);
+  if (!lines.length) return "-";
+
+  return <span className="project-summary">{lines.join("\n")}</span>;
+}
+
+function AllocationLines({ lines }) {
+  if (!lines?.length) return null;
+
+  return (
+    <div className="allocation-lines">
+      <h3>Aufteilung</h3>
+      <div className="allocation-table">
+        {lines.map((line) => (
+          <div key={`${line.delivery_address}-${line.amount}`} className="allocation-row">
+            <span>
+              {line.assignment_code
+                ? `${formatAssignmentKind(line.assignment_kind)} ${line.assignment_code}`
+                : line.project_code
+                  ? `BV ${displayProjectCode(line.project_code)}`
+                  : "Zuordnung ungeklaert"},{" "}
+              {line.address || line.delivery_address},{" "}
+              {formatMoney(line.amount)} Netto
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function formatSize(sizeBytes) {
   if (sizeBytes < 1024) return `${sizeBytes} B`;
   return `${Math.round(sizeBytes / 1024)} KB`;
@@ -707,6 +784,8 @@ function formatAssignment(rawResult) {
   const labels = {
     general_cost: "Allgemeine Kosten",
     assignment_unresolved: "Zuordnung ungeklaert",
+    assignment_split: "Zuordnung aufgeteilt",
+    project_split: "BV aufgeteilt",
     project_unresolved: "BV ungeklaert",
     assigned: "Zugeordnet",
   };
@@ -722,6 +801,51 @@ function formatAssignmentKind(value) {
     department: "Bereich",
   };
   return labels[value] ?? value;
+}
+
+function projectSummaryLines(rawResult) {
+  if (rawResult?.assignment_code) {
+    return [`${formatAssignmentKind(rawResult.assignment_kind)} ${rawResult.assignment_code}`];
+  }
+  if (rawResult?.allocation_lines?.length) {
+    return rawResult.allocation_lines
+      .map((line) => {
+        const code = line.assignment_code
+          ? `${formatAssignmentKind(line.assignment_kind)} ${line.assignment_code}`
+          : line.project_code
+            ? `BV ${displayProjectCode(line.project_code, { compact: true })}`
+            : "Zuordnung ungeklaert";
+        return [displayProjectNumber(line), code].filter(Boolean).join(" ");
+      });
+  }
+  if (rawResult?.project_code) {
+    const code = `BV ${displayProjectCode(rawResult.project_code, { compact: true })}`;
+    return [[displayProjectNumber(rawResult), code].filter(Boolean).join(" ")];
+  }
+  return [];
+}
+
+function displayProjectCode(projectCode, options = {}) {
+  if (options.compact && projectCode === "Wewe20") return "Wewe";
+  const labels = {
+    Heu92: "Hk92",
+  };
+  return labels[projectCode] ?? projectCode;
+}
+
+function displayProjectNumber(project) {
+  const fallback = projectNumberFallback(project?.project_code);
+  if (project?.project_code === "Hk92" || project?.project_code === "Heu92") return fallback;
+  return project?.project_number || fallback;
+}
+
+function projectNumberFallback(projectCode) {
+  const numbers = {
+    Wewe20: "25-00008",
+    Heu92: "2026-00007",
+    Hk92: "2026-00007",
+  };
+  return numbers[projectCode] ?? null;
 }
 
 function formatCostCategory(value) {

@@ -4,9 +4,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
-from app.services.database import create_document_record, list_documents
+from app.services.database import create_document_record, delete_document, list_documents
 from app.services.extraction import run_mock_extraction
-from app.services.storage import delete_stored_document, store_original_document
+from app.services.storage import delete_stored_document, delete_stored_document_path, store_original_document
 
 router = APIRouter()
 
@@ -47,4 +47,14 @@ def get_documents(
 @router.post("/{document_id}/extract")
 def extract_document(document_id: UUID) -> dict[str, Any]:
     return {"document": run_mock_extraction(document_id)}
+
+
+@router.delete("/{document_id}")
+def remove_document(document_id: UUID) -> dict[str, Any]:
+    document = delete_document(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="document not found")
+
+    delete_stored_document_path(document["storage_path"])
+    return {"document": document, "status": "deleted"}
 

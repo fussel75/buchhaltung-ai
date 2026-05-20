@@ -265,6 +265,12 @@ select {
   gap: 3px;
 }
 
+.document-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .document-card span {
   color: #526154;
 }
@@ -283,6 +289,11 @@ select {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.extraction-panel {
+  display: grid;
+  gap: 14px;
+}
+
 .field {
   display: grid;
   gap: 4px;
@@ -298,10 +309,19 @@ select {
 }
 
 .field strong {
+  display: block;
   color: #17211b;
   overflow-wrap: anywhere;
 }
 
+.project-summary {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.15;
+  max-width: 100%;
+  white-space: pre-line;
+}
 code {
   border-radius: 6px;
   padding: 6px 8px;
@@ -315,6 +335,38 @@ code {
   background: #e2f0e7;
   font-size: 0.85rem;
   font-weight: 800;
+}
+
+.allocation-lines {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #dce5da;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f7faf7;
+}
+
+.allocation-lines h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.allocation-table {
+  display: grid;
+  gap: 8px;
+}
+
+.allocation-row {
+  border: 1px solid #e3e9e1;
+  border-radius: 6px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.allocation-row span {
+  color: #17211b;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .pending-extraction {
@@ -342,6 +394,17 @@ button:disabled {
   opacity: 0.65;
 }
 
+.secondary-button {
+  border: 1px solid #b7c2b8;
+  color: #17211b;
+  background: #ffffff;
+}
+
+.danger-button {
+  border-color: #d7aaa3;
+  color: #7d2020;
+}
+
 .warnings {
   margin: 0;
   border-radius: 8px;
@@ -354,8 +417,10 @@ button:disabled {
   .toolbar,
   .compact-form,
   .document-head,
+  .document-actions,
   .meta-grid,
   .extraction-grid,
+  .allocation-row,
   .pending-extraction,
   .table-row {
     grid-template-columns: 1fr;
@@ -367,6 +432,7 @@ button:disabled {
   }
 
   .document-head,
+  .document-actions,
   .pending-extraction {
     display: grid;
   }

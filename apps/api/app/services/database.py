@@ -278,6 +278,29 @@ def get_document(document_id: UUID) -> dict[str, Any] | None:
             return _serialize_document(row) if row else None
 
 
+def delete_document(document_id: UUID) -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None:
+        return None
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.deleted",
+        document_id=document_id,
+        details={
+            "original_filename": document["original_filename"],
+            "sha256": document["sha256"],
+            "storage_path": document["storage_path"],
+        },
+    )
+
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("delete from documents where id = %s", (document_id,))
+
+    return document
+
+
 def save_document_extraction(
     document_id: UUID,
     tenant_id: str,
