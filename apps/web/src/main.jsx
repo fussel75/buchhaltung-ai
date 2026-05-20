@@ -181,7 +181,7 @@ function LoginPage() {
         </label>
         {error ? <p className="error">{error}</p> : null}
         <button disabled={isSubmitting} type="submit">
-          {isSubmitting ? "Pruefe ..." : "Einloggen"}
+          {isSubmitting ? "Prüfe ..." : "Einloggen"}
         </button>
       </form>
     </main>
@@ -393,7 +393,7 @@ function UploadApp() {
             }}
           >
             <strong>Belege hier ablegen</strong>
-            <span>PDFs, Bilder oder exportierte Rechnungen fuer den ausgewaehlten Mandanten.</span>
+            <span>PDFs, Bilder oder exportierte Rechnungen für den ausgewählten Mandanten.</span>
             <input
               type="file"
               multiple
@@ -408,7 +408,7 @@ function UploadApp() {
           <span>{documents.length} Belege</span>
         </div>
         {documents.length === 0 ? (
-          <p className="empty">Noch keine Belege fuer diesen Mandanten.</p>
+          <p className="empty">Noch keine Belege für diesen Mandanten.</p>
         ) : (
           <div className="queue">
             {documents.map((document) => (
@@ -433,7 +433,7 @@ function UploadApp() {
 
                 <div className="meta-grid">
                   <span>Hash <code>{document.sha256.slice(0, 16)}</code></span>
-                  <span>Groesse {formatSize(document.size_bytes)}</span>
+                  <span>Größe {formatSize(document.size_bytes)}</span>
                 </div>
 
                 {document.extraction ? (
@@ -468,7 +468,7 @@ function UploadApp() {
                       onClick={() => startExtraction(document.id)}
                       disabled={extractingIds.includes(document.id)}
                     >
-                      {extractingIds.includes(document.id) ? "Laeuft..." : "Extraktion starten"}
+                      {extractingIds.includes(document.id) ? "Läuft..." : "Extraktion starten"}
                     </button>
                   </div>
                 )}
@@ -654,6 +654,26 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     setMessage("Zuordnung angelegt.");
   }
 
+  async function updateAssignment(assignment, payload) {
+    const response = await apiFetch(`/masterdata/assignment-units/${assignment.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: assignment.label,
+        kind: assignment.kind,
+        revenue_relevant: assignment.revenue_relevant,
+        aliases: assignment.aliases ?? [],
+        is_active: assignment.is_active,
+        ...payload,
+      }),
+    });
+    if (!response.ok) {
+      setMessage(`Zuordnung konnte nicht aktualisiert werden: ${response.status}`);
+      return;
+    }
+    await loadMasterdata();
+  }
+
   async function saveTenantProfile(event) {
     event.preventDefault();
     const response = await apiFetch(`/masterdata/tenant-profile?tenant_id=${encodeURIComponent(tenantId)}`, {
@@ -686,100 +706,224 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     setMessage("Lieferantenregel angelegt.");
   }
 
+  async function updateSupplierRule(rule, payload) {
+    const response = await apiFetch(`/masterdata/supplier-rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        match_text: rule.match_text,
+        supplier_name: rule.supplier_name,
+        customer_number: rule.customer_number,
+        default_cost_category: rule.default_cost_category,
+        default_assignment_code: rule.default_assignment_code,
+        is_active: rule.is_active,
+        ...payload,
+      }),
+    });
+    if (!response.ok) {
+      setMessage(`Lieferantenregel konnte nicht aktualisiert werden: ${response.status}`);
+      return;
+    }
+    await loadMasterdata();
+  }
+
   return (
     <section className="admin-panel">
       <div className="section-header">
-        <h2>Stammdaten</h2>
-        <span>{tenantId}</span>
+        <div>
+          <p className="eyebrow">Mandant</p>
+          <h2>Stammdaten</h2>
+        </div>
+        <span className="tenant-chip">{tenantId}</span>
       </div>
       {message ? <p className="notice">{message}</p> : null}
 
-      <h3>Mandantenprofil</h3>
-      <form className="compact-form profile-form" onSubmit={saveTenantProfile}>
-        <input placeholder="Mandantenname" value={profileForm.display_name || ""} onChange={(event) => setProfileForm({ ...profileForm, display_name: event.target.value })} required />
-        <select
-          value={profileForm.industry || "general"}
-          onChange={(event) => {
-            const nextTemplate = defaultTenantProfile(event.target.value);
-            setProfileForm({ ...profileForm, ...nextTemplate, display_name: profileForm.display_name || tenantId });
-          }}
-        >
-          <option value="construction">Baubranche</option>
-          <option value="fitness_studio">Sportstudio</option>
-          <option value="container_transport">Container/Transport</option>
-          <option value="general">Allgemein</option>
-        </select>
-        <input placeholder="Bezeichnung Singular" value={profileForm.assignment_label_singular || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_singular: event.target.value })} required />
-        <input placeholder="Bezeichnung Plural" value={profileForm.assignment_label_plural || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_plural: event.target.value })} required />
-        <input placeholder="Spaltenname" value={profileForm.assignment_code_label || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_label: event.target.value })} required />
-        <input placeholder="Kuerzel, z.B. BV" value={profileForm.assignment_code_prefix || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_prefix: event.target.value })} />
-        <label className="inline-check">
-          <input type="checkbox" checked={profileForm.allow_multiple_assignments ?? true} onChange={(event) => setProfileForm({ ...profileForm, allow_multiple_assignments: event.target.checked })} />
-          mehrere pro Beleg
-        </label>
-        <button type="submit">Profil speichern</button>
-      </form>
-
-      <h3>{tenantProfile.assignment_label_plural}</h3>
-      <form className="compact-form" onSubmit={createAssignment}>
-        <input placeholder="Code" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
-        <input placeholder="Name" value={assignmentForm.label} onChange={(event) => setAssignmentForm({ ...assignmentForm, label: event.target.value })} required />
-        <select value={assignmentForm.kind} onChange={(event) => setAssignmentForm({ ...assignmentForm, kind: event.target.value })}>
-          <option value="construction_project">Bauvorhaben</option>
-          <option value="location">Standort</option>
-          <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
-          <option value="cost_object">Kostenobjekt</option>
-          <option value="vehicle">Fahrzeug</option>
-          <option value="subscription">Abo/Vertrag</option>
-          <option value="department">Bereich</option>
-        </select>
-        <input placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
-        <label className="inline-check">
-          <input type="checkbox" checked={assignmentForm.revenue_relevant} onChange={(event) => setAssignmentForm({ ...assignmentForm, revenue_relevant: event.target.checked })} />
-          umsatzrelevant
-        </label>
-        <button type="submit">{tenantProfile.assignment_label_singular} anlegen</button>
-      </form>
-      <div className="table-list">
-        {assignmentUnits.map((assignment) => (
-          <div className="table-row" key={assignment.id}>
-            <strong>{assignment.code}</strong>
-            <span>{assignment.label}</span>
-            <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
-            <span>{assignment.revenue_relevant ? "umsatzrelevant" : "intern/allgemein"}</span>
+      <div className="admin-grid">
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Branche und Begrifflichkeit</p>
+              <h3>Mandantenprofil</h3>
+            </div>
+            <StatusPill value={industryLabel(profileForm.industry)} />
           </div>
-        ))}
-      </div>
+          <form className="form-grid profile-form" onSubmit={saveTenantProfile}>
+            <FormField label="Mandantenname">
+              <input placeholder="Mandantenname" value={profileForm.display_name || ""} onChange={(event) => setProfileForm({ ...profileForm, display_name: event.target.value })} required />
+            </FormField>
+            <FormField label="Branche">
+              <select
+                value={profileForm.industry || "general"}
+                onChange={(event) => {
+                  const nextTemplate = defaultTenantProfile(event.target.value);
+                  setProfileForm({ ...profileForm, ...nextTemplate, display_name: profileForm.display_name || tenantId });
+                }}
+              >
+                <option value="construction">Baubranche</option>
+                <option value="fitness_studio">Sportstudio</option>
+                <option value="container_transport">Container/Transport</option>
+                <option value="general">Allgemein</option>
+              </select>
+            </FormField>
+            <FormField label="Einzahl">
+              <input placeholder="Bauvorhaben" value={profileForm.assignment_label_singular || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_singular: event.target.value })} required />
+            </FormField>
+            <FormField label="Mehrzahl">
+              <input placeholder="Bauvorhaben" value={profileForm.assignment_label_plural || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_plural: event.target.value })} required />
+            </FormField>
+            <FormField label="Spaltenname">
+              <input placeholder="Zuordnung" value={profileForm.assignment_code_label || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_label: event.target.value })} required />
+            </FormField>
+            <FormField label="Kürzel">
+              <input placeholder="z.B. BV" value={profileForm.assignment_code_prefix || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_code_prefix: event.target.value })} />
+            </FormField>
+            <label className="toggle-field">
+              <input type="checkbox" checked={profileForm.allow_multiple_assignments ?? true} onChange={(event) => setProfileForm({ ...profileForm, allow_multiple_assignments: event.target.checked })} />
+              <span>Mehrere Zuordnungen pro Beleg erlauben</span>
+            </label>
+            <button type="submit">Profil speichern</button>
+          </form>
+        </section>
 
-      <h3>Lieferantenregeln</h3>
-      <form className="compact-form" onSubmit={createSupplierRule}>
-        <input placeholder="Erkennungstext" value={supplierForm.match_text} onChange={(event) => setSupplierForm({ ...supplierForm, match_text: event.target.value })} required />
-        <input placeholder="Lieferantenname" value={supplierForm.supplier_name} onChange={(event) => setSupplierForm({ ...supplierForm, supplier_name: event.target.value })} required />
-        <input placeholder="Unsere Kunden-Nr." value={supplierForm.customer_number} onChange={(event) => setSupplierForm({ ...supplierForm, customer_number: event.target.value })} />
-        <select value={supplierForm.default_cost_category} onChange={(event) => setSupplierForm({ ...supplierForm, default_cost_category: event.target.value })}>
-          <option value="material">Material</option>
-          <option value="subcontractor">Fremdleistung</option>
-          <option value="fuel_vehicle">Fahrzeug/Tanken</option>
-          <option value="software_subscription">Software/Abo</option>
-          <option value="security_subscription">Ueberwachung/Abo</option>
-          <option value="general_overhead">Sonstige Gemeinkosten</option>
-        </select>
-        <input placeholder={`${tenantProfile.assignment_code_label} optional`} value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
-        <button type="submit">Regel anlegen</button>
-      </form>
-      <div className="table-list">
-        {supplierRules.map((rule) => (
-          <div className="table-row" key={rule.id}>
-            <strong>{rule.supplier_name}</strong>
-            <span>{rule.match_text}</span>
-            <span>{rule.customer_number || "-"}</span>
-            <span>{formatCostCategory(rule.default_cost_category)}</span>
-            <span>{rule.default_assignment_code || "-"}</span>
+        <section className="admin-card">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Kosten- und Umsatzzuordnung</p>
+              <h3>{tenantProfile.assignment_label_plural}</h3>
+            </div>
+            <StatusPill value={`${assignmentUnits.length} Einträge`} />
           </div>
-        ))}
+          <form className="form-grid" onSubmit={createAssignment}>
+            <FormField label="Code">
+              <input placeholder="Wewe20" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
+            </FormField>
+            <FormField label="Name">
+              <input placeholder="Weseler Weg 20" value={assignmentForm.label} onChange={(event) => setAssignmentForm({ ...assignmentForm, label: event.target.value })} required />
+            </FormField>
+            <FormField label="Art">
+              <select value={assignmentForm.kind} onChange={(event) => setAssignmentForm({ ...assignmentForm, kind: event.target.value })}>
+                <option value="construction_project">Bauvorhaben</option>
+                <option value="location">Standort</option>
+                <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+                <option value="cost_object">Kostenobjekt</option>
+                <option value="vehicle">Fahrzeug</option>
+                <option value="subscription">Abo/Vertrag</option>
+                <option value="department">Bereich</option>
+              </select>
+            </FormField>
+            <FormField label="Aliase">
+              <input placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
+            </FormField>
+            <label className="toggle-field">
+              <input type="checkbox" checked={assignmentForm.revenue_relevant} onChange={(event) => setAssignmentForm({ ...assignmentForm, revenue_relevant: event.target.checked })} />
+              <span>umsatzrelevant</span>
+            </label>
+            <button type="submit">{tenantProfile.assignment_label_singular} anlegen</button>
+          </form>
+          <div className="data-table assignment-table">
+            <div className="data-row data-head">
+              <span>Code</span>
+              <span>Name</span>
+              <span>Art</span>
+              <span>Status</span>
+              <span>Aktiv</span>
+            </div>
+            {assignmentUnits.map((assignment) => (
+              <div className="data-row" key={assignment.id}>
+                <strong>{formatAssignmentCode(assignment.code, assignment.kind, tenantProfile)}</strong>
+                <span>{assignment.label}</span>
+                <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
+                <StatusPill value={assignment.revenue_relevant ? "umsatzrelevant" : "intern"} tone={assignment.revenue_relevant ? "green" : "gray"} />
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={assignment.is_active}
+                    onChange={(event) => updateAssignment(assignment, { is_active: event.target.checked })}
+                  />
+                  <span>{assignment.is_active ? "aktiv" : "inaktiv"}</span>
+                </label>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="admin-card">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Erkennung und Defaults</p>
+              <h3>Lieferantenregeln</h3>
+            </div>
+            <StatusPill value={`${supplierRules.length} Regeln`} />
+          </div>
+          <form className="form-grid supplier-form" onSubmit={createSupplierRule}>
+            <FormField label="Erkennungstext">
+              <input placeholder="Holz Junge" value={supplierForm.match_text} onChange={(event) => setSupplierForm({ ...supplierForm, match_text: event.target.value })} required />
+            </FormField>
+            <FormField label="Lieferant">
+              <input placeholder="Holz Junge GmbH" value={supplierForm.supplier_name} onChange={(event) => setSupplierForm({ ...supplierForm, supplier_name: event.target.value })} required />
+            </FormField>
+            <FormField label="Unsere Kunden-Nr.">
+              <input placeholder="109324" value={supplierForm.customer_number} onChange={(event) => setSupplierForm({ ...supplierForm, customer_number: event.target.value })} />
+            </FormField>
+            <FormField label="Kostenart">
+              <select value={supplierForm.default_cost_category} onChange={(event) => setSupplierForm({ ...supplierForm, default_cost_category: event.target.value })}>
+                <option value="material">Material</option>
+                <option value="subcontractor">Fremdleistung</option>
+                <option value="fuel_vehicle">Fahrzeug/Tanken</option>
+                <option value="software_subscription">Software/Abo</option>
+                <option value="security_subscription">Überwachung/Abo</option>
+                <option value="general_overhead">Sonstige Gemeinkosten</option>
+              </select>
+            </FormField>
+            <FormField label={tenantProfile.assignment_code_label}>
+              <input placeholder="optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
+            </FormField>
+            <button type="submit">Regel anlegen</button>
+          </form>
+          <div className="data-table supplier-table">
+            <div className="data-row data-head">
+              <span>Lieferant</span>
+              <span>Erkennung</span>
+              <span>Kunden-Nr.</span>
+              <span>Kostenart</span>
+              <span>{tenantProfile.assignment_code_label}</span>
+              <span>Aktiv</span>
+            </div>
+            {supplierRules.map((rule) => (
+              <div className="data-row" key={rule.id}>
+                <strong>{rule.supplier_name}</strong>
+                <span>{rule.match_text}</span>
+                <span>{rule.customer_number || "-"}</span>
+                <span>{formatCostCategory(rule.default_cost_category)}</span>
+                <span>{rule.default_assignment_code || "-"}</span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={rule.is_active}
+                    onChange={(event) => updateSupplierRule(rule, { is_active: event.target.checked })}
+                  />
+                  <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
+                </label>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </section>
   );
+}
+
+function FormField({ label, children }) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function StatusPill({ value, tone = "green" }) {
+  return <span className={`status-pill ${tone}`}>{value}</span>;
 }
 
 function Field({ label, value }) {
@@ -830,7 +974,7 @@ function formatSize(sizeBytes) {
 
 function formatStatus(status) {
   const labels = {
-    review_pending: "Pruefen",
+    review_pending: "Prüfen",
     extracted: "Extrahiert",
   };
   return labels[status] ?? status;
@@ -937,9 +1081,19 @@ function formatCostCategory(value) {
     fuel_vehicle: "Fahrzeug/Tanken",
     general_overhead: "Sonstige Gemeinkosten",
     material: "Material",
-    security_subscription: "Ueberwachung/Abo",
+    security_subscription: "Überwachung/Abo",
     software_subscription: "Software/Abo",
     subcontractor: "Fremdleistung",
+  };
+  return labels[value] ?? value;
+}
+
+function industryLabel(value) {
+  const labels = {
+    construction: "Baubranche",
+    container_transport: "Container/Transport",
+    fitness_studio: "Sportstudio",
+    general: "Allgemein",
   };
   return labels[value] ?? value;
 }
@@ -1002,7 +1156,7 @@ function defaultTenantProfile(industry) {
       industry: "container_transport",
       display_name: "",
       assignment_label_singular: "Bauvorhaben / Stellplatz",
-      assignment_label_plural: "Bauvorhaben / Stellplaetze",
+      assignment_label_plural: "Bauvorhaben / Stellplätze",
       assignment_code_label: "Bauvorhaben / Stellplatz",
       assignment_code_prefix: "",
       default_assignment_kind: "construction_or_dropoff_site",
