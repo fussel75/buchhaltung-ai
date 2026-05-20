@@ -468,7 +468,7 @@ function UploadApp() {
         if (!response.ok) {
           throw new Error(`Download fehlgeschlagen: ${response.status}`);
         }
-        await downloadResponse(response, document.normalized_filename || document.original_filename);
+        await downloadResponse(response, safeVisibleFilename(document.normalized_filename || document.original_filename));
       } catch (downloadError) {
         setError(downloadError.message);
       } finally {
@@ -649,9 +649,9 @@ function UploadApp() {
                       />
                       <span>Auswählen</span>
                     </label>
-                    <div>
+                    <div className="document-file-names">
                       <strong>{document.original_filename}</strong>
-                      <span>{document.normalized_filename || document.tenant_id}</span>
+                      <span>{safeVisibleFilename(document.normalized_filename || document.tenant_id)}</span>
                     </div>
                   </div>
                   <div className="document-actions">
@@ -1464,6 +1464,14 @@ function filenameFromDisposition(disposition) {
   if (utfMatch) return decodeURIComponent(utfMatch[1]);
   const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
   return plainMatch?.[1] || null;
+}
+
+function safeVisibleFilename(filename) {
+  return String(filename || "beleg.pdf")
+    .replace(/[<>:"/\\|?*]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.+$/, "") || "beleg.pdf";
 }
 
 function formatSize(sizeBytes) {

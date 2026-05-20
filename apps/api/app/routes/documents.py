@@ -86,11 +86,17 @@ def _normalize_tenant_id(tenant_id: str) -> str:
 
 
 def _download_filename(document: dict[str, Any]) -> str:
-    return (
+    return _safe_visible_filename(
         document.get("normalized_filename")
         or document.get("original_filename")
         or f"{document['id']}.pdf"
     )
+
+
+def _safe_visible_filename(filename: str) -> str:
+    cleaned = sub(r'[<>:"/\\|?*]+', " ", filename)
+    cleaned = sub(r"\s+", " ", cleaned).strip().rstrip(".")
+    return cleaned or "beleg.pdf"
 
 
 def _safe_archive_name(filename: str, fallback_suffix: str = ".pdf") -> str:

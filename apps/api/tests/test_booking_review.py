@@ -4,7 +4,8 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from app.routes.documents import BookingSuggestionUpdate
+from app.services.extraction import _normalized_invoice_filename
+from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.services.database import _booking_suggestions_from_extraction
 
 
@@ -101,3 +102,39 @@ class BookingSuggestionTests(TestCase):
                 tax_amount="19.00",
                 gross_amount="119.00",
             )
+
+    def test_normalized_invoice_filename_is_windows_safe(self):
+        filename = _normalized_invoice_filename(
+            invoice_number="RE1574023",
+            assignment=None,
+            assignment_type="assignment_split",
+            tenant_profile={
+                "assignment_label_singular": "Bauvorhaben",
+                "assignment_label_plural": "BV",
+                "assignment_code_prefix": "BV",
+            },
+            supplier_name="Luechau Baustoffe GmbH",
+            product_name="PE-Folie 200 my / Baustoffe",
+            invoice_date="2026-05-07",
+        )
+
+        self.assertEqual(
+            filename,
+            "ERg RE1574023, BV aufgeteilt, Luechau Baustoffe GmbH, PE-Folie 200 my Baustoffe, 2026-05-07.pdf",
+        )
+        self.assertFalse(any(character in filename for character in '<>:"/\\|?*'))
+
+    def test_download_filename_is_windows_safe_for_existing_rows(self):
+        filename = _download_filename(
+            {
+                "id": str(uuid4()),
+                "normalized_filename": "ERg RE1574023, BV aufgeteilt, Luechau Baustoffe GmbH, PE-Folie 200 my / Baustoffe, 2026-05-07.pdf",
+                "original_filename": "RE1574023.pdf",
+            }
+        )
+
+        self.assertEqual(
+            filename,
+            "ERg RE1574023, BV aufgeteilt, Luechau Baustoffe GmbH, PE-Folie 200 my Baustoffe, 2026-05-07.pdf",
+        )
+        self.assertFalse(any(character in filename for character in '<>:"/\\|?*'))

@@ -484,6 +484,23 @@ button:disabled {
   min-width: 0;
 }
 
+.document-file-names {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.document-file-names strong,
+.document-file-names span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.document-file-names span {
+  line-height: 1.45;
+}
+
 .document-head strong {
   overflow-wrap: anywhere;
 }

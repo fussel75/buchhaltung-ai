@@ -795,7 +795,13 @@ def _normalized_invoice_filename(
         product_name,
         invoice_date or "ohne Datum",
     ]
-    return ", ".join(parts) + ".pdf"
+    return ", ".join(_filename_part(part) for part in parts) + ".pdf"
+
+
+def _filename_part(value: str) -> str:
+    cleaned = sub(r'[<>:"/\\|?*]+', " ", value)
+    cleaned = sub(r"\s+", " ", cleaned).strip().rstrip(".")
+    return cleaned or "-"
 
 
 def _filename_assignment_label(assignment: dict | None, assignment_type: str, tenant_profile: dict) -> str:
