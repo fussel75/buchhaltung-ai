@@ -18,6 +18,7 @@ from app.services.database import (
     list_documents,
     list_documents_for_month,
     prepare_document_review,
+    reopen_document_review,
     update_booking_suggestion,
 )
 from app.services.extraction import run_mock_extraction
@@ -231,6 +232,16 @@ def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
     document = approve_document_review(document_id, actor=actor)
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
+    return {"document": document}
+
+
+@router.post("/{document_id}/reopen-review")
+def reopen_review(document_id: UUID, request: Request) -> dict[str, Any]:
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("email") or "system"
+    document = reopen_document_review(document_id, actor=actor)
+    if document is None:
+        raise HTTPException(status_code=404, detail="approved review not found")
     return {"document": document}
 
 

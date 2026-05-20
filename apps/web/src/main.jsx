@@ -418,6 +418,38 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const reopenReview = useCallback(
+    async (document) => {
+      const confirmed = window.confirm(
+        `Freigabe für "${document.original_filename}" wieder zur Bearbeitung öffnen?`,
+      );
+      if (!confirmed) return;
+
+      setError("");
+      setNotice("");
+      setApprovingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/reopen-review`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Bearbeitung konnte nicht geöffnet werden: ${response.status}`);
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Bearbeitung wieder geöffnet: ${result.document.original_filename}`);
+      } catch (reopenError) {
+        setError(reopenError.message);
+      } finally {
+        setApprovingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   const saveBookingSuggestion = useCallback(
     async (document, suggestion, values) => {
       setError("");
@@ -683,6 +715,16 @@ function UploadApp() {
                         disabled={approvingIds.includes(document.id)}
                       >
                         {approvingIds.includes(document.id) ? "Gibt frei..." : "Final freigeben"}
+                      </button>
+                    ) : null}
+                    {document.booking_suggestions?.length && document.status === "review_approved" ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => reopenReview(document)}
+                        disabled={approvingIds.includes(document.id)}
+                      >
+                        {approvingIds.includes(document.id) ? "Öffnet..." : "Bearbeitung öffnen"}
                       </button>
                     ) : null}
                     <button
@@ -1300,14 +1342,14 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
       </div>
       <div className="booking-table">
         <div className="booking-edit-row booking-head">
-          <span>Zeile</span>
+          <span>Nr.</span>
           <span>Beschreibung</span>
           <span>Zuordnung</span>
           <span>Kostenart</span>
           <span>Netto</span>
           <span>USt</span>
           <span>Brutto</span>
-          <span>Aktion</span>
+          <span>Status</span>
         </div>
         {suggestions.map((suggestion) => {
           const draft = drafts[suggestion.id] ?? bookingSuggestionDraft(suggestion);

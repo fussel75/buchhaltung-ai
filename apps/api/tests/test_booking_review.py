@@ -1,12 +1,42 @@
 from decimal import Decimal
 from unittest import TestCase
+from unittest.mock import patch
 from uuid import uuid4
 
 from pydantic import ValidationError
 
+from app.services import database as database_service
 from app.services.extraction import _normalized_invoice_filename
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.services.database import _booking_suggestions_from_extraction
+
+
+class RecordingCursor:
+    def __init__(self):
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, statement, params=None):
+        self.statements.append((" ".join(statement.split()), params))
+
+
+class RecordingConnection:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def cursor(self):
+        return self._cursor
 
 
 class BookingSuggestionTests(TestCase):
@@ -138,3 +168,33 @@ class BookingSuggestionTests(TestCase):
             "ERg RE1574023, BV aufgeteilt, Luechau Baustoffe GmbH, PE-Folie 200 my Baustoffe, 2026-05-07.pdf",
         )
         self.assertFalse(any(character in filename for character in '<>:"/\\|?*'))
+
+    def test_reopen_approved_review_unlocks_existing_suggestions(self):
+        document_id = uuid4()
+        suggestion_id = uuid4()
+        approved_document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_approved",
+            "extraction": {"invoice_number": "RE1574023"},
+            "booking_suggestions": [{"id": str(suggestion_id), "status": "approved"}],
+        }
+        reopened_document = {
+            **approved_document,
+            "status": "review_ready",
+            "booking_suggestions": [{"id": str(suggestion_id), "status": "reviewed"}],
+        }
+        cursor = RecordingCursor()
+
+        with (
+            patch.object(database_service, "get_document", side_effect=[approved_document, reopened_document]),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "insert_audit_event") as audit_event,
+        ):
+            result = database_service.reopen_document_review(document_id, actor="admin@example.com")
+
+        self.assertEqual(result["status"], "review_ready")
+        self.assertTrue(any("status = 'reviewed'" in statement for statement, _ in cursor.statements))
+        self.assertTrue(any("status = 'review_ready'" in statement for statement, _ in cursor.statements))
+        audit_event.assert_called_once()
+        self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.review_reopened")

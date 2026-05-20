@@ -544,6 +544,41 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
     return get_document(document_id)
 
 
+def reopen_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None or not document.get("extraction") or not document.get("booking_suggestions"):
+        return None
+
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_booking_suggestions
+                set status = 'reviewed', updated_at = %s
+                where document_id = %s and status = 'approved'
+                """,
+                (now, document_id),
+            )
+            cursor.execute(
+                """
+                update documents
+                set status = 'review_ready', updated_at = %s
+                where id = %s
+                """,
+                (now, document_id),
+            )
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.review_reopened",
+        document_id=document_id,
+        actor=actor,
+        details={"suggestion_count": len(document.get("booking_suggestions") or [])},
+    )
+    return get_document(document_id)
+
+
 def prepare_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
     document = get_document(document_id)
     if document is None or not document.get("extraction"):
