@@ -89,9 +89,10 @@ Die Vorschlagszeilen sind vor der finalen Freigabe editierbar und werden bei fin
 Die Extraktionsreihenfolge ist:
 
 1. Eingebettete E-Rechnungsdaten lesen, z.B. `xrechnung.xml`, ZUGFeRD/Factur-X.
-2. Fehlende Kontextdaten aus dem PDF-Text ergaenzen, z.B. Bauvorhaben aus Lieferanschrift.
-3. Wenn keine strukturierten Daten vorhanden sind, PDF-Textregeln verwenden.
-4. OCR erst als spaeterer Fallback fuer nicht textlesbare Scans.
+2. Eigenstaendige XML-Belege wie UBL/XRechnung direkt strukturiert auslesen.
+3. Fehlende Kontextdaten aus dem PDF-Text ergaenzen, z.B. Bauvorhaben aus Lieferanschrift.
+4. Wenn keine strukturierten Daten vorhanden sind, PDF-Textregeln verwenden.
+5. OCR erst als spaeterer Fallback fuer nicht textlesbare Scans.
 
 ## Mandanten-Stammdaten
 

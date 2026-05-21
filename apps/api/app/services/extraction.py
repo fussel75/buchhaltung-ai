@@ -41,14 +41,32 @@ def run_mock_extraction(document_id: UUID) -> dict:
 
 
 def _build_extraction_result(document: dict) -> dict:
-    if document["content_type"] != "application/pdf":
-        return _build_mock_result(document)
+    if _is_standalone_xml_document(document):
+        structured = _build_standalone_xml_result(document)
+        return structured or _build_mock_result(document)
 
-    structured = _build_embedded_xml_result(document)
-    if structured:
-        return structured
+    if document["content_type"] == "application/pdf":
+        structured = _build_embedded_xml_result(document)
+        if structured:
+            return structured
 
-    return _build_pdf_text_result(document)
+        return _build_pdf_text_result(document)
+
+    return _build_mock_result(document)
+
+
+def _is_standalone_xml_document(document: dict) -> bool:
+    return document["content_type"] in {"application/xml", "text/xml"} or Path(document["original_filename"]).suffix.lower() == ".xml"
+
+
+def _structured_source(document: dict) -> str:
+    return "standalone_xml" if _is_standalone_xml_document(document) else "embedded_xml"
+
+
+def _normalized_structured_filename(filename: str | None, document: dict) -> str | None:
+    if not filename or not _is_standalone_xml_document(document):
+        return filename
+    return f"{Path(filename).stem}.xml"
 
 
 def _build_embedded_xml_result(document: dict) -> dict | None:
@@ -61,10 +79,38 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
 
     attachment_name, xml_content = xml_attachment
     text = _extract_pdf_text(document["storage_path"])
+    return _build_structured_xml_result(document, attachment_name, xml_content, text)
+
+
+def _build_standalone_xml_result(document: dict) -> dict | None:
+    xml_path = get_settings().storage_root / document["storage_path"]
+    return _build_structured_xml_result(document, document["original_filename"], xml_path.read_bytes(), "")
+
+
+def _build_structured_xml_result(
+    document: dict,
+    attachment_name: str,
+    xml_content: bytes,
+    text: str,
+) -> dict | None:
     try:
         root = ElementTree.fromstring(xml_content)
     except ElementTree.ParseError:
         return None
+
+    if root.tag.endswith("CrossIndustryInvoice"):
+        return _build_cii_xml_result(document, root, attachment_name, text)
+    if _local_name(root.tag) in {"Invoice", "CreditNote"}:
+        return _build_ubl_xml_result(document, root, attachment_name, text)
+    return None
+
+
+def _build_cii_xml_result(
+    document: dict,
+    root: ElementTree.Element,
+    attachment_name: str,
+    text: str,
+) -> dict | None:
     if not root.tag.endswith("CrossIndustryInvoice"):
         return None
     ns = {
@@ -161,6 +207,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         product_name=_filename_product_name(product_name or "Eingangsrechnung"),
         invoice_date=invoice_date,
     )
+    normalized_filename = _normalized_structured_filename(normalized_filename, document)
 
     missing = [
         label
@@ -232,8 +279,147 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         "confidence": Decimal("1.00") if not missing else Decimal("0.90"),
         "warnings": warnings,
         "normalized_filename": normalized_filename,
-        "source": "embedded_xml",
+        "source": _structured_source(document),
         "structured_attachment": attachment_name,
+        "xml_format": "cii",
+    }
+
+
+def _build_ubl_xml_result(
+    document: dict,
+    root: ElementTree.Element,
+    attachment_name: str,
+    text: str,
+) -> dict | None:
+    ns = {
+        "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+        "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+    }
+    root_name = _local_name(root.tag)
+    line_tag = "CreditNoteLine" if root_name == "CreditNote" else "InvoiceLine"
+    monetary_total_tag = "RequestedMonetaryTotal" if root_name == "CreditNote" else "LegalMonetaryTotal"
+
+    invoice_number = _xml_text(root, "./cbc:ID", ns)
+    customer_number = _xml_text(root, "./cbc:BuyerReference", ns)
+    invoice_date = _xml_text(root, "./cbc:IssueDate", ns)
+    due_date = _xml_text(root, "./cbc:DueDate", ns)
+    supplier_name = _normalize_supplier_name(
+        _xml_text(root, ".//cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:RegistrationName", ns)
+        or _xml_text(root, ".//cac:AccountingSupplierParty/cac:Party/cac:PartyName/cbc:Name", ns)
+    )
+    product_name = _clean_product_name(
+        _xml_text(root, f".//cac:{line_tag}[1]/cac:Item/cbc:Name", ns)
+        or _xml_text(root, f".//cac:{line_tag}[1]/cbc:Note", ns)
+    )
+    currency = _xml_text(root, "./cbc:DocumentCurrencyCode", ns) or "EUR"
+    net_amount = _xml_decimal(
+        root,
+        f".//cac:{monetary_total_tag}/cbc:LineExtensionAmount",
+        ns,
+    ) or _xml_decimal(root, f".//cac:{monetary_total_tag}/cbc:TaxExclusiveAmount", ns)
+    tax_amount = _xml_decimal(root, ".//cac:TaxTotal/cbc:TaxAmount", ns)
+    gross_amount = _xml_decimal(root, f".//cac:{monetary_total_tag}/cbc:TaxInclusiveAmount", ns)
+    due_payable_amount = _xml_decimal(root, f".//cac:{monetary_total_tag}/cbc:PayableAmount", ns)
+    payment_description = _xml_text(root, ".//cac:PaymentTerms/cbc:Note", ns)
+    discount_base = _description_decimal(payment_description, "BASISBETRAG")
+    discount_percent = _description_decimal(payment_description, "PROZENT")
+    discount_amount = None
+    if discount_base is not None and discount_percent is not None:
+        discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
+    is_credit_note = root_name == "CreditNote" or (gross_amount is not None and gross_amount < 0)
+    discount_amount = _signed_discount_amount(discount_amount, gross_amount)
+
+    delivery_address = _ubl_delivery_address(root, ns) or _find_delivery_address(text)
+    supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
+    if supplier_rule:
+        supplier_name = supplier_rule["supplier_name"]
+        customer_number = supplier_rule["customer_number"] or customer_number
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    assignment_type = _assignment_type(delivery_address, assignment)
+    cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
+    cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
+    normalized_filename = _normalized_invoice_filename(
+        invoice_number=invoice_number,
+        assignment=assignment,
+        assignment_type=assignment_type,
+        tenant_profile=tenant_profile,
+        supplier_name=supplier_name or _supplier_from_filename(Path(document["original_filename"]).stem),
+        product_name=_filename_product_name(product_name or "E-Rechnung"),
+        invoice_date=invoice_date,
+    )
+
+    normalized_filename = _normalized_structured_filename(normalized_filename, document)
+
+    missing = [
+        label
+        for label, value in {
+            "Rechnungsnummer": invoice_number,
+            "Datum": invoice_date,
+            "Lieferant": supplier_name,
+            "Netto": net_amount,
+            "MwSt": tax_amount,
+            "Gesamtbetrag": gross_amount,
+        }.items()
+        if not value
+    ]
+    warnings = []
+    if delivery_address and not assignment:
+        warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
+    if missing:
+        warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
+
+    return {
+        "supplier_name": supplier_name,
+        "invoice_number": invoice_number,
+        "customer_number": customer_number,
+        "invoice_date": invoice_date,
+        "due_date": due_date,
+        "discount_due_date": None,
+        "service_period": invoice_date[:7] if invoice_date else None,
+        "delivery_address": delivery_address,
+        "assignment_code": assignment["code"] if assignment else None,
+        "assignment_label": assignment["label"] if assignment else None,
+        "assignment_kind": assignment["kind"] if assignment else None,
+        "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
+        "project_code": _legacy_project_code(assignment),
+        "project_number": _project_number(assignment),
+        "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
+        "assignment_type": assignment_type,
+        "cost_category": cost_category,
+        "product_name": product_name,
+        "net_amount": net_amount,
+        "tax_amount": tax_amount,
+        "gross_amount": gross_amount,
+        "due_payable_amount": due_payable_amount,
+        "discounted_payable_amount": None,
+        "is_credit_note": is_credit_note,
+        "document_type": "credit_note" if is_credit_note else "incoming_invoice",
+        "discount_base": discount_base,
+        "xml_discount_base": discount_base,
+        "discount_percent": discount_percent,
+        "discount_amount": discount_amount,
+        "payment_terms": _payment_terms(
+            gross_amount=due_payable_amount or gross_amount,
+            due_date=due_date,
+            discount_due_date=None,
+            discount_base=discount_base,
+            discount_percent=discount_percent,
+            discount_amount=discount_amount,
+            discounted_payable_amount=None,
+            is_credit_note=is_credit_note,
+        ),
+        "currency": currency,
+        "confidence": Decimal("1.00") if not missing else Decimal("0.90"),
+        "warnings": warnings,
+        "normalized_filename": normalized_filename,
+        "source": _structured_source(document),
+        "structured_attachment": attachment_name,
+        "xml_format": "ubl",
     }
 
 
@@ -458,6 +644,10 @@ def _xml_text(root: ElementTree.Element, path: str, ns: dict[str, str]) -> str |
     return value or None
 
 
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
 def _xml_decimal(root: ElementTree.Element, path: str, ns: dict[str, str]) -> Decimal | None:
     value = _xml_text(root, path, ns)
     return Decimal(value).quantize(Decimal("0.01")) if value else None
@@ -499,6 +689,17 @@ def _xml_delivery_address(root: ElementTree.Element, ns: dict[str, str]) -> str 
     )
     if name and postcode and city:
         return f"{name.strip()}, {postcode} {city}"
+    return None
+
+
+def _ubl_delivery_address(root: ElementTree.Element, ns: dict[str, str]) -> str | None:
+    street = _xml_text(root, ".//cac:Delivery/cac:DeliveryLocation/cac:Address/cbc:StreetName", ns)
+    building = _xml_text(root, ".//cac:Delivery/cac:DeliveryLocation/cac:Address/cbc:BuildingNumber", ns)
+    postcode = _xml_text(root, ".//cac:Delivery/cac:DeliveryLocation/cac:Address/cbc:PostalZone", ns)
+    city = _xml_text(root, ".//cac:Delivery/cac:DeliveryLocation/cac:Address/cbc:CityName", ns)
+    if street and postcode and city:
+        street_line = f"{street} {building}".strip() if building else street
+        return f"{street_line}, {postcode} {city}"
     return None
 
 
