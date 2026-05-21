@@ -111,6 +111,33 @@ def init_database() -> None:
             )
             cursor.execute(
                 """
+                create table if not exists document_payment_decisions (
+                    id uuid primary key,
+                    document_id uuid not null references documents(id) on delete cascade,
+                    tenant_id text not null,
+                    payment_type text not null,
+                    label text not null,
+                    due_date date,
+                    amount numeric(12, 2),
+                    discount_base numeric(12, 2),
+                    discount_percent numeric(5, 2),
+                    discount_amount numeric(12, 2),
+                    currency text not null default 'EUR',
+                    status text not null default 'selected',
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null,
+                    unique (document_id)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists document_payment_decisions_document_idx
+                    on document_payment_decisions (document_id)
+                """
+            )
+            cursor.execute(
+                """
                 create index if not exists audit_events_tenant_created_idx
                     on audit_events (tenant_id, created_at desc)
                 """
@@ -304,9 +331,11 @@ def list_documents(tenant_id: str) -> list[dict[str, Any]]:
                             where s.document_id = d.id
                         ),
                         '[]'::jsonb
-                    ) as booking_suggestions
+                    ) as booking_suggestions,
+                    to_jsonb(pd.*) as payment_decision
                 from documents d
                 left join document_extractions e on e.document_id = d.id
+                left join document_payment_decisions pd on pd.document_id = d.id
                 where d.tenant_id = %s
                 order by d.created_at desc
                 limit 100
@@ -333,9 +362,11 @@ def list_documents_for_month(tenant_id: str, year: int, month: int) -> list[dict
                             where s.document_id = d.id
                         ),
                         '[]'::jsonb
-                    ) as booking_suggestions
+                    ) as booking_suggestions,
+                    to_jsonb(pd.*) as payment_decision
                 from documents d
                 left join document_extractions e on e.document_id = d.id
+                left join document_payment_decisions pd on pd.document_id = d.id
                 where d.tenant_id = %s
                     and coalesce(e.invoice_date, d.created_at::date) >= %s
                     and coalesce(e.invoice_date, d.created_at::date) < %s
@@ -362,9 +393,11 @@ def get_document(document_id: UUID) -> dict[str, Any] | None:
                             where s.document_id = d.id
                         ),
                         '[]'::jsonb
-                    ) as booking_suggestions
+                    ) as booking_suggestions,
+                    to_jsonb(pd.*) as payment_decision
                 from documents d
                 left join document_extractions e on e.document_id = d.id
+                left join document_payment_decisions pd on pd.document_id = d.id
                 where d.id = %s
                 """,
                 (document_id,),
@@ -707,6 +740,78 @@ def update_booking_suggestion(
     return get_document(document_id)
 
 
+def select_payment_decision(
+    document_id: UUID,
+    payment_type: str,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None or not document.get("extraction"):
+        return None
+    if document["status"] == "review_approved":
+        raise ValueError("approved document cannot be edited")
+
+    selected_term = _payment_term_by_type(document["extraction"], payment_type)
+    if selected_term is None:
+        raise ValueError("payment option not available")
+
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into document_payment_decisions (
+                    id, document_id, tenant_id, payment_type, label, due_date, amount,
+                    discount_base, discount_percent, discount_amount, currency, status,
+                    created_at, updated_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'selected', %s, %s)
+                on conflict (document_id) do update set
+                    payment_type = excluded.payment_type,
+                    label = excluded.label,
+                    due_date = excluded.due_date,
+                    amount = excluded.amount,
+                    discount_base = excluded.discount_base,
+                    discount_percent = excluded.discount_percent,
+                    discount_amount = excluded.discount_amount,
+                    currency = excluded.currency,
+                    status = 'selected',
+                    updated_at = excluded.updated_at
+                returning *
+                """,
+                (
+                    uuid4(),
+                    document_id,
+                    document["tenant_id"],
+                    selected_term["type"],
+                    selected_term["label"],
+                    selected_term.get("due_date"),
+                    _decimal_or_none(selected_term.get("amount")),
+                    _decimal_or_none(selected_term.get("discount_base")),
+                    _decimal_or_none(selected_term.get("discount_percent")),
+                    _decimal_or_none(selected_term.get("discount_amount")),
+                    selected_term.get("currency") or "EUR",
+                    now,
+                    now,
+                ),
+            )
+            saved = cursor.fetchone()
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.payment_decision_selected",
+        document_id=document_id,
+        actor=actor,
+        details={
+            "payment_type": saved["payment_type"],
+            "amount": str(saved["amount"]) if saved["amount"] is not None else None,
+            "discount_amount": str(saved["discount_amount"]) if saved["discount_amount"] is not None else None,
+            "due_date": _serialize_date(saved["due_date"]),
+        },
+    )
+    return get_document(document_id)
+
+
 def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, Any]]:
     raw_result = extraction.get("raw_result") or {}
     booking_type = raw_result.get("document_type") or "incoming_invoice"
@@ -752,6 +857,71 @@ def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: d
             "currency": currency,
         }
     ]
+
+
+def _payment_term_by_type(extraction: dict[str, Any], payment_type: str) -> dict[str, Any] | None:
+    for term in _payment_terms_from_extraction(extraction):
+        if term["type"] == payment_type:
+            return term
+    return None
+
+
+def _payment_terms_from_extraction(extraction: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_result = extraction.get("raw_result") or {}
+    terms = raw_result.get("payment_terms") or []
+    if terms:
+        return [_normalize_payment_term(term) for term in terms]
+
+    gross_amount = raw_result.get("gross_amount") or extraction.get("gross_amount")
+    if gross_amount is None:
+        return []
+
+    document_type = raw_result.get("document_type") or "incoming_invoice"
+    currency = extraction.get("currency") or "EUR"
+    fallback_terms = [
+        {
+            "type": "full_amount",
+            "label": "Gutschrift verrechnen" if document_type == "credit_note" else "Ohne Abzug zahlen",
+            "due_date": raw_result.get("due_date"),
+            "amount": gross_amount,
+            "currency": currency,
+        }
+    ]
+
+    discounted_amount = raw_result.get("discounted_payable_amount")
+    discount_amount = raw_result.get("discount_amount")
+    discount_due_date = raw_result.get("discount_due_date")
+    if document_type == "credit_note" and discount_amount is not None:
+        discount_amount = -abs(_decimal_or_none(discount_amount))
+    if discounted_amount is None and discount_amount is not None:
+        discounted_amount = _decimal_or_none(gross_amount) - abs(_decimal_or_none(discount_amount))
+    if discount_due_date and discounted_amount is not None:
+        fallback_terms.append(
+            {
+                "type": "credit_note_settlement" if document_type == "credit_note" else "cash_discount",
+                "label": "Verrechnung mit Skonto" if document_type == "credit_note" else "Skontozahlung",
+                "due_date": discount_due_date,
+                "amount": discounted_amount,
+                "discount_base": raw_result.get("discount_base"),
+                "discount_percent": raw_result.get("discount_percent"),
+                "discount_amount": discount_amount,
+                "currency": currency,
+            }
+        )
+    return [_normalize_payment_term(term) for term in fallback_terms]
+
+
+def _normalize_payment_term(term: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": term["type"],
+        "label": term.get("label") or term["type"],
+        "due_date": term.get("due_date"),
+        "amount": _decimal_or_none(term.get("amount")),
+        "discount_base": _decimal_or_none(term.get("discount_base")),
+        "discount_percent": _decimal_or_none(term.get("discount_percent")),
+        "discount_amount": _decimal_or_none(term.get("discount_amount")),
+        "currency": term.get("currency") or "EUR",
+    }
 
 
 def insert_audit_event(
@@ -1372,6 +1542,9 @@ def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
             _serialize_booking_suggestion(suggestion)
             for suggestion in row.get("booking_suggestions", [])
         ],
+        "payment_decision": _serialize_payment_decision(row["payment_decision"])
+        if row.get("payment_decision")
+        else None,
     }
 
 
@@ -1472,6 +1645,25 @@ def _serialize_booking_suggestion(row: dict[str, Any]) -> dict[str, Any]:
         "net_amount": str(row["net_amount"]) if row["net_amount"] is not None else None,
         "tax_amount": str(row["tax_amount"]) if row["tax_amount"] is not None else None,
         "gross_amount": str(row["gross_amount"]) if row["gross_amount"] is not None else None,
+        "currency": row["currency"],
+        "status": row["status"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _serialize_payment_decision(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "document_id": str(row["document_id"]),
+        "tenant_id": row["tenant_id"],
+        "payment_type": row["payment_type"],
+        "label": row["label"],
+        "due_date": _serialize_date(row["due_date"]),
+        "amount": str(row["amount"]) if row["amount"] is not None else None,
+        "discount_base": str(row["discount_base"]) if row["discount_base"] is not None else None,
+        "discount_percent": str(row["discount_percent"]) if row["discount_percent"] is not None else None,
+        "discount_amount": str(row["discount_amount"]) if row["discount_amount"] is not None else None,
         "currency": row["currency"],
         "status": row["status"],
         "created_at": _serialize_date(row["created_at"]),

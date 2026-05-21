@@ -19,6 +19,7 @@ from app.services.database import (
     list_documents_for_month,
     prepare_document_review,
     reopen_document_review,
+    select_payment_decision,
     update_booking_suggestion,
 )
 from app.services.extraction import run_mock_extraction
@@ -77,6 +78,10 @@ class BookingSuggestionUpdate(BaseModel):
             "gross_amount": self.gross_amount,
             "currency": self.currency,
         }
+
+
+class PaymentDecisionUpdate(BaseModel):
+    payment_type: Literal["full_amount", "cash_discount", "credit_note_settlement"]
 
 
 def _normalize_tenant_id(tenant_id: str) -> str:
@@ -265,6 +270,27 @@ def update_document_booking_suggestion(
         raise HTTPException(status_code=409, detail=str(error)) from error
     if document is None:
         raise HTTPException(status_code=404, detail="booking suggestion not found")
+    return {"document": document}
+
+
+@router.post("/{document_id}/payment-decision")
+def update_document_payment_decision(
+    document_id: UUID,
+    payload: PaymentDecisionUpdate,
+    request: Request,
+) -> dict[str, Any]:
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("email") or "system"
+    try:
+        document = select_payment_decision(
+            document_id=document_id,
+            payment_type=payload.payment_type,
+            actor=actor,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if document is None:
+        raise HTTPException(status_code=404, detail="document with extraction not found")
     return {"document": document}
 
 

@@ -204,6 +204,7 @@ function UploadApp() {
   const [deletingIds, setDeletingIds] = useState([]);
   const [approvingIds, setApprovingIds] = useState([]);
   const [savingSuggestionIds, setSavingSuggestionIds] = useState([]);
+  const [savingPaymentIds, setSavingPaymentIds] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [exporting, setExporting] = useState("");
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -473,6 +474,34 @@ function UploadApp() {
         setError(saveError.message);
       } finally {
         setSavingSuggestionIds((current) => current.filter((id) => id !== suggestion.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
+  const selectPaymentDecision = useCallback(
+    async (document, term) => {
+      setError("");
+      setNotice("");
+      setSavingPaymentIds((current) => [...current, document.id]);
+      try {
+        const response = await apiFetch(`/documents/${document.id}/payment-decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payment_type: term.type }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Zahlungsentscheidung konnte nicht gespeichert werden: ${response.status}`);
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Zahlungsentscheidung gespeichert: ${result.document.original_filename}`);
+      } catch (paymentError) {
+        setError(paymentError.message);
+      } finally {
+        setSavingPaymentIds((current) => current.filter((id) => id !== document.id));
       }
     },
     [apiFetch, loadDocuments],
@@ -766,7 +795,12 @@ function UploadApp() {
                       <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
                     </div>
                     <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
-                    <PaymentTerms rawResult={document.extraction.raw_result} />
+                    <PaymentTerms
+                      document={document}
+                      rawResult={document.extraction.raw_result}
+                      onSelect={selectPaymentDecision}
+                      isSaving={savingPaymentIds.includes(document.id)}
+                    />
                     <BookingSuggestions
                       document={document}
                       suggestions={document.booking_suggestions}
@@ -1307,9 +1341,11 @@ function AllocationLines({ lines, tenantProfile }) {
   );
 }
 
-function PaymentTerms({ rawResult }) {
+function PaymentTerms({ document, rawResult, onSelect, isSaving }) {
   const terms = paymentTermLines(rawResult);
   if (!terms.length) return null;
+  const selectedType = document.payment_decision?.payment_type;
+  const isLocked = document.status === "review_approved";
 
   return (
     <div className="payment-terms">
@@ -1320,6 +1356,7 @@ function PaymentTerms({ rawResult }) {
           <span>Fällig</span>
           <span>Betrag</span>
           <span>Skonto</span>
+          <span>Auswahl</span>
         </div>
         {terms.map((term) => (
           <div className="payment-row" key={`${term.type}-${term.due_date || "ohne-datum"}`}>
@@ -1327,6 +1364,18 @@ function PaymentTerms({ rawResult }) {
             <span>{formatDate(term.due_date)}</span>
             <span>{formatMoney(term.amount)}</span>
             <span>{term.discount_amount ? formatMoney(term.discount_amount) : "-"}</span>
+            {selectedType === term.type ? (
+              <StatusPill value="gewählt" tone="green" />
+            ) : (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onSelect(document, term)}
+                disabled={isLocked || isSaving}
+              >
+                {isSaving ? "Speichert..." : "Wählen"}
+              </button>
+            )}
           </div>
         ))}
       </div>

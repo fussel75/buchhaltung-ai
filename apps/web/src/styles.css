@@ -673,7 +673,7 @@ code {
 
 .payment-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1.1fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr);
+  grid-template-columns: minmax(170px, 1.1fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(104px, 0.6fr);
   gap: 12px;
   align-items: center;
   padding: 11px 12px;

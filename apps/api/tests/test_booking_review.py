@@ -12,8 +12,9 @@ from app.services.database import _booking_suggestions_from_extraction
 
 
 class RecordingCursor:
-    def __init__(self):
+    def __init__(self, fetchone_result=None):
         self.statements = []
+        self.fetchone_result = fetchone_result
 
     def __enter__(self):
         return self
@@ -23,6 +24,9 @@ class RecordingCursor:
 
     def execute(self, statement, params=None):
         self.statements.append((" ".join(statement.split()), params))
+
+    def fetchone(self):
+        return self.fetchone_result
 
 
 class RecordingConnection:
@@ -234,3 +238,90 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(terms[1]["type"], "credit_note_settlement")
         self.assertEqual(terms[1]["discount_amount"], Decimal("-12.14"))
         self.assertEqual(terms[1]["amount"], Decimal("-273.94"))
+
+    def test_select_payment_decision_uses_extracted_term_values(self):
+        document_id = uuid4()
+        decision_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_ready",
+            "extraction": {
+                "currency": "EUR",
+                "raw_result": {
+                    "payment_terms": [
+                        {
+                            "type": "full_amount",
+                            "label": "Ohne Abzug zahlen",
+                            "due_date": "2026-06-05",
+                            "amount": "1441.03",
+                            "currency": "EUR",
+                        },
+                        {
+                            "type": "cash_discount",
+                            "label": "Skontozahlung",
+                            "due_date": "2026-05-20",
+                            "amount": "1405.01",
+                            "discount_base": "1200.54",
+                            "discount_percent": "3.00",
+                            "discount_amount": "36.02",
+                            "currency": "EUR",
+                        },
+                    ]
+                },
+            },
+        }
+        selected_document = {
+            **document,
+            "payment_decision": {"payment_type": "cash_discount", "amount": "1405.01"},
+        }
+        cursor = RecordingCursor(
+            fetchone_result={
+                "id": decision_id,
+                "document_id": document_id,
+                "tenant_id": "demo-mandant",
+                "payment_type": "cash_discount",
+                "label": "Skontozahlung",
+                "due_date": "2026-05-20",
+                "amount": Decimal("1405.01"),
+                "discount_base": Decimal("1200.54"),
+                "discount_percent": Decimal("3.00"),
+                "discount_amount": Decimal("36.02"),
+                "currency": "EUR",
+                "status": "selected",
+                "created_at": "2026-05-21T10:00:00+00:00",
+                "updated_at": "2026-05-21T10:00:00+00:00",
+            }
+        )
+
+        with (
+            patch.object(database_service, "get_document", side_effect=[document, selected_document]),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "insert_audit_event") as audit_event,
+        ):
+            result = database_service.select_payment_decision(
+                document_id,
+                payment_type="cash_discount",
+                actor="admin@example.com",
+            )
+
+        self.assertEqual(result["payment_decision"]["payment_type"], "cash_discount")
+        self.assertTrue(any("insert into document_payment_decisions" in statement for statement, _ in cursor.statements))
+        saved_params = cursor.statements[0][1]
+        self.assertEqual(saved_params[3], "cash_discount")
+        self.assertEqual(saved_params[6], Decimal("1405.01"))
+        self.assertEqual(saved_params[9], Decimal("36.02"))
+        audit_event.assert_called_once()
+        self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.payment_decision_selected")
+
+    def test_select_payment_decision_rejects_unavailable_option(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "status": "review_ready",
+            "extraction": {"raw_result": {"payment_terms": []}},
+        }
+
+        with patch.object(database_service, "get_document", return_value=document):
+            with self.assertRaises(ValueError):
+                database_service.select_payment_decision(uuid4(), payment_type="cash_discount")
