@@ -1428,7 +1428,6 @@ def seed_demo_masterdata() -> None:
         supplier_name="Holz Junge GmbH",
         customer_number="109324",
         default_cost_category="material",
-        default_assignment_code="Wewe20",
     )
     create_supplier_rule(
         tenant_id="demo-mandant",

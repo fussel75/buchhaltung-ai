@@ -967,7 +967,7 @@ code {
 }
 
 .supplier-table .data-row {
-  grid-template-columns: minmax(180px, 1.35fr) minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(170px, 1fr) minmax(130px, 0.8fr) minmax(100px, 0.6fr);
+  grid-template-columns: minmax(170px, 1.25fr) minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(150px, 0.95fr) minmax(150px, 0.9fr) minmax(100px, 0.65fr) minmax(130px, 0.8fr);
 }
 
 .accounting-table .data-row {
@@ -982,6 +982,22 @@ code {
   color: var(--muted);
   font-size: 0.84rem;
   font-weight: 720;
+}
+
+.editing-row input,
+.editing-row select {
+  min-width: 0;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row-actions button {
+  min-height: 36px;
+  padding: 0 12px;
 }
 
 .table-list {

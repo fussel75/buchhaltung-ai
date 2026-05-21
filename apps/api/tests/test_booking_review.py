@@ -455,6 +455,37 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(rule["name"], "Luechau Material")
 
+    def test_supplier_rule_update_can_clear_default_assignment(self):
+        rule_id = uuid4()
+        row = {
+            "id": rule_id,
+            "tenant_id": "demo-mandant",
+            "match_text": "Holz Junge",
+            "supplier_name": "Holz Junge GmbH",
+            "customer_number": "109324",
+            "default_cost_category": "material",
+            "default_assignment_code": None,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            rule = database_service.update_supplier_rule(
+                rule_id=rule_id,
+                match_text="Holz Junge",
+                supplier_name="Holz Junge GmbH",
+                customer_number="109324",
+                default_cost_category="material",
+                default_assignment_code="",
+                is_active=True,
+            )
+
+        params = cursor.statements[0][1]
+        self.assertIsNone(params[4])
+        self.assertIsNone(rule["default_assignment_code"])
+
     def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
         document = {
             "id": str(uuid4()),

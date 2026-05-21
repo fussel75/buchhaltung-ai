@@ -1104,6 +1104,8 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
+  const [supplierEditId, setSupplierEditId] = useState(null);
+  const [supplierEditForm, setSupplierEditForm] = useState(null);
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -1259,6 +1261,44 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       return;
     }
     await loadMasterdata();
+    setMessage("Lieferantenregel aktualisiert.");
+  }
+
+  function startSupplierEdit(rule) {
+    setSupplierEditId(rule.id);
+    setSupplierEditForm({
+      match_text: rule.match_text || "",
+      supplier_name: rule.supplier_name || "",
+      customer_number: rule.customer_number || "",
+      default_cost_category: rule.default_cost_category || "material",
+      default_assignment_code: rule.default_assignment_code || "",
+      is_active: rule.is_active,
+    });
+  }
+
+  function cancelSupplierEdit() {
+    setSupplierEditId(null);
+    setSupplierEditForm(null);
+  }
+
+  async function saveSupplierEdit(rule) {
+    if (!supplierEditForm) return;
+    if (!supplierEditForm.match_text.trim() || !supplierEditForm.supplier_name.trim()) {
+      setMessage("Lieferantenregel braucht Erkennungstext und Lieferant.");
+      return;
+    }
+    const response = await apiFetch(`/masterdata/supplier-rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emptyToNull(supplierEditForm)),
+    });
+    if (!response.ok) {
+      setMessage(`Lieferantenregel konnte nicht gespeichert werden: ${response.status}`);
+      return;
+    }
+    cancelSupplierEdit();
+    await loadMasterdata();
+    setMessage("Lieferantenregel gespeichert.");
   }
 
   async function createAccountingRule(event) {
@@ -1466,10 +1506,17 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
               </select>
             </FormField>
             <FormField label={tenantProfile.assignment_code_label}>
-              <input placeholder="optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
+              <input list="assignment-code-options" placeholder="optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
             </FormField>
             <button type="submit">Regel anlegen</button>
           </form>
+          <datalist id="assignment-code-options">
+            {assignmentUnits.map((assignment) => (
+              <option key={assignment.id} value={assignment.code}>
+                {assignment.label}
+              </option>
+            ))}
+          </datalist>
           <div className="data-table supplier-table">
             <div className="data-row data-head">
               <span>Lieferant</span>
@@ -1478,24 +1525,87 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
               <span>Kostenart</span>
               <span>{tenantProfile.assignment_code_label}</span>
               <span>Aktiv</span>
+              <span>Aktion</span>
             </div>
-            {supplierRules.map((rule) => (
-              <div className="data-row" key={rule.id}>
-                <strong>{rule.supplier_name}</strong>
-                <span>{rule.match_text}</span>
-                <span>{rule.customer_number || "-"}</span>
-                <span>{formatCostCategory(rule.default_cost_category)}</span>
-                <span>{rule.default_assignment_code || "-"}</span>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={rule.is_active}
-                    onChange={(event) => updateSupplierRule(rule, { is_active: event.target.checked })}
-                  />
-                  <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
-                </label>
-              </div>
-            ))}
+            {supplierRules.map((rule) => {
+              const isEditing = supplierEditId === rule.id && supplierEditForm;
+              return (
+                <div className={isEditing ? "data-row editing-row" : "data-row"} key={rule.id}>
+                  {isEditing ? (
+                    <>
+                      <input
+                        aria-label="Lieferant"
+                        value={supplierEditForm.supplier_name}
+                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, supplier_name: event.target.value })}
+                        required
+                      />
+                      <input
+                        aria-label="Erkennungstext"
+                        value={supplierEditForm.match_text}
+                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, match_text: event.target.value })}
+                        required
+                      />
+                      <input
+                        aria-label="Unsere Kunden-Nr."
+                        value={supplierEditForm.customer_number}
+                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, customer_number: event.target.value })}
+                      />
+                      <select
+                        aria-label="Kostenart"
+                        value={supplierEditForm.default_cost_category || ""}
+                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, default_cost_category: event.target.value })}
+                      >
+                        <option value="">Kein Default</option>
+                        <option value="material">Material</option>
+                        <option value="subcontractor">Fremdleistung</option>
+                        <option value="fuel_vehicle">Fahrzeug/Tanken</option>
+                        <option value="software_subscription">Software/Abo</option>
+                        <option value="security_subscription">Überwachung/Abo</option>
+                        <option value="general_overhead">Sonstige Gemeinkosten</option>
+                      </select>
+                      <input
+                        aria-label={tenantProfile.assignment_code_label}
+                        list="assignment-code-options"
+                        placeholder="leer = keine feste Zuordnung"
+                        value={supplierEditForm.default_assignment_code}
+                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, default_assignment_code: event.target.value })}
+                      />
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={supplierEditForm.is_active}
+                          onChange={(event) => setSupplierEditForm({ ...supplierEditForm, is_active: event.target.checked })}
+                        />
+                        <span>{supplierEditForm.is_active ? "aktiv" : "inaktiv"}</span>
+                      </label>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => saveSupplierEdit(rule)}>Speichern</button>
+                        <button className="secondary-button" type="button" onClick={cancelSupplierEdit}>Abbrechen</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{rule.supplier_name}</strong>
+                      <span>{rule.match_text}</span>
+                      <span>{rule.customer_number || "-"}</span>
+                      <span>{formatCostCategory(rule.default_cost_category)}</span>
+                      <span>{rule.default_assignment_code || "-"}</span>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={rule.is_active}
+                          onChange={(event) => updateSupplierRule(rule, { is_active: event.target.checked })}
+                        />
+                        <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
+                      </label>
+                      <button className="secondary-button" type="button" onClick={() => startSupplierEdit(rule)}>
+                        Bearbeiten
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 
