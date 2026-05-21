@@ -467,7 +467,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _find_text(
         text,
         r"Belegnummer:\s*([A-Z]{1,5}\d+)",
-    )
+    ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_text(text, r"Kunden-Nr\.:\s*(\d+)") or _find_text(
         text,
         r"Kundennummer\s*:\s*([0-9/.-]+)",
@@ -487,7 +487,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _find_date(
         text,
         r"Belegdatum:\s*\n\s*Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
-    )
+    ) or _invoice_date_from_filename(document["original_filename"])
     due_date = (
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
@@ -506,10 +506,13 @@ def _build_pdf_text_result(document: dict) -> dict:
     net_amount = totals.get("net_amount")
     tax_amount = totals.get("tax_amount")
     gross_amount = totals.get("gross_amount")
-    discount_base = discount_base or gross_amount
     discount_amount = _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})") or visible_discount.get(
         "discount_amount"
     )
+    if net_amount is None and tax_amount is not None and gross_amount is not None:
+        net_amount = (gross_amount - tax_amount).quantize(Decimal("0.01"))
+    if discount_base is None and gross_amount is not None and (discount_percent is not None or discount_amount is not None):
+        discount_base = gross_amount
     if discount_amount is None and discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
     is_credit_note = gross_amount is not None and gross_amount < 0
@@ -910,6 +913,19 @@ def _find_date(text: str, pattern: str) -> str | None:
     return f"{year}-{month}-{day}"
 
 
+def _invoice_number_from_filename(filename: str) -> str | None:
+    stem = Path(filename).stem.lower()
+    match = search(r"(?:rechnung|rg)[_-]?([0-9]{6,})", stem, flags=0)
+    if match:
+        return match.group(1)
+    match = search(r"\b([0-9]{8,})\b", stem)
+    return match.group(1) if match else None
+
+
+def _invoice_date_from_filename(filename: str) -> str | None:
+    return _find_date(Path(filename).stem, r"(\d{2}\.\d{2}\.\d{4})")
+
+
 def _find_money_after_label(text: str, label: str) -> Decimal | None:
     pattern = rf"{label}[^\n]*?([0-9.]+,\d{{2}})"
     return _find_money(text, pattern)
@@ -1040,6 +1056,8 @@ def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresse
 
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
+    if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
+        return "Theo Foerch GmbH & Co. KG"
     if "lüchau baustoffe gmbh" in text.lower():
         return "Lüchau Baustoffe GmbH"
     if "rechnungar" in original and "0113042/504" in text:
