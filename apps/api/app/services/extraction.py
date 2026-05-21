@@ -130,8 +130,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
     if discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
     is_credit_note = gross_amount is not None and gross_amount < 0
-    if is_credit_note and discount_amount is not None:
-        discount_amount = -discount_amount
+    discount_amount = _signed_discount_amount(discount_amount, gross_amount)
 
     # Some supplier XML files do not carry construction-site delivery text,
     # so the project assignment is enriched from the human-readable PDF.
@@ -219,6 +218,16 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         "xml_discount_base": xml_discount_base,
         "discount_percent": discount_percent,
         "discount_amount": discount_amount,
+        "payment_terms": _payment_terms(
+            gross_amount=due_payable_amount or gross_amount,
+            due_date=due_date,
+            discount_due_date=discount_due_date,
+            discount_base=discount_base,
+            discount_percent=discount_percent,
+            discount_amount=discount_amount,
+            discounted_payable_amount=visible_discount.get("discounted_payable_amount"),
+            is_credit_note=is_credit_note,
+        ),
         "currency": "EUR",
         "confidence": Decimal("1.00") if not missing else Decimal("0.90"),
         "warnings": warnings,
@@ -288,6 +297,8 @@ def _build_pdf_text_result(document: dict) -> dict:
     )
     if discount_amount is None and discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
+    is_credit_note = gross_amount is not None and gross_amount < 0
+    discount_amount = _signed_discount_amount(discount_amount, gross_amount)
     delivery_addresses = _find_delivery_addresses(text)
     delivery_address = delivery_addresses[0] if delivery_addresses else _find_delivery_address(text)
     supplier_name = _supplier_name(document, text)
@@ -369,7 +380,18 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_percent": discount_percent,
         "discount_amount": discount_amount,
         "discounted_payable_amount": visible_discount.get("discounted_payable_amount"),
-        "document_type": "incoming_invoice",
+        "is_credit_note": is_credit_note,
+        "document_type": "credit_note" if is_credit_note else "incoming_invoice",
+        "payment_terms": _payment_terms(
+            gross_amount=gross_amount,
+            due_date=due_date,
+            discount_due_date=discount_due_date,
+            discount_base=discount_base,
+            discount_percent=discount_percent,
+            discount_amount=discount_amount,
+            discounted_payable_amount=visible_discount.get("discounted_payable_amount"),
+            is_credit_note=is_credit_note,
+        ),
         "currency": "EUR",
         "confidence": Decimal("0.88") if not missing else Decimal("0.72"),
         "warnings": warnings,
@@ -520,6 +542,70 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
         "discount_amount": discount_amount,
         "discounted_payable_amount": discounted_payable_amount,
     }
+
+
+def _payment_terms(
+    *,
+    gross_amount: Decimal | None,
+    due_date: str | None,
+    discount_due_date: str | None,
+    discount_base: Decimal | None,
+    discount_percent: Decimal | None,
+    discount_amount: Decimal | None,
+    discounted_payable_amount: Decimal | None,
+    is_credit_note: bool,
+) -> list[dict[str, Decimal | str | None]]:
+    terms = []
+    gross_amount = _as_decimal(gross_amount)
+    discount_amount = _signed_discount_amount(discount_amount, gross_amount)
+    discounted_payable_amount = _as_decimal(discounted_payable_amount)
+
+    if gross_amount is not None:
+        terms.append(
+            {
+                "type": "full_amount",
+                "label": "Gutschrift verrechnen" if is_credit_note else "Ohne Abzug zahlen",
+                "due_date": due_date,
+                "amount": gross_amount,
+                "currency": "EUR",
+            }
+        )
+
+    if discount_due_date and discount_amount is not None:
+        if discounted_payable_amount is None and gross_amount is not None:
+            discounted_payable_amount = (gross_amount - abs(discount_amount)).quantize(Decimal("0.01"))
+        terms.append(
+            {
+                "type": "credit_note_settlement" if is_credit_note else "cash_discount",
+                "label": "Verrechnung mit Skonto" if is_credit_note else "Skontozahlung",
+                "due_date": discount_due_date,
+                "amount": discounted_payable_amount,
+                "discount_base": _as_decimal(discount_base),
+                "discount_percent": _as_decimal(discount_percent),
+                "discount_amount": discount_amount,
+                "currency": "EUR",
+            }
+        )
+
+    return terms
+
+
+def _signed_discount_amount(discount_amount: Decimal | None, gross_amount: Decimal | None) -> Decimal | None:
+    discount_amount = _as_decimal(discount_amount)
+    gross_amount = _as_decimal(gross_amount)
+    if discount_amount is None:
+        return None
+    if gross_amount is not None and gross_amount < 0:
+        return -abs(discount_amount)
+    return abs(discount_amount)
+
+
+def _as_decimal(value: Decimal | str | int | float | None) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal("0.01"))
+    return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
 def _find_text(text: str, pattern: str) -> str | None:

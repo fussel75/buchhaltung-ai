@@ -1492,10 +1492,17 @@ def _serialize_date(value: Any) -> str | None:
 
 
 def _json_safe_extraction(extraction: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: str(value) if isinstance(value, Decimal) else value
-        for key, value in extraction.items()
-    }
+    return {key: _json_safe_value(value) for key, value in extraction.items()}
+
+
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_safe_value(item) for key, item in value.items()}
+    return value
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:

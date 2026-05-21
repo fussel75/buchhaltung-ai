@@ -630,6 +630,7 @@ code {
 }
 
 .allocation-lines,
+.payment-terms,
 .booking-suggestions {
   display: grid;
   gap: 12px;
@@ -637,7 +638,8 @@ code {
   padding: 14px;
 }
 
-.allocation-lines {
+.allocation-lines,
+.payment-terms {
   border: 1px solid #dce8df;
   background: #f7faf8;
 }
@@ -648,6 +650,7 @@ code {
 }
 
 .allocation-table,
+.payment-table,
 .booking-table {
   display: grid;
   border: 1px solid var(--border);
@@ -655,7 +658,8 @@ code {
   background: var(--surface);
 }
 
-.allocation-table {
+.allocation-table,
+.payment-table {
   overflow: hidden;
 }
 
@@ -667,11 +671,31 @@ code {
   padding: 11px 12px;
 }
 
-.allocation-row + .allocation-row {
+.payment-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.1fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr);
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+}
+
+.payment-head {
+  min-height: 36px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font-size: 0.74rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.allocation-row + .allocation-row,
+.payment-row + .payment-row {
   border-top: 1px solid #edf0f3;
 }
 
-.allocation-row span {
+.allocation-row span,
+.payment-row strong,
+.payment-row span {
   color: var(--text);
   font-weight: 720;
   overflow-wrap: anywhere;

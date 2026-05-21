@@ -6,7 +6,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from app.services import database as database_service
-from app.services.extraction import _normalized_invoice_filename
+from app.services.extraction import _normalized_invoice_filename, _payment_terms
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.services.database import _booking_suggestions_from_extraction
 
@@ -198,3 +198,39 @@ class BookingSuggestionTests(TestCase):
         self.assertTrue(any("status = 'review_ready'" in statement for statement, _ in cursor.statements))
         audit_event.assert_called_once()
         self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.review_reopened")
+
+    def test_payment_terms_for_incoming_invoice_discount(self):
+        terms = _payment_terms(
+            gross_amount=Decimal("1441.03"),
+            due_date="2026-06-05",
+            discount_due_date="2026-05-20",
+            discount_base=Decimal("1200.54"),
+            discount_percent=Decimal("3.00"),
+            discount_amount=Decimal("36.02"),
+            discounted_payable_amount=Decimal("1405.01"),
+            is_credit_note=False,
+        )
+
+        self.assertEqual(terms[0]["type"], "full_amount")
+        self.assertEqual(terms[0]["amount"], Decimal("1441.03"))
+        self.assertEqual(terms[1]["type"], "cash_discount")
+        self.assertEqual(terms[1]["discount_amount"], Decimal("36.02"))
+        self.assertEqual(terms[1]["amount"], Decimal("1405.01"))
+
+    def test_payment_terms_for_credit_note_keep_discount_effect_negative(self):
+        terms = _payment_terms(
+            gross_amount=Decimal("-261.80"),
+            due_date=None,
+            discount_due_date="2026-05-15",
+            discount_base=Decimal("340.00"),
+            discount_percent=Decimal("3.00"),
+            discount_amount=Decimal("12.14"),
+            discounted_payable_amount=None,
+            is_credit_note=True,
+        )
+
+        self.assertEqual(terms[0]["type"], "full_amount")
+        self.assertEqual(terms[0]["amount"], Decimal("-261.80"))
+        self.assertEqual(terms[1]["type"], "credit_note_settlement")
+        self.assertEqual(terms[1]["discount_amount"], Decimal("-12.14"))
+        self.assertEqual(terms[1]["amount"], Decimal("-273.94"))

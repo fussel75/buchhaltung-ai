@@ -766,6 +766,7 @@ function UploadApp() {
                       <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
                     </div>
                     <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
+                    <PaymentTerms rawResult={document.extraction.raw_result} />
                     <BookingSuggestions
                       document={document}
                       suggestions={document.booking_suggestions}
@@ -1306,6 +1307,33 @@ function AllocationLines({ lines, tenantProfile }) {
   );
 }
 
+function PaymentTerms({ rawResult }) {
+  const terms = paymentTermLines(rawResult);
+  if (!terms.length) return null;
+
+  return (
+    <div className="payment-terms">
+      <h3>Zahlung und Skonto</h3>
+      <div className="payment-table">
+        <div className="payment-row payment-head">
+          <span>Option</span>
+          <span>Fällig</span>
+          <span>Betrag</span>
+          <span>Skonto</span>
+        </div>
+        {terms.map((term) => (
+          <div className="payment-row" key={`${term.type}-${term.due_date || "ohne-datum"}`}>
+            <strong>{term.label}</strong>
+            <span>{formatDate(term.due_date)}</span>
+            <span>{formatMoney(term.amount)}</span>
+            <span>{term.discount_amount ? formatMoney(term.discount_amount) : "-"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savingIds = [] }) {
   const [drafts, setDrafts] = useState({});
 
@@ -1681,6 +1709,39 @@ function formatDate(value) {
 }
 
 function discountedAmount(rawResult) {
+  const discountTerm = paymentTermLines(rawResult).find((term) => term.type !== "full_amount");
+  if (discountTerm?.amount) return discountTerm.amount;
+  if (rawResult?.discounted_payable_amount) return rawResult.discounted_payable_amount;
+  if (!rawResult?.gross_amount || !rawResult?.discount_amount) return null;
+  return Number(rawResult.gross_amount) - Math.abs(Number(rawResult.discount_amount));
+}
+
+function paymentTermLines(rawResult) {
+  if (rawResult?.payment_terms?.length) return rawResult.payment_terms;
+  const terms = [];
+  if (rawResult?.gross_amount) {
+    terms.push({
+      type: "full_amount",
+      label: rawResult.document_type === "credit_note" ? "Gutschrift verrechnen" : "Ohne Abzug zahlen",
+      due_date: rawResult.due_date,
+      amount: rawResult.gross_amount,
+      discount_amount: null,
+    });
+  }
+  const amount = legacyDiscountedAmount(rawResult);
+  if (amount && rawResult?.discount_due_date) {
+    terms.push({
+      type: rawResult.document_type === "credit_note" ? "credit_note_settlement" : "cash_discount",
+      label: rawResult.document_type === "credit_note" ? "Verrechnung mit Skonto" : "Skontozahlung",
+      due_date: rawResult.discount_due_date,
+      amount,
+      discount_amount: rawResult.discount_amount,
+    });
+  }
+  return terms;
+}
+
+function legacyDiscountedAmount(rawResult) {
   if (rawResult?.discounted_payable_amount) return rawResult.discounted_payable_amount;
   if (!rawResult?.gross_amount || !rawResult?.discount_amount) return null;
   return Number(rawResult.gross_amount) - Math.abs(Number(rawResult.discount_amount));
