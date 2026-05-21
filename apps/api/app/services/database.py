@@ -812,6 +812,73 @@ def select_payment_decision(
     return get_document(document_id)
 
 
+def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for document in documents:
+        if document.get("status") != "review_approved":
+            continue
+
+        extraction = document.get("extraction") or {}
+        raw_result = extraction.get("raw_result") or {}
+        payment_decision = document.get("payment_decision") or _default_payment_decision(extraction)
+        common = {
+            "tenant_id": document.get("tenant_id"),
+            "document_id": document.get("id"),
+            "original_filename": document.get("original_filename"),
+            "normalized_filename": document.get("normalized_filename"),
+            "supplier_name": extraction.get("supplier_name"),
+            "invoice_number": extraction.get("invoice_number"),
+            "invoice_date": extraction.get("invoice_date"),
+            "document_type": raw_result.get("document_type") or "incoming_invoice",
+            "currency": extraction.get("currency") or "EUR",
+            "payment_type": payment_decision.get("payment_type") if payment_decision else None,
+            "payment_label": payment_decision.get("label") if payment_decision else None,
+            "payment_due_date": payment_decision.get("due_date") if payment_decision else None,
+            "payment_amount": _money_string(payment_decision.get("amount")) if payment_decision else None,
+            "discount_base": _money_string(payment_decision.get("discount_base")) if payment_decision else None,
+            "discount_percent": _money_string(payment_decision.get("discount_percent")) if payment_decision else None,
+            "discount_amount": _money_string(payment_decision.get("discount_amount")) if payment_decision else None,
+        }
+
+        for suggestion in document.get("booking_suggestions") or []:
+            rows.append(
+                {
+                    **common,
+                    "row_type": "cost",
+                    "line_no": suggestion.get("line_no"),
+                    "booking_type": suggestion.get("booking_type"),
+                    "cost_category": suggestion.get("cost_category"),
+                    "assignment_kind": suggestion.get("assignment_kind"),
+                    "assignment_code": suggestion.get("assignment_code"),
+                    "description": suggestion.get("description"),
+                    "net_amount": _money_string(suggestion.get("net_amount")),
+                    "tax_amount": _money_string(suggestion.get("tax_amount")),
+                    "gross_amount": _money_string(suggestion.get("gross_amount")),
+                    "payable_delta": None,
+                }
+            )
+
+        payment_delta = _payment_delta(extraction, payment_decision)
+        if payment_delta is not None and payment_delta != Decimal("0.00"):
+            rows.append(
+                {
+                    **common,
+                    "row_type": "payment_adjustment",
+                    "line_no": None,
+                    "booking_type": raw_result.get("document_type") or "incoming_invoice",
+                    "cost_category": "payment_discount",
+                    "assignment_kind": None,
+                    "assignment_code": None,
+                    "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
+                    "net_amount": None,
+                    "tax_amount": None,
+                    "gross_amount": _money_string(payment_delta),
+                    "payable_delta": _money_string(payment_delta),
+                }
+            )
+    return rows
+
+
 def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, Any]]:
     raw_result = extraction.get("raw_result") or {}
     booking_type = raw_result.get("document_type") or "incoming_invoice"
@@ -864,6 +931,32 @@ def _payment_term_by_type(extraction: dict[str, Any], payment_type: str) -> dict
         if term["type"] == payment_type:
             return term
     return None
+
+
+def _default_payment_decision(extraction: dict[str, Any]) -> dict[str, Any] | None:
+    terms = _payment_terms_from_extraction(extraction)
+    if not terms:
+        return None
+    term = terms[0]
+    return {
+        "payment_type": term["type"],
+        "label": term["label"],
+        "due_date": term.get("due_date"),
+        "amount": term.get("amount"),
+        "discount_base": term.get("discount_base"),
+        "discount_percent": term.get("discount_percent"),
+        "discount_amount": term.get("discount_amount"),
+    }
+
+
+def _payment_delta(extraction: dict[str, Any], payment_decision: dict[str, Any] | None) -> Decimal | None:
+    if not payment_decision:
+        return None
+    gross_amount = _decimal_or_none(extraction.get("gross_amount"))
+    payment_amount = _decimal_or_none(payment_decision.get("amount"))
+    if gross_amount is None or payment_amount is None:
+        return None
+    return _round_money(payment_amount - gross_amount)
 
 
 def _payment_terms_from_extraction(extraction: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1705,3 +1798,10 @@ def _decimal_or_none(value: Any) -> Decimal | None:
 
 def _round_money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
+
+
+def _money_string(value: Any) -> str | None:
+    amount = _decimal_or_none(value)
+    if amount is None:
+        return None
+    return str(_round_money(amount))

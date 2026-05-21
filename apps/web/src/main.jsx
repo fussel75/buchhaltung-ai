@@ -590,6 +590,35 @@ function UploadApp() {
     }
   }, [activeTenantId, apiFetch, exportMonth]);
 
+  const exportBookingRows = useCallback(async () => {
+    const [year, month] = exportMonth.split("-").map((value) => Number(value));
+    if (!year || !month) {
+      setError("Bitte einen Monat auswählen.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setExporting("bookings");
+    try {
+      const response = await apiFetch(
+        `/documents/export/bookings?tenant_id=${encodeURIComponent(activeTenantId)}&year=${year}&month=${month}`,
+      );
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "Keine freigegebenen Buchungszeilen für diesen Monat gefunden."
+            : `Buchungsexport fehlgeschlagen: ${response.status}`,
+        );
+      }
+      await downloadResponse(response, `buchungsentwurf-${activeTenantId}-${exportMonth}.csv`);
+      setNotice(`Buchungsentwurf erstellt: ${exportMonth}`);
+    } catch (exportError) {
+      setError(exportError.message);
+    } finally {
+      setExporting("");
+    }
+  }, [activeTenantId, apiFetch, exportMonth]);
+
   return (
     <main className="app app-shell">
       <header className="app-header">
@@ -691,6 +720,14 @@ function UploadApp() {
               disabled={exporting === "month"}
             >
               {exporting === "month" ? "Erstellt..." : "Monat ZIP"}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={exportBookingRows}
+              disabled={exporting === "bookings"}
+            >
+              {exporting === "bookings" ? "Erstellt..." : "Buchungen CSV"}
             </button>
           </div>
         </div>

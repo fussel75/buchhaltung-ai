@@ -1,5 +1,6 @@
 from decimal import Decimal
-from io import BytesIO
+from csv import DictWriter
+from io import BytesIO, StringIO
 from re import sub
 from typing import Any, Literal
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.services.database import (
     approve_document_review,
+    build_booking_export_rows,
     create_document_record,
     delete_document,
     get_document,
@@ -192,6 +194,30 @@ def export_documents_for_month(
     tenant_id = _normalize_tenant_id(tenant_id)
     documents = list_documents_for_month(tenant_id=tenant_id, year=year, month=month)
     return _zip_documents(documents, f"belege-{tenant_id}-{year}-{month:02d}.zip")
+
+
+@router.get("/export/bookings", response_model=None)
+def export_booking_rows(
+    tenant_id: str = Query("demo-mandant", min_length=1),
+    year: int = Query(..., ge=2000, le=2100),
+    month: int = Query(..., ge=1, le=12),
+    format: Literal["csv", "json"] = Query("csv"),
+) -> Any:
+    tenant_id = _normalize_tenant_id(tenant_id)
+    documents = list_documents_for_month(tenant_id=tenant_id, year=year, month=month)
+    rows = build_booking_export_rows(documents)
+    if not rows:
+        raise HTTPException(status_code=404, detail="no approved booking rows found for export")
+    if format == "json":
+        return {"rows": rows}
+
+    buffer = StringIO()
+    writer = DictWriter(buffer, fieldnames=list(rows[0].keys()), delimiter=";", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    content = ("\ufeff" + buffer.getvalue()).encode("utf-8")
+    headers = {"Content-Disposition": f'attachment; filename="buchungsentwurf-{tenant_id}-{year}-{month:02d}.csv"'}
+    return StreamingResponse(BytesIO(content), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @router.get("/{document_id}/file")
