@@ -208,10 +208,12 @@ function UploadApp() {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [exporting, setExporting] = useState("");
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [uploadBatch, setUploadBatch] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
+  const isUploading = uploadBatch?.state === "running";
   const queueStats = useMemo(
     () => ({
       pending: documents.filter((document) => document.status === "review_pending").length,
@@ -261,9 +263,6 @@ function UploadApp() {
 
   const uploadFile = useCallback(
     async (file) => {
-      setError("");
-      setNotice("");
-
       const formData = new FormData();
       formData.append("tenant_id", activeTenantId);
       formData.append("file", file);
@@ -279,28 +278,95 @@ function UploadApp() {
       }
 
       const result = await response.json();
-      await loadDocuments();
-      setNotice(
-        result.is_duplicate
-          ? `Dublette erkannt: ${result.document.original_filename} ist bereits in der Review-Queue.`
-          : `Beleg gespeichert: ${result.document.original_filename}`,
-      );
+      return result;
     },
-    [activeTenantId, apiFetch, loadDocuments],
+    [activeTenantId, apiFetch],
   );
 
   const handleFiles = useCallback(
     async (files) => {
-      if (!canUpload) return;
-      try {
-        for (const file of files) {
-          await uploadFile(file);
+      const selectedFiles = Array.from(files || []).filter((file) => file?.name);
+      if (!canUpload || selectedFiles.length === 0 || isUploading) return;
+
+      const results = {
+        saved: [],
+        duplicates: [],
+        failed: [],
+      };
+
+      setError("");
+      setNotice("");
+      setUploadBatch({
+        state: "running",
+        total: selectedFiles.length,
+        done: 0,
+        current: selectedFiles[0]?.name || "",
+        saved: 0,
+        duplicates: 0,
+        failed: 0,
+      });
+
+      for (const [index, file] of selectedFiles.entries()) {
+        setUploadBatch((current) => ({
+          ...(current || {}),
+          state: "running",
+          current: file.name,
+          done: index,
+          total: selectedFiles.length,
+        }));
+
+        try {
+          const result = await uploadFile(file);
+          if (result.is_duplicate) {
+            results.duplicates.push(result.document.original_filename || file.name);
+          } else {
+            results.saved.push(result.document.original_filename || file.name);
+          }
+        } catch (uploadError) {
+          results.failed.push({
+            name: file.name,
+            message: uploadError.message,
+          });
+        } finally {
+          setUploadBatch((current) => ({
+            ...(current || {}),
+            state: "running",
+            done: index + 1,
+            total: selectedFiles.length,
+            saved: results.saved.length,
+            duplicates: results.duplicates.length,
+            failed: results.failed.length,
+          }));
         }
-      } catch (uploadError) {
-        setError(uploadError.message);
+      }
+
+      await loadDocuments();
+      setUploadBatch({
+        state: "done",
+        total: selectedFiles.length,
+        done: selectedFiles.length,
+        current: "",
+        saved: results.saved.length,
+        duplicates: results.duplicates.length,
+        failed: results.failed.length,
+      });
+
+      const noticeParts = [];
+      if (results.saved.length) noticeParts.push(`${results.saved.length} gespeichert`);
+      if (results.duplicates.length) noticeParts.push(`${results.duplicates.length} Dubletten`);
+      if (results.failed.length) noticeParts.push(`${results.failed.length} fehlgeschlagen`);
+      setNotice(`Stapel verarbeitet: ${noticeParts.join(", ")}.`);
+
+      if (results.failed.length) {
+        setError(
+          `Nicht hochgeladen: ${results.failed
+            .slice(0, 3)
+            .map((failure) => `${failure.name} (${failure.message})`)
+            .join("; ")}${results.failed.length > 3 ? " ..." : ""}`,
+        );
       }
     },
-    [canUpload, uploadFile],
+    [canUpload, isUploading, loadDocuments, uploadFile],
   );
 
   const startExtraction = useCallback(
@@ -673,9 +739,10 @@ function UploadApp() {
       {activeView === "review" ? (
         <section className="review-board">
           <section
-            className={isDragging ? "dropzone active" : "dropzone"}
+            className={`dropzone${isDragging ? " active" : ""}${isUploading ? " uploading" : ""}`}
             onDragEnter={(event) => {
               event.preventDefault();
+              if (isUploading) return;
               setIsDragging(true);
             }}
             onDragOver={(event) => event.preventDefault()}
@@ -683,16 +750,31 @@ function UploadApp() {
             onDrop={(event) => {
               event.preventDefault();
               setIsDragging(false);
+              if (isUploading) return;
               handleFiles(event.dataTransfer.files);
             }}
           >
-            <strong>Belege hier ablegen</strong>
-            <span>PDFs, Bilder oder exportierte Rechnungen für den ausgewählten Mandanten.</span>
+            <strong>{isUploading ? "Stapel wird hochgeladen" : "Belege hier ablegen"}</strong>
+            <span>Mehrere PDFs, Bilder oder exportierte Rechnungen für den ausgewählten Mandanten.</span>
+            {uploadBatch ? (
+              <div className="upload-progress" aria-live="polite">
+                <span>
+                  {uploadBatch.done} / {uploadBatch.total} verarbeitet
+                </span>
+                {uploadBatch.current ? <strong>{uploadBatch.current}</strong> : null}
+                <small>
+                  {uploadBatch.saved} gespeichert, {uploadBatch.duplicates} Dubletten, {uploadBatch.failed} fehlgeschlagen
+                </small>
+              </div>
+            ) : null}
             <input
               type="file"
               multiple
-              disabled={!canUpload}
-              onChange={(event) => handleFiles(event.target.files)}
+              disabled={!canUpload || isUploading}
+              onChange={(event) => {
+                handleFiles(event.target.files);
+                event.target.value = "";
+              }}
             />
           </section>
 

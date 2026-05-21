@@ -369,6 +369,11 @@ button:disabled {
   transform: translateY(-2px);
 }
 
+.dropzone.uploading {
+  border-color: var(--accent);
+  background: var(--surface-subtle);
+}
+
 .dropzone strong {
   color: var(--text);
   font-size: 1.18rem;
@@ -385,6 +390,26 @@ button:disabled {
 .dropzone input[type="file"] {
   padding: 7px;
   background: var(--surface-subtle);
+}
+
+.upload-progress {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+}
+
+.upload-progress strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+
+.upload-progress small {
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .uploads {
