@@ -1116,6 +1116,8 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
   const [assignmentEditForm, setAssignmentEditForm] = useState(null);
   const [supplierEditId, setSupplierEditId] = useState(null);
   const [supplierEditForm, setSupplierEditForm] = useState(null);
+  const [accountingEditId, setAccountingEditId] = useState(null);
+  const [accountingEditForm, setAccountingEditForm] = useState(null);
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -1401,6 +1403,47 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       return;
     }
     await loadMasterdata();
+    setMessage("Kontierungsregel aktualisiert.");
+  }
+
+  function startAccountingEdit(rule) {
+    setAccountingEditId(rule.id);
+    setAccountingEditForm({
+      name: rule.name || "",
+      supplier_match_text: rule.supplier_match_text || "",
+      cost_category: rule.cost_category || "",
+      debit_account: rule.debit_account || "",
+      credit_account: rule.credit_account || "",
+      tax_key: rule.tax_key || "",
+      tax_rate: rule.tax_rate || "",
+      discount_account: rule.discount_account || "",
+      is_active: rule.is_active,
+    });
+  }
+
+  function cancelAccountingEdit() {
+    setAccountingEditId(null);
+    setAccountingEditForm(null);
+  }
+
+  async function saveAccountingEdit(rule) {
+    if (!accountingEditForm) return;
+    if (!accountingEditForm.name.trim() || !accountingEditForm.debit_account.trim() || !accountingEditForm.credit_account.trim()) {
+      setMessage("Kontierungsregel braucht Name, Aufwandskonto und Gegenkonto.");
+      return;
+    }
+    const response = await apiFetch(`/masterdata/accounting-rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emptyToNull(accountingEditForm)),
+    });
+    if (!response.ok) {
+      setMessage(`Kontierungsregel konnte nicht gespeichert werden: ${response.status}`);
+      return;
+    }
+    cancelAccountingEdit();
+    await loadMasterdata();
+    setMessage("Kontierungsregel gespeichert.");
   }
 
   return (
@@ -1775,26 +1818,101 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
               <span>Steuer</span>
               <span>Skonto</span>
               <span>Aktiv</span>
+              <span>Aktion</span>
             </div>
-            {accountingRules.map((rule) => (
-              <div className="data-row" key={rule.id}>
-                <strong>{rule.name}</strong>
-                <span>{rule.supplier_match_text || "-"}</span>
-                <span>{formatCostCategory(rule.cost_category)}</span>
-                <span>{rule.debit_account}</span>
-                <span>{rule.credit_account}</span>
-                <span>{[rule.tax_key, rule.tax_rate ? `${rule.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"}</span>
-                <span>{rule.discount_account || "-"}</span>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={rule.is_active}
-                    onChange={(event) => updateAccountingRule(rule, { is_active: event.target.checked })}
-                  />
-                  <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
-                </label>
-              </div>
-            ))}
+            {accountingRules.map((rule) => {
+              const isEditing = accountingEditId === rule.id && accountingEditForm;
+              return (
+                <div className={isEditing ? "data-row editing-row" : "data-row"} key={rule.id}>
+                  {isEditing ? (
+                    <>
+                      <input
+                        aria-label="Name"
+                        value={accountingEditForm.name}
+                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, name: event.target.value })}
+                        required
+                      />
+                      <input
+                        aria-label="Lieferant enthaelt"
+                        placeholder="optional"
+                        value={accountingEditForm.supplier_match_text}
+                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, supplier_match_text: event.target.value })}
+                      />
+                      <CostCategorySelect
+                        value={accountingEditForm.cost_category}
+                        onChange={(value) => setAccountingEditForm({ ...accountingEditForm, cost_category: value })}
+                        includeAll
+                      />
+                      <input
+                        aria-label="Aufwandskonto"
+                        value={accountingEditForm.debit_account}
+                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, debit_account: event.target.value })}
+                        required
+                      />
+                      <input
+                        aria-label="Gegenkonto"
+                        value={accountingEditForm.credit_account}
+                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, credit_account: event.target.value })}
+                        required
+                      />
+                      <div className="inline-fields">
+                        <input
+                          aria-label="Steuerschluessel"
+                          placeholder="Schl."
+                          value={accountingEditForm.tax_key}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_key: event.target.value })}
+                        />
+                        <input
+                          aria-label="Steuersatz"
+                          placeholder="19.00"
+                          value={accountingEditForm.tax_rate}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_rate: event.target.value })}
+                        />
+                      </div>
+                      <input
+                        aria-label="Skontokonto"
+                        placeholder="optional"
+                        value={accountingEditForm.discount_account}
+                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, discount_account: event.target.value })}
+                      />
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={accountingEditForm.is_active}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, is_active: event.target.checked })}
+                        />
+                        <span>{accountingEditForm.is_active ? "aktiv" : "inaktiv"}</span>
+                      </label>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => saveAccountingEdit(rule)}>Speichern</button>
+                        <button className="secondary-button" type="button" onClick={cancelAccountingEdit}>Abbrechen</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{rule.name}</strong>
+                      <span>{rule.supplier_match_text || "-"}</span>
+                      <span>{formatCostCategory(rule.cost_category)}</span>
+                      <span>{rule.debit_account}</span>
+                      <span>{rule.credit_account}</span>
+                      <span>{[rule.tax_key, rule.tax_rate ? `${rule.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"}</span>
+                      <span>{rule.discount_account || "-"}</span>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={rule.is_active}
+                          onChange={(event) => updateAccountingRule(rule, { is_active: event.target.checked })}
+                        />
+                        <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
+                      </label>
+                      <button className="secondary-button" type="button" onClick={() => startAccountingEdit(rule)}>
+                        Bearbeiten
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       </div>
@@ -1831,6 +1949,17 @@ function CategoryChecklist({ value, onChange }) {
         </label>
       ))}
     </div>
+  );
+}
+
+function CostCategorySelect({ value, onChange, includeAll = false }) {
+  return (
+    <select aria-label="Kostenart" value={value || ""} onChange={(event) => onChange(event.target.value)}>
+      {includeAll ? <option value="">Alle Kostenarten</option> : null}
+      {COST_CATEGORY_OPTIONS.map(([category, label]) => (
+        <option key={category} value={category}>{label}</option>
+      ))}
+    </select>
   );
 }
 

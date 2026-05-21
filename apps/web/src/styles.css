@@ -1002,7 +1002,7 @@ code {
 }
 
 .accounting-table .data-row {
-  grid-template-columns: minmax(150px, 1.1fr) minmax(130px, 0.9fr) minmax(150px, 1fr) minmax(90px, 0.65fr) minmax(110px, 0.75fr) minmax(110px, 0.75fr) minmax(100px, 0.7fr) minmax(90px, 0.55fr);
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.8fr) minmax(135px, 0.9fr) minmax(90px, 0.6fr) minmax(105px, 0.7fr) minmax(105px, 0.7fr) minmax(95px, 0.65fr) minmax(90px, 0.55fr) minmax(125px, 0.75fr);
 }
 
 .switch,
@@ -1029,6 +1029,17 @@ code {
 .row-actions button {
   min-height: 36px;
   padding: 0 12px;
+}
+
+.inline-fields {
+  display: grid;
+  grid-template-columns: 0.85fr 1fr;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inline-fields input {
+  min-width: 0;
 }
 
 .table-list {
@@ -1125,6 +1136,7 @@ code {
   .supplier-form > button,
   .assignment-table .data-row,
   .supplier-table .data-row,
+  .accounting-table .data-row,
   .booking-row,
   .booking-edit-row,
   .assignment-edit,

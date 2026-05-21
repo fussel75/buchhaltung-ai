@@ -538,6 +538,47 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(subcontractor, "subcontractor")
         self.assertIsNone(unclear)
 
+    def test_accounting_rule_update_can_clear_optional_fields(self):
+        rule_id = uuid4()
+        row = {
+            "id": rule_id,
+            "tenant_id": "demo-mandant",
+            "name": "Material Standard",
+            "supplier_match_text": None,
+            "cost_category": None,
+            "debit_account": "3400",
+            "credit_account": "70000",
+            "tax_key": None,
+            "tax_rate": None,
+            "discount_account": None,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            rule = database_service.update_accounting_rule(
+                rule_id=rule_id,
+                name="Material Standard",
+                supplier_match_text="",
+                cost_category="",
+                debit_account="3400",
+                credit_account="70000",
+                tax_key="",
+                tax_rate=None,
+                discount_account="",
+                is_active=True,
+            )
+
+        params = cursor.statements[0][1]
+        self.assertIsNone(params[1])
+        self.assertIsNone(params[2])
+        self.assertIsNone(params[5])
+        self.assertIsNone(params[7])
+        self.assertIsNone(rule["supplier_match_text"])
+        self.assertIsNone(rule["discount_account"])
+
     def test_assignment_unit_update_can_edit_code_and_clear_project_number(self):
         assignment_id = uuid4()
         row = {
