@@ -35,6 +35,7 @@ class AssignmentUnitRequest(BaseModel):
 
 
 class AssignmentUnitUpdateRequest(BaseModel):
+    code: str
     label: str
     kind: str = "cost_object"
     project_number: str | None = None
@@ -159,6 +160,7 @@ def patch_assignment_unit(
     require_admin(request)
     assignment = update_assignment_unit(
         assignment_id=assignment_id,
+        code=payload.code,
         label=payload.label,
         kind=payload.kind,
         project_number=payload.project_number,

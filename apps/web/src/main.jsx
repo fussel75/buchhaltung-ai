@@ -1104,6 +1104,8 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
+  const [assignmentEditId, setAssignmentEditId] = useState(null);
+  const [assignmentEditForm, setAssignmentEditForm] = useState(null);
   const [supplierEditId, setSupplierEditId] = useState(null);
   const [supplierEditForm, setSupplierEditForm] = useState(null);
   const [profileForm, setProfileForm] = useState(tenantProfile);
@@ -1194,6 +1196,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        code: assignment.code,
         label: assignment.label,
         kind: assignment.kind,
         project_number: assignment.project_number,
@@ -1208,6 +1211,48 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       return;
     }
     await loadMasterdata();
+    setMessage("Zuordnung aktualisiert.");
+  }
+
+  function startAssignmentEdit(assignment) {
+    setAssignmentEditId(assignment.id);
+    setAssignmentEditForm({
+      code: assignment.code || "",
+      label: assignment.label || "",
+      kind: assignment.kind || tenantProfile.default_assignment_kind || "cost_object",
+      project_number: assignment.project_number || "",
+      revenue_relevant: assignment.revenue_relevant,
+      aliases: (assignment.aliases || []).join(", "),
+      is_active: assignment.is_active,
+    });
+  }
+
+  function cancelAssignmentEdit() {
+    setAssignmentEditId(null);
+    setAssignmentEditForm(null);
+  }
+
+  async function saveAssignmentEdit(assignment) {
+    if (!assignmentEditForm) return;
+    if (!assignmentEditForm.code.trim() || !assignmentEditForm.label.trim()) {
+      setMessage(`${tenantProfile.assignment_label_singular} braucht Code und Name.`);
+      return;
+    }
+    const response = await apiFetch(`/masterdata/assignment-units/${assignment.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emptyToNull({
+        ...assignmentEditForm,
+        aliases: splitAliases(assignmentEditForm.aliases),
+      })),
+    });
+    if (!response.ok) {
+      setMessage(`Zuordnung konnte nicht gespeichert werden: ${response.status}`);
+      return;
+    }
+    cancelAssignmentEdit();
+    await loadMasterdata();
+    setMessage("Zuordnung gespeichert.");
   }
 
   async function saveTenantProfile(event) {
@@ -1454,26 +1499,99 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
               <span>Projektnummer</span>
               <span>Name</span>
               <span>Art</span>
+              <span>Aliase</span>
               <span>Status</span>
               <span>Aktiv</span>
+              <span>Aktion</span>
             </div>
-            {assignmentUnits.map((assignment) => (
-              <div className="data-row" key={assignment.id}>
-                <strong>{formatAssignmentCode(assignment.code, assignment.kind, tenantProfile)}</strong>
-                <span>{usesProjectNumber(assignment.kind) ? assignment.project_number || "-" : "-"}</span>
-                <span>{assignment.label}</span>
-                <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
-                <StatusPill value={assignment.revenue_relevant ? "umsatzrelevant" : "intern"} tone={assignment.revenue_relevant ? "green" : "gray"} />
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={assignment.is_active}
-                    onChange={(event) => updateAssignment(assignment, { is_active: event.target.checked })}
-                  />
-                  <span>{assignment.is_active ? "aktiv" : "inaktiv"}</span>
-                </label>
-              </div>
-            ))}
+            {assignmentUnits.map((assignment) => {
+              const isEditing = assignmentEditId === assignment.id && assignmentEditForm;
+              return (
+                <div className={isEditing ? "data-row editing-row" : "data-row"} key={assignment.id}>
+                  {isEditing ? (
+                    <>
+                      <input
+                        aria-label="Code"
+                        value={assignmentEditForm.code}
+                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, code: event.target.value })}
+                        required
+                      />
+                      <input
+                        aria-label="Projektnummer"
+                        placeholder={usesProjectNumber(assignmentEditForm.kind) ? "z.B. 25-00008" : "optional"}
+                        value={assignmentEditForm.project_number}
+                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, project_number: event.target.value })}
+                      />
+                      <input
+                        aria-label="Name"
+                        value={assignmentEditForm.label}
+                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, label: event.target.value })}
+                        required
+                      />
+                      <select
+                        aria-label="Art"
+                        value={assignmentEditForm.kind}
+                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, kind: event.target.value })}
+                      >
+                        <option value="construction_project">Bauvorhaben</option>
+                        <option value="location">Standort</option>
+                        <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+                        <option value="cost_object">Kostenobjekt</option>
+                        <option value="vehicle">Fahrzeug</option>
+                        <option value="subscription">Abo/Vertrag</option>
+                        <option value="department">Bereich</option>
+                      </select>
+                      <input
+                        aria-label="Aliase"
+                        placeholder="kommagetrennt"
+                        value={assignmentEditForm.aliases}
+                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, aliases: event.target.value })}
+                      />
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={assignmentEditForm.revenue_relevant}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, revenue_relevant: event.target.checked })}
+                        />
+                        <span>{assignmentEditForm.revenue_relevant ? "umsatzrelevant" : "intern"}</span>
+                      </label>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={assignmentEditForm.is_active}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, is_active: event.target.checked })}
+                        />
+                        <span>{assignmentEditForm.is_active ? "aktiv" : "inaktiv"}</span>
+                      </label>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => saveAssignmentEdit(assignment)}>Speichern</button>
+                        <button className="secondary-button" type="button" onClick={cancelAssignmentEdit}>Abbrechen</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{formatAssignmentCode(assignment.code, assignment.kind, tenantProfile)}</strong>
+                      <span>{usesProjectNumber(assignment.kind) ? assignment.project_number || "-" : "-"}</span>
+                      <span>{assignment.label}</span>
+                      <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
+                      <span>{assignment.aliases?.length ? assignment.aliases.join(", ") : "-"}</span>
+                      <StatusPill value={assignment.revenue_relevant ? "umsatzrelevant" : "intern"} tone={assignment.revenue_relevant ? "green" : "gray"} />
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={assignment.is_active}
+                          onChange={(event) => updateAssignment(assignment, { is_active: event.target.checked })}
+                        />
+                        <span>{assignment.is_active ? "aktiv" : "inaktiv"}</span>
+                      </label>
+                      <button className="secondary-button" type="button" onClick={() => startAssignmentEdit(assignment)}>
+                        Bearbeiten
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 

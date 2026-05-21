@@ -486,6 +486,40 @@ class BookingSuggestionTests(TestCase):
         self.assertIsNone(params[4])
         self.assertIsNone(rule["default_assignment_code"])
 
+    def test_assignment_unit_update_can_edit_code_and_clear_project_number(self):
+        assignment_id = uuid4()
+        row = {
+            "id": assignment_id,
+            "tenant_id": "demo-mandant",
+            "code": "Wewe20",
+            "label": "Weseler Weg 20",
+            "kind": "construction_project",
+            "project_number": None,
+            "revenue_relevant": True,
+            "aliases": [],
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            assignment = database_service.update_assignment_unit(
+                assignment_id=assignment_id,
+                code="Wewe20",
+                label="Weseler Weg 20",
+                kind="construction_project",
+                project_number="",
+                revenue_relevant=True,
+                aliases=["Weseler Weg 20", ""],
+                is_active=True,
+            )
+
+        params = cursor.statements[0][1]
+        self.assertEqual(params[0], "Wewe20")
+        self.assertIsNone(params[3])
+        self.assertIsNone(assignment["project_number"])
+
     def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
         document = {
             "id": str(uuid4()),

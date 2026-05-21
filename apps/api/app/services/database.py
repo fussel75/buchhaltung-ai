@@ -1627,6 +1627,7 @@ def create_assignment_unit(
 
 def update_assignment_unit(
     assignment_id: UUID,
+    code: str,
     label: str,
     kind: str,
     project_number: str | None,
@@ -1640,6 +1641,7 @@ def update_assignment_unit(
                 """
                 update tenant_assignment_units
                 set
+                    code = %s,
                     label = %s,
                     kind = %s,
                     project_number = %s,
@@ -1651,6 +1653,7 @@ def update_assignment_unit(
                 returning *
                 """,
                 (
+                    code.strip(),
                     label.strip(),
                     kind,
                     project_number.strip() if project_number else None,
