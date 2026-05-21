@@ -94,6 +94,11 @@ Die Extraktionsreihenfolge ist:
 4. Wenn keine strukturierten Daten vorhanden sind, PDF-Textregeln verwenden.
 5. OCR erst als spaeterer Fallback fuer nicht textlesbare Scans.
 
+Strukturierte XML-Belege durchlaufen zusaetzlich ein erstes Validator-Gate. Das MVP prueft
+Pflichtfelder, ISO-Datum, mindestens eine Position und die Summenlogik Netto + USt = Brutto.
+Fehler werden als `structured_validation` und `structured_validation_errors` gespeichert, in den
+Review-Warnungen angezeigt und blockieren die finale Freigabe.
+
 ## Mandanten-Stammdaten
 
 Admin-Benutzer koennen in der App einfache Stammdaten pflegen:

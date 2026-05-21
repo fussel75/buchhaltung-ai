@@ -94,5 +94,47 @@ class ExtractionXmlTests(TestCase):
         self.assertEqual(result["gross_amount"], Decimal("119.00"))
         self.assertEqual(result["document_type"], "incoming_invoice")
         self.assertEqual(result["confidence"], Decimal("1.00"))
+        self.assertEqual(result["structured_validation"]["status"], "passed")
+        self.assertEqual(result["structured_validation_errors"], [])
         self.assertEqual(result["payment_terms"][0]["amount"], Decimal("119.00"))
         self.assertTrue(result["normalized_filename"].endswith(".xml"))
+
+    def test_standalone_ubl_invoice_flags_structured_validation_errors(self):
+        broken_invoice = UBL_INVOICE.replace(
+            b"<cbc:TaxInclusiveAmount currencyID=\"EUR\">119.00</cbc:TaxInclusiveAmount>",
+            b"<cbc:TaxInclusiveAmount currencyID=\"EUR\">118.00</cbc:TaxInclusiveAmount>",
+        )
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "invoice.xml").write_bytes(broken_invoice)
+            document = {
+                "tenant_id": "demo-mandant",
+                "original_filename": "invoice.xml",
+                "content_type": "application/xml",
+                "storage_path": "invoice.xml",
+                "size_bytes": len(broken_invoice),
+                "sha256": "abc",
+            }
+
+            with (
+                patch.object(extraction_service, "get_settings", return_value=SimpleNamespace(storage_root=root)),
+                patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+                patch.object(extraction_service, "find_supplier_rule", return_value=None),
+                patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+            ):
+                result = _build_extraction_result(document)
+
+        self.assertEqual(result["source"], "standalone_xml")
+        self.assertEqual(result["xml_format"], "ubl")
+        self.assertEqual(result["gross_amount"], Decimal("118.00"))
+        self.assertEqual(result["confidence"], Decimal("0.90"))
+        self.assertEqual(result["structured_validation"]["status"], "failed")
+        self.assertEqual(
+            result["structured_validation_errors"],
+            ["Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto."],
+        )
+        self.assertIn(
+            "E-Rechnungsvalidierung: Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.",
+            result["warnings"],
+        )

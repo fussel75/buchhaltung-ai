@@ -599,6 +599,63 @@ class BookingSuggestionTests(TestCase):
         self.assertIn("Offene Extraktionswarnungen muessen vor finaler Freigabe geklaert werden.", errors)
         self.assertIn("Split-Summe Brutto passt nicht zum Beleggesamtbetrag.", errors)
 
+    def test_review_validation_blocks_structured_xml_validation_errors(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "invoice.xml",
+            "extraction": {
+                "supplier_name": "Beispiel Lieferant GmbH",
+                "invoice_number": "XR-2026-1001",
+                "invoice_date": "2026-05-21",
+                "net_amount": "100.00",
+                "tax_amount": "19.00",
+                "gross_amount": "118.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {
+                    "document_type": "incoming_invoice",
+                    "source": "standalone_xml",
+                    "xml_format": "ubl",
+                    "structured_validation_errors": [
+                        "Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto."
+                    ],
+                },
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "software",
+                    "description": "Software Abo",
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "118.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "118.00"},
+        }
+        rules = [
+            {
+                "name": "Software Standard",
+                "supplier_match_text": None,
+                "cost_category": "software",
+                "debit_account": "4806",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            errors = validate_document_review(document)
+
+        self.assertEqual(errors, ["E-Rechnungsvalidierung ist fehlgeschlagen."])
+
     def test_tenant_access_requires_admin_or_explicit_assignment(self):
         self.assertTrue(user_can_access_tenant({"role": "admin", "allowed_tenant_ids": []}, "fremd-mandant"))
         self.assertTrue(

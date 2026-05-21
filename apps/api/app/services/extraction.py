@@ -127,6 +127,7 @@ def _build_cii_xml_result(
     supplier_name = _normalize_supplier_name(
         _xml_text(root, ".//ram:ApplicableHeaderTradeAgreement/ram:SellerTradeParty/ram:Name", ns)
     )
+    currency = _xml_text(root, ".//ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode", ns)
     product_name = _clean_product_name(
         _find_first_position_product_name(text)
         or _xml_text(root, ".//ram:IncludedSupplyChainTradeLineItem[1]/ram:SpecifiedTradeProduct/ram:Name", ns)
@@ -208,6 +209,7 @@ def _build_cii_xml_result(
         invoice_date=invoice_date,
     )
     normalized_filename = _normalized_structured_filename(normalized_filename, document)
+    line_count = len(root.findall(".//ram:IncludedSupplyChainTradeLineItem", ns))
 
     missing = [
         label
@@ -219,8 +221,18 @@ def _build_cii_xml_result(
             "MwSt": tax_amount,
             "Gesamtbetrag": gross_amount,
         }.items()
-        if not value
+        if not _has_value(value)
     ]
+    validation_errors = _structured_xml_validation_errors(
+        invoice_number=invoice_number,
+        invoice_date=invoice_date,
+        supplier_name=supplier_name,
+        currency=currency,
+        net_amount=net_amount,
+        tax_amount=tax_amount,
+        gross_amount=gross_amount,
+        line_count=line_count,
+    )
     warnings = []
     if delivery_address and not assignment:
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
@@ -230,6 +242,7 @@ def _build_cii_xml_result(
         )
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
+    warnings.extend(f"E-Rechnungsvalidierung: {error}" for error in validation_errors)
 
     return {
         "supplier_name": supplier_name,
@@ -275,13 +288,15 @@ def _build_cii_xml_result(
             discounted_payable_amount=visible_discount.get("discounted_payable_amount"),
             is_credit_note=is_credit_note,
         ),
-        "currency": "EUR",
-        "confidence": Decimal("1.00") if not missing else Decimal("0.90"),
+        "currency": currency or "EUR",
+        "confidence": Decimal("1.00") if not missing and not validation_errors else Decimal("0.90"),
         "warnings": warnings,
         "normalized_filename": normalized_filename,
         "source": _structured_source(document),
         "structured_attachment": attachment_name,
         "xml_format": "cii",
+        "structured_validation": _structured_xml_validation("cii", validation_errors),
+        "structured_validation_errors": validation_errors,
     }
 
 
@@ -350,6 +365,7 @@ def _build_ubl_xml_result(
     )
 
     normalized_filename = _normalized_structured_filename(normalized_filename, document)
+    line_count = len(root.findall(f".//cac:{line_tag}", ns))
 
     missing = [
         label
@@ -361,13 +377,24 @@ def _build_ubl_xml_result(
             "MwSt": tax_amount,
             "Gesamtbetrag": gross_amount,
         }.items()
-        if not value
+        if not _has_value(value)
     ]
+    validation_errors = _structured_xml_validation_errors(
+        invoice_number=invoice_number,
+        invoice_date=invoice_date,
+        supplier_name=supplier_name,
+        currency=currency,
+        net_amount=net_amount,
+        tax_amount=tax_amount,
+        gross_amount=gross_amount,
+        line_count=line_count,
+    )
     warnings = []
     if delivery_address and not assignment:
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
+    warnings.extend(f"E-Rechnungsvalidierung: {error}" for error in validation_errors)
 
     return {
         "supplier_name": supplier_name,
@@ -414,12 +441,14 @@ def _build_ubl_xml_result(
             is_credit_note=is_credit_note,
         ),
         "currency": currency,
-        "confidence": Decimal("1.00") if not missing else Decimal("0.90"),
+        "confidence": Decimal("1.00") if not missing and not validation_errors else Decimal("0.90"),
         "warnings": warnings,
         "normalized_filename": normalized_filename,
         "source": _structured_source(document),
         "structured_attachment": attachment_name,
         "xml_format": "ubl",
+        "structured_validation": _structured_xml_validation("ubl", validation_errors),
+        "structured_validation_errors": validation_errors,
     }
 
 
@@ -644,6 +673,10 @@ def _xml_text(root: ElementTree.Element, path: str, ns: dict[str, str]) -> str |
     return value or None
 
 
+def _has_value(value: object) -> bool:
+    return value is not None and value != ""
+
+
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
@@ -701,6 +734,59 @@ def _ubl_delivery_address(root: ElementTree.Element, ns: dict[str, str]) -> str 
         street_line = f"{street} {building}".strip() if building else street
         return f"{street_line}, {postcode} {city}"
     return None
+
+
+def _structured_xml_validation_errors(
+    *,
+    invoice_number: str | None,
+    invoice_date: str | None,
+    supplier_name: str | None,
+    currency: str | None,
+    net_amount: Decimal | None,
+    tax_amount: Decimal | None,
+    gross_amount: Decimal | None,
+    line_count: int,
+) -> list[str]:
+    errors = []
+    required_values = {
+        "Belegnummer": invoice_number,
+        "Belegdatum": invoice_date,
+        "Lieferant": supplier_name,
+        "Waehrung": currency,
+        "Netto": net_amount,
+        "USt": tax_amount,
+        "Brutto": gross_amount,
+    }
+    for label, value in required_values.items():
+        if not _has_value(value):
+            errors.append(f"Pflichtfeld fehlt: {label}.")
+
+    if invoice_date and not _is_iso_date(invoice_date):
+        errors.append("Belegdatum ist kein ISO-Datum YYYY-MM-DD.")
+    if line_count < 1:
+        errors.append("Mindestens eine Rechnungsposition fehlt.")
+    if net_amount is not None and tax_amount is not None and gross_amount is not None:
+        expected_gross = (net_amount + tax_amount).quantize(Decimal("0.01"))
+        if abs(expected_gross - gross_amount) > Decimal("0.02"):
+            errors.append("Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.")
+
+    return errors
+
+
+def _structured_xml_validation(xml_format: str, errors: list[str]) -> dict[str, object]:
+    return {
+        "format": xml_format,
+        "status": "failed" if errors else "passed",
+        "errors": errors,
+    }
+
+
+def _is_iso_date(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
 
 
 def _find_visible_discount_base(text: str) -> Decimal | None:

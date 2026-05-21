@@ -642,6 +642,9 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
         errors.append("Pflichtfeld fehlt: Belegart.")
     if extraction.get("warnings"):
         errors.append("Offene Extraktionswarnungen muessen vor finaler Freigabe geklaert werden.")
+    structured_validation = raw_result.get("structured_validation") or {}
+    if raw_result.get("structured_validation_errors") or structured_validation.get("status") == "failed":
+        errors.append("E-Rechnungsvalidierung ist fehlgeschlagen.")
 
     if not suggestions:
         errors.append("Keine Buchungsvorschlaege vorhanden.")
