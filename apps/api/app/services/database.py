@@ -150,12 +150,15 @@ def init_database() -> None:
                     password_hash text not null,
                     display_name text not null,
                     role text not null check (role in ('admin', 'user')),
+                    allowed_tenant_ids jsonb not null default '[]'::jsonb,
                     is_active boolean not null default true,
                     created_at timestamptz not null,
                     last_login_at timestamptz
                 )
                 """
             )
+            cursor.execute("alter table users add column if not exists allowed_tenant_ids jsonb not null default '[]'::jsonb")
+            cursor.execute("update users set allowed_tenant_ids = '[\"*\"]'::jsonb where role = 'admin'")
             cursor.execute(
                 """
                 create unique index if not exists users_email_idx
@@ -240,6 +243,31 @@ def init_database() -> None:
                 """
                 create index if not exists tenant_supplier_rules_tenant_idx
                     on tenant_supplier_rules (tenant_id, is_active)
+                """
+            )
+            cursor.execute(
+                """
+                create table if not exists tenant_accounting_rules (
+                    id uuid primary key,
+                    tenant_id text not null,
+                    name text not null,
+                    supplier_match_text text,
+                    cost_category text,
+                    debit_account text not null,
+                    credit_account text not null,
+                    tax_key text,
+                    tax_rate numeric(5, 2),
+                    discount_account text,
+                    is_active boolean not null default true,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists tenant_accounting_rules_tenant_idx
+                    on tenant_accounting_rules (tenant_id, is_active, cost_category)
                 """
             )
     seed_demo_masterdata()
@@ -821,12 +849,13 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
         extraction = document.get("extraction") or {}
         raw_result = extraction.get("raw_result") or {}
         payment_decision = document.get("payment_decision") or _default_payment_decision(extraction)
+        supplier_name = extraction.get("supplier_name")
         common = {
             "tenant_id": document.get("tenant_id"),
             "document_id": document.get("id"),
             "original_filename": document.get("original_filename"),
             "normalized_filename": document.get("normalized_filename"),
-            "supplier_name": extraction.get("supplier_name"),
+            "supplier_name": supplier_name,
             "invoice_number": extraction.get("invoice_number"),
             "invoice_date": extraction.get("invoice_date"),
             "document_type": raw_result.get("document_type") or "incoming_invoice",
@@ -841,6 +870,11 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
         }
 
         for suggestion in document.get("booking_suggestions") or []:
+            accounting_rule = find_accounting_rule(
+                tenant_id=document.get("tenant_id"),
+                supplier_name=supplier_name,
+                cost_category=suggestion.get("cost_category"),
+            )
             rows.append(
                 {
                     **common,
@@ -855,11 +889,17 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                     "tax_amount": _money_string(suggestion.get("tax_amount")),
                     "gross_amount": _money_string(suggestion.get("gross_amount")),
                     "payable_delta": None,
+                    **_accounting_export_fields(accounting_rule),
                 }
             )
 
         payment_delta = _payment_delta(extraction, payment_decision)
         if payment_delta is not None and payment_delta != Decimal("0.00"):
+            accounting_rule = find_accounting_rule(
+                tenant_id=document.get("tenant_id"),
+                supplier_name=supplier_name,
+                cost_category=(document.get("booking_suggestions") or [{}])[0].get("cost_category"),
+            )
             rows.append(
                 {
                     **common,
@@ -874,6 +914,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                     "tax_amount": None,
                     "gross_amount": _money_string(payment_delta),
                     "payable_delta": _money_string(payment_delta),
+                    **_accounting_export_fields(accounting_rule, payment_adjustment=True),
                 }
             )
     return rows
@@ -957,6 +998,30 @@ def _payment_delta(extraction: dict[str, Any], payment_decision: dict[str, Any] 
     if gross_amount is None or payment_amount is None:
         return None
     return _round_money(payment_amount - gross_amount)
+
+
+def _accounting_export_fields(
+    rule: dict[str, Any] | None,
+    payment_adjustment: bool = False,
+) -> dict[str, Any]:
+    if not rule:
+        return {
+            "debit_account": None,
+            "credit_account": None,
+            "tax_key": None,
+            "tax_rate": None,
+            "discount_account": None,
+            "accounting_rule": None,
+        }
+    debit_account = rule["discount_account"] if payment_adjustment and rule.get("discount_account") else rule["debit_account"]
+    return {
+        "debit_account": debit_account,
+        "credit_account": rule["credit_account"],
+        "tax_key": rule["tax_key"],
+        "tax_rate": _money_string(rule["tax_rate"]),
+        "discount_account": rule["discount_account"],
+        "accounting_rule": rule["name"],
+    }
 
 
 def _payment_terms_from_extraction(extraction: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1056,8 +1121,10 @@ def create_user(
     display_name: str,
     role: str = "user",
     is_active: bool = True,
+    allowed_tenant_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
+    tenant_ids = _normalize_allowed_tenant_ids(allowed_tenant_ids, role)
     with _connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -1068,11 +1135,12 @@ def create_user(
                     password_hash,
                     display_name,
                     role,
+                    allowed_tenant_ids,
                     is_active,
                     created_at,
                     last_login_at
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, null)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, null)
                 returning *
                 """,
                 (
@@ -1081,6 +1149,7 @@ def create_user(
                     password_hash,
                     display_name.strip() or email.strip().lower(),
                     role,
+                    Jsonb(tenant_ids),
                     is_active,
                     now,
                 ),
@@ -1107,6 +1176,7 @@ def update_user(
     role: str | None = None,
     is_active: bool | None = None,
     password_hash: str | None = None,
+    allowed_tenant_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     assignments = []
     values: list[Any] = []
@@ -1122,6 +1192,9 @@ def update_user(
     if password_hash is not None:
         assignments.append("password_hash = %s")
         values.append(password_hash)
+    if allowed_tenant_ids is not None or role == "admin":
+        assignments.append("allowed_tenant_ids = %s")
+        values.append(Jsonb(_normalize_allowed_tenant_ids(allowed_tenant_ids, role or "user")))
     if not assignments:
         return None
 
@@ -1604,6 +1677,142 @@ def update_supplier_rule(
             return _serialize_supplier_rule(row) if row else None
 
 
+def list_accounting_rules(tenant_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_accounting_rules
+                where tenant_id = %s
+                order by is_active desc, supplier_match_text nulls last, cost_category nulls last, name asc
+                """,
+                (tenant_id,),
+            )
+            return [_serialize_accounting_rule(row) for row in cursor.fetchall()]
+
+
+def create_accounting_rule(
+    tenant_id: str,
+    name: str,
+    supplier_match_text: str | None,
+    cost_category: str | None,
+    debit_account: str,
+    credit_account: str,
+    tax_key: str | None,
+    tax_rate: Decimal | None,
+    discount_account: str | None,
+    is_active: bool = True,
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into tenant_accounting_rules (
+                    id, tenant_id, name, supplier_match_text, cost_category,
+                    debit_account, credit_account, tax_key, tax_rate, discount_account,
+                    is_active, created_at, updated_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                returning *
+                """,
+                (
+                    uuid4(),
+                    tenant_id,
+                    name.strip(),
+                    supplier_match_text.strip() if supplier_match_text else None,
+                    cost_category or None,
+                    debit_account.strip(),
+                    credit_account.strip(),
+                    tax_key.strip() if tax_key else None,
+                    tax_rate,
+                    discount_account.strip() if discount_account else None,
+                    is_active,
+                    now,
+                    now,
+                ),
+            )
+            return _serialize_accounting_rule(cursor.fetchone())
+
+
+def update_accounting_rule(
+    rule_id: UUID,
+    name: str,
+    supplier_match_text: str | None,
+    cost_category: str | None,
+    debit_account: str,
+    credit_account: str,
+    tax_key: str | None,
+    tax_rate: Decimal | None,
+    discount_account: str | None,
+    is_active: bool,
+) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update tenant_accounting_rules
+                set
+                    name = %s,
+                    supplier_match_text = %s,
+                    cost_category = %s,
+                    debit_account = %s,
+                    credit_account = %s,
+                    tax_key = %s,
+                    tax_rate = %s,
+                    discount_account = %s,
+                    is_active = %s,
+                    updated_at = %s
+                where id = %s
+                returning *
+                """,
+                (
+                    name.strip(),
+                    supplier_match_text.strip() if supplier_match_text else None,
+                    cost_category or None,
+                    debit_account.strip(),
+                    credit_account.strip(),
+                    tax_key.strip() if tax_key else None,
+                    tax_rate,
+                    discount_account.strip() if discount_account else None,
+                    is_active,
+                    datetime.now(UTC),
+                    rule_id,
+                ),
+            )
+            row = cursor.fetchone()
+            return _serialize_accounting_rule(row) if row else None
+
+
+def find_accounting_rule(
+    tenant_id: str | None,
+    supplier_name: str | None,
+    cost_category: str | None,
+) -> dict[str, Any] | None:
+    if not tenant_id:
+        return None
+    supplier_text = _normalize_match_text(supplier_name or "")
+    best_rule = None
+    best_score = -1
+    for rule in list_accounting_rules(tenant_id):
+        if not rule["is_active"]:
+            continue
+        score = 0
+        if rule["cost_category"]:
+            if rule["cost_category"] != cost_category:
+                continue
+            score += 2
+        if rule["supplier_match_text"]:
+            if _normalize_match_text(rule["supplier_match_text"]) not in supplier_text:
+                continue
+            score += 4
+        if score > best_score:
+            best_rule = rule
+            best_score = score
+    return best_rule
+
+
 def find_supplier_rule(tenant_id: str, *texts: str | None) -> dict[str, Any] | None:
     haystack = _normalize_match_text(" ".join(text or "" for text in texts))
     if not haystack:
@@ -1668,6 +1877,7 @@ def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) ->
         "email": row["email"],
         "display_name": row["display_name"],
         "role": row["role"],
+        "allowed_tenant_ids": row.get("allowed_tenant_ids") or [],
         "is_active": row["is_active"],
         "created_at": _serialize_date(row["created_at"]),
         "last_login_at": _serialize_date(row["last_login_at"]),
@@ -1675,6 +1885,17 @@ def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) ->
     if include_password_hash:
         user["password_hash"] = row["password_hash"]
     return user
+
+
+def _normalize_allowed_tenant_ids(tenant_ids: list[str] | None, role: str) -> list[str]:
+    if role == "admin":
+        return ["*"]
+    normalized: list[str] = []
+    for tenant_id in tenant_ids or ["demo-mandant"]:
+        clean = tenant_id.strip()
+        if clean and clean not in normalized:
+            normalized.append(clean)
+    return normalized or ["demo-mandant"]
 
 
 def _serialize_tenant_profile(row: dict[str, Any]) -> dict[str, Any]:
@@ -1718,6 +1939,24 @@ def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:
         "customer_number": row["customer_number"],
         "default_cost_category": row["default_cost_category"],
         "default_assignment_code": row["default_assignment_code"],
+        "is_active": row["is_active"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _serialize_accounting_rule(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "tenant_id": row["tenant_id"],
+        "name": row["name"],
+        "supplier_match_text": row["supplier_match_text"],
+        "cost_category": row["cost_category"],
+        "debit_account": row["debit_account"],
+        "credit_account": row["credit_account"],
+        "tax_key": row["tax_key"],
+        "tax_rate": str(row["tax_rate"]) if row["tax_rate"] is not None else None,
+        "discount_account": row["discount_account"],
         "is_active": row["is_active"],
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),

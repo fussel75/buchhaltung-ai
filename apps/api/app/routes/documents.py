@@ -16,7 +16,6 @@ from app.services.database import (
     build_booking_export_rows,
     create_document_record,
     delete_document,
-    get_document,
     list_documents,
     list_documents_for_month,
     prepare_document_review,
@@ -31,6 +30,7 @@ from app.services.storage import (
     resolve_stored_document_path,
     store_original_document,
 )
+from app.routes.users import require_document_access, require_tenant_access
 
 router = APIRouter()
 
@@ -145,10 +145,12 @@ def _zip_documents(documents: list[dict[str, Any]], archive_name: str) -> Stream
 
 @router.post("/upload")
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     tenant_id: str = Form("demo-mandant"),
 ) -> dict[str, Any]:
     tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, tenant_id)
     stored = await store_original_document(file=file, tenant_id=tenant_id)
     document, is_duplicate = create_document_record(tenant_id=tenant_id, stored=stored)
     if is_duplicate:
@@ -163,20 +165,22 @@ async def upload_document(
 
 @router.get("")
 def get_documents(
+    request: Request,
     tenant_id: str = Query("demo-mandant", min_length=1),
 ) -> dict[str, list[dict[str, Any]]]:
     tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, tenant_id)
     return {"documents": list_documents(tenant_id=tenant_id)}
 
 
 @router.post("/export")
-def export_documents(payload: DocumentExportRequest) -> StreamingResponse:
+def export_documents(payload: DocumentExportRequest, request: Request) -> StreamingResponse:
     documents: list[dict[str, Any]] = []
     expected_tenant_id = _normalize_tenant_id(payload.tenant_id) if payload.tenant_id else None
+    if expected_tenant_id:
+        require_tenant_access(request, expected_tenant_id)
     for document_id in payload.document_ids:
-        document = get_document(document_id)
-        if document is None:
-            raise HTTPException(status_code=404, detail=f"document not found: {document_id}")
+        document = require_document_access(request, document_id)
         if expected_tenant_id and document["tenant_id"] != expected_tenant_id:
             raise HTTPException(status_code=400, detail="document does not belong to tenant")
         documents.append(document)
@@ -187,23 +191,27 @@ def export_documents(payload: DocumentExportRequest) -> StreamingResponse:
 
 @router.get("/export/month")
 def export_documents_for_month(
+    request: Request,
     tenant_id: str = Query("demo-mandant", min_length=1),
     year: int = Query(..., ge=2000, le=2100),
     month: int = Query(..., ge=1, le=12),
 ) -> StreamingResponse:
     tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, tenant_id)
     documents = list_documents_for_month(tenant_id=tenant_id, year=year, month=month)
     return _zip_documents(documents, f"belege-{tenant_id}-{year}-{month:02d}.zip")
 
 
 @router.get("/export/bookings", response_model=None)
 def export_booking_rows(
+    request: Request,
     tenant_id: str = Query("demo-mandant", min_length=1),
     year: int = Query(..., ge=2000, le=2100),
     month: int = Query(..., ge=1, le=12),
     format: Literal["csv", "json"] = Query("csv"),
 ) -> Any:
     tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, tenant_id)
     documents = list_documents_for_month(tenant_id=tenant_id, year=year, month=month)
     rows = build_booking_export_rows(documents)
     if not rows:
@@ -223,11 +231,10 @@ def export_booking_rows(
 @router.get("/{document_id}/file")
 def get_document_file(
     document_id: UUID,
+    request: Request,
     disposition: str = Query("inline", pattern="^(inline|attachment)$"),
 ) -> FileResponse:
-    document = get_document(document_id)
-    if document is None:
-        raise HTTPException(status_code=404, detail="document not found")
+    document = require_document_access(request, document_id)
 
     path = resolve_stored_document_path(document["storage_path"])
     if not path.is_file():
@@ -242,12 +249,14 @@ def get_document_file(
 
 
 @router.post("/{document_id}/extract")
-def extract_document(document_id: UUID) -> dict[str, Any]:
+def extract_document(document_id: UUID, request: Request) -> dict[str, Any]:
+    require_document_access(request, document_id)
     return {"document": run_mock_extraction(document_id)}
 
 
 @router.post("/{document_id}/review")
 def prepare_review(document_id: UUID, request: Request) -> dict[str, Any]:
+    require_document_access(request, document_id)
     user = getattr(request.state, "user", None) or {}
     actor = user.get("email") or "system"
     document = prepare_document_review(document_id, actor=actor)
@@ -258,6 +267,7 @@ def prepare_review(document_id: UUID, request: Request) -> dict[str, Any]:
 
 @router.post("/{document_id}/approve")
 def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
+    require_document_access(request, document_id)
     user = getattr(request.state, "user", None) or {}
     actor = user.get("email") or "system"
     document = approve_document_review(document_id, actor=actor)
@@ -268,6 +278,7 @@ def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
 
 @router.post("/{document_id}/reopen-review")
 def reopen_review(document_id: UUID, request: Request) -> dict[str, Any]:
+    require_document_access(request, document_id)
     user = getattr(request.state, "user", None) or {}
     actor = user.get("email") or "system"
     document = reopen_document_review(document_id, actor=actor)
@@ -283,6 +294,7 @@ def update_document_booking_suggestion(
     payload: BookingSuggestionUpdate,
     request: Request,
 ) -> dict[str, Any]:
+    require_document_access(request, document_id)
     user = getattr(request.state, "user", None) or {}
     actor = user.get("email") or "system"
     try:
@@ -305,6 +317,7 @@ def update_document_payment_decision(
     payload: PaymentDecisionUpdate,
     request: Request,
 ) -> dict[str, Any]:
+    require_document_access(request, document_id)
     user = getattr(request.state, "user", None) or {}
     actor = user.get("email") or "system"
     try:
@@ -321,10 +334,9 @@ def update_document_payment_decision(
 
 
 @router.delete("/{document_id}")
-def remove_document(document_id: UUID) -> dict[str, Any]:
+def remove_document(document_id: UUID, request: Request) -> dict[str, Any]:
+    require_document_access(request, document_id)
     document = delete_document(document_id)
-    if document is None:
-        raise HTTPException(status_code=404, detail="document not found")
 
     delete_stored_document_path(document["storage_path"])
     return {"document": document, "status": "deleted"}

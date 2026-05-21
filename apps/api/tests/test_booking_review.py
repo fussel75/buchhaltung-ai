@@ -8,7 +8,8 @@ from pydantic import ValidationError
 from app.services import database as database_service
 from app.services.extraction import _normalized_invoice_filename, _payment_terms
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
-from app.services.database import _booking_suggestions_from_extraction, build_booking_export_rows
+from app.routes.users import user_can_access_tenant
+from app.services.database import _booking_suggestions_from_extraction, build_booking_export_rows, find_accounting_rule
 
 
 class RecordingCursor:
@@ -328,54 +329,75 @@ class BookingSuggestionTests(TestCase):
 
     def test_booking_export_rows_include_payment_adjustment_for_cash_discount(self):
         document_id = uuid4()
-        rows = build_booking_export_rows(
-            [
+        with patch.object(
+            database_service,
+            "list_accounting_rules",
+            return_value=[
                 {
-                    "id": str(document_id),
-                    "tenant_id": "demo-mandant",
-                    "original_filename": "RE1574023.pdf",
-                    "normalized_filename": "ERg RE1574023.pdf",
-                    "status": "review_approved",
-                    "extraction": {
-                        "supplier_name": "Luechau Baustoffe GmbH",
-                        "invoice_number": "RE1574023",
-                        "invoice_date": "2026-05-07",
-                        "gross_amount": "331.91",
-                        "currency": "EUR",
-                        "raw_result": {"document_type": "incoming_invoice"},
-                    },
-                    "booking_suggestions": [
-                        {
-                            "line_no": 1,
-                            "booking_type": "incoming_invoice",
-                            "cost_category": "material",
-                            "assignment_kind": "construction_project",
-                            "assignment_code": "Wewe20",
-                            "description": "PE-Folie",
-                            "net_amount": "278.92",
-                            "tax_amount": "52.99",
-                            "gross_amount": "331.91",
-                        }
-                    ],
-                    "payment_decision": {
-                        "payment_type": "cash_discount",
-                        "label": "Skontozahlung",
-                        "due_date": "2026-05-21",
-                        "amount": "324.63",
-                        "discount_base": "242.66",
-                        "discount_percent": "3.00",
-                        "discount_amount": "7.28",
-                    },
+                    "name": "Material Standard",
+                    "supplier_match_text": None,
+                    "cost_category": "material",
+                    "debit_account": "3400",
+                    "credit_account": "70000",
+                    "tax_key": "9",
+                    "tax_rate": "19.00",
+                    "discount_account": "3736",
+                    "is_active": True,
                 }
-            ]
-        )
+            ],
+        ):
+            rows = build_booking_export_rows(
+                [
+                    {
+                        "id": str(document_id),
+                        "tenant_id": "demo-mandant",
+                        "original_filename": "RE1574023.pdf",
+                        "normalized_filename": "ERg RE1574023.pdf",
+                        "status": "review_approved",
+                        "extraction": {
+                            "supplier_name": "Luechau Baustoffe GmbH",
+                            "invoice_number": "RE1574023",
+                            "invoice_date": "2026-05-07",
+                            "gross_amount": "331.91",
+                            "currency": "EUR",
+                            "raw_result": {"document_type": "incoming_invoice"},
+                        },
+                        "booking_suggestions": [
+                            {
+                                "line_no": 1,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "assignment_kind": "construction_project",
+                                "assignment_code": "Wewe20",
+                                "description": "PE-Folie",
+                                "net_amount": "278.92",
+                                "tax_amount": "52.99",
+                                "gross_amount": "331.91",
+                            }
+                        ],
+                        "payment_decision": {
+                            "payment_type": "cash_discount",
+                            "label": "Skontozahlung",
+                            "due_date": "2026-05-21",
+                            "amount": "324.63",
+                            "discount_base": "242.66",
+                            "discount_percent": "3.00",
+                            "discount_amount": "7.28",
+                        },
+                    }
+                ]
+            )
 
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["row_type"], "cost")
         self.assertEqual(rows[0]["gross_amount"], "331.91")
+        self.assertEqual(rows[0]["debit_account"], "3400")
+        self.assertEqual(rows[0]["credit_account"], "70000")
+        self.assertEqual(rows[0]["tax_key"], "9")
         self.assertEqual(rows[1]["row_type"], "payment_adjustment")
         self.assertEqual(rows[1]["gross_amount"], "-7.28")
         self.assertEqual(rows[1]["payable_delta"], "-7.28")
+        self.assertEqual(rows[1]["debit_account"], "3736")
         self.assertEqual(rows[1]["payment_type"], "cash_discount")
 
     def test_booking_export_rows_skip_unapproved_documents(self):
@@ -392,3 +414,53 @@ class BookingSuggestionTests(TestCase):
         )
 
         self.assertEqual(rows, [])
+
+    def test_accounting_rule_matching_prefers_supplier_and_cost_category(self):
+        rules = [
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": None,
+                "is_active": True,
+            },
+            {
+                "name": "Luechau Material",
+                "supplier_match_text": "Luechau",
+                "cost_category": "material",
+                "debit_account": "3425",
+                "credit_account": "70001",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            rule = find_accounting_rule(
+                tenant_id="demo-mandant",
+                supplier_name="Luechau Baustoffe GmbH",
+                cost_category="material",
+            )
+
+        self.assertEqual(rule["name"], "Luechau Material")
+
+    def test_tenant_access_requires_admin_or_explicit_assignment(self):
+        self.assertTrue(user_can_access_tenant({"role": "admin", "allowed_tenant_ids": []}, "fremd-mandant"))
+        self.assertTrue(
+            user_can_access_tenant(
+                {"role": "user", "allowed_tenant_ids": ["demo-mandant"]},
+                "demo-mandant",
+            )
+        )
+        self.assertFalse(
+            user_can_access_tenant(
+                {"role": "user", "allowed_tenant_ids": ["demo-mandant"]},
+                "fremd-mandant",
+            )
+        )

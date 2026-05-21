@@ -1,17 +1,21 @@
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from app.routes.users import require_admin
+from app.routes.users import require_admin, require_tenant_access
 from app.services.database import (
+    create_accounting_rule,
     create_assignment_unit,
     create_supplier_rule,
     ensure_tenant_profile,
     get_tenant_profile,
+    list_accounting_rules,
     list_assignment_units,
     list_supplier_rules,
     tenant_profile_template,
+    update_accounting_rule,
     update_assignment_unit,
     update_supplier_rule,
     upsert_tenant_profile,
@@ -48,6 +52,18 @@ class SupplierRuleRequest(BaseModel):
     is_active: bool = True
 
 
+class AccountingRuleRequest(BaseModel):
+    name: str
+    supplier_match_text: str | None = None
+    cost_category: str | None = None
+    debit_account: str
+    credit_account: str
+    tax_key: str | None = None
+    tax_rate: Decimal | None = None
+    discount_account: str | None = None
+    is_active: bool = True
+
+
 class TenantProfileRequest(BaseModel):
     display_name: str
     industry: str = "general"
@@ -71,9 +87,8 @@ def get_profile(
     request: Request,
     tenant_id: str = Query("demo-mandant", min_length=1),
 ) -> dict:
-    if not getattr(request.state, "user", None):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, normalized_tenant_id)
     return {"tenant_profile": get_tenant_profile(normalized_tenant_id) or ensure_tenant_profile(normalized_tenant_id)}
 
 
@@ -203,3 +218,58 @@ def patch_supplier_rule(
     if not rule:
         raise HTTPException(status_code=404, detail="supplier rule not found")
     return {"supplier_rule": rule}
+
+
+@router.get("/accounting-rules")
+def get_accounting_rules(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    require_admin(request)
+    return {"accounting_rules": list_accounting_rules(_normalize_tenant_id(tenant_id))}
+
+
+@router.post("/accounting-rules", status_code=status.HTTP_201_CREATED)
+def post_accounting_rule(
+    payload: AccountingRuleRequest,
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    require_admin(request)
+    rule = create_accounting_rule(
+        tenant_id=_normalize_tenant_id(tenant_id),
+        name=payload.name,
+        supplier_match_text=payload.supplier_match_text,
+        cost_category=payload.cost_category,
+        debit_account=payload.debit_account,
+        credit_account=payload.credit_account,
+        tax_key=payload.tax_key,
+        tax_rate=payload.tax_rate,
+        discount_account=payload.discount_account,
+        is_active=payload.is_active,
+    )
+    return {"accounting_rule": rule}
+
+
+@router.patch("/accounting-rules/{rule_id}")
+def patch_accounting_rule(
+    rule_id: UUID,
+    payload: AccountingRuleRequest,
+    request: Request,
+) -> dict:
+    require_admin(request)
+    rule = update_accounting_rule(
+        rule_id=rule_id,
+        name=payload.name,
+        supplier_match_text=payload.supplier_match_text,
+        cost_category=payload.cost_category,
+        debit_account=payload.debit_account,
+        credit_account=payload.credit_account,
+        tax_key=payload.tax_key,
+        tax_rate=payload.tax_rate,
+        discount_account=payload.discount_account,
+        is_active=payload.is_active,
+    )
+    if not rule:
+        raise HTTPException(status_code=404, detail="accounting rule not found")
+    return {"accounting_rule": rule}

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.services.auth import hash_password
-from app.services.database import create_user, list_users, update_user
+from app.services.database import create_user, get_document, list_users, update_user
 
 router = APIRouter()
 
@@ -14,23 +14,50 @@ class UserCreateRequest(BaseModel):
     password: str
     display_name: str
     role: str = "user"
+    allowed_tenant_ids: list[str] | None = None
     is_active: bool = True
 
 
 class UserUpdateRequest(BaseModel):
     display_name: str | None = None
     role: str | None = None
+    allowed_tenant_ids: list[str] | None = None
     is_active: bool | None = None
     password: str | None = None
 
 
-def require_admin(request: Request) -> dict:
+def require_user(request: Request) -> dict:
     user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user
+
+
+def require_admin(request: Request) -> dict:
+    user = require_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
     return user
+
+
+def user_can_access_tenant(user: dict, tenant_id: str) -> bool:
+    allowed_tenant_ids = user.get("allowed_tenant_ids") or []
+    return user.get("role") == "admin" or "*" in allowed_tenant_ids or tenant_id in allowed_tenant_ids
+
+
+def require_tenant_access(request: Request, tenant_id: str) -> dict:
+    user = require_user(request)
+    if not user_can_access_tenant(user, tenant_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant access required")
+    return user
+
+
+def require_document_access(request: Request, document_id: UUID) -> dict:
+    document = get_document(document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+    require_tenant_access(request, document["tenant_id"])
+    return document
 
 
 def _validate_role(role: str) -> str:
@@ -55,6 +82,7 @@ def post_user(payload: UserCreateRequest, request: Request) -> dict:
         password_hash=hash_password(payload.password),
         display_name=payload.display_name,
         role=_validate_role(payload.role),
+        allowed_tenant_ids=payload.allowed_tenant_ids,
         is_active=payload.is_active,
     )
     return {"user": user}
@@ -71,6 +99,7 @@ def patch_user(user_id: UUID, payload: UserUpdateRequest, request: Request) -> d
         user_id=user_id,
         display_name=payload.display_name,
         role=role,
+        allowed_tenant_ids=payload.allowed_tenant_ids,
         is_active=payload.is_active,
         password_hash=password_hash,
     )

@@ -727,7 +727,7 @@ function UploadApp() {
               onClick={exportBookingRows}
               disabled={exporting === "bookings"}
             >
-              {exporting === "bookings" ? "Erstellt..." : "Buchungen CSV"}
+              {exporting === "bookings" ? "Erstellt..." : "Buchungsentwurf CSV"}
             </button>
           </div>
         </div>
@@ -879,7 +879,7 @@ function UploadApp() {
       ) : null}
 
       {activeView === "users" && user?.role === "admin" ? (
-        <UserAdmin apiFetch={apiFetch} currentUser={user} />
+        <UserAdmin apiFetch={apiFetch} currentUser={user} activeTenantId={activeTenantId} />
       ) : null}
     </main>
   );
@@ -894,21 +894,34 @@ function Metric({ label, value }) {
   );
 }
 
-function UserAdmin({ apiFetch, currentUser }) {
+function UserAdmin({ apiFetch, currentUser, activeTenantId }) {
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({ email: "", password: "", display_name: "", role: "user" });
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    display_name: "",
+    role: "user",
+    allowed_tenant_ids: activeTenantId,
+  });
   const [message, setMessage] = useState("");
 
   const loadUsers = useCallback(async () => {
     const response = await apiFetch("/users");
     if (!response.ok) throw new Error(`Benutzer konnten nicht geladen werden: ${response.status}`);
     const result = await response.json();
-    setUsers(result.users ?? []);
+    setUsers((result.users ?? []).map((account) => ({
+      ...account,
+      allowed_tenant_ids_text: (account.allowed_tenant_ids ?? []).join(", "),
+    })));
   }, [apiFetch]);
 
   useEffect(() => {
     loadUsers().catch((error) => setMessage(error.message));
   }, [loadUsers]);
+
+  useEffect(() => {
+    setForm((current) => (current.allowed_tenant_ids ? current : { ...current, allowed_tenant_ids: activeTenantId }));
+  }, [activeTenantId]);
 
   async function createUser(event) {
     event.preventDefault();
@@ -916,14 +929,17 @@ function UserAdmin({ apiFetch, currentUser }) {
     const response = await apiFetch("/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        ...form,
+        allowed_tenant_ids: splitCommaList(form.allowed_tenant_ids),
+      }),
     });
     if (!response.ok) {
       const result = await response.json().catch(() => ({}));
       setMessage(result.detail || `Benutzer konnte nicht angelegt werden: ${response.status}`);
       return;
     }
-    setForm({ email: "", password: "", display_name: "", role: "user" });
+    setForm({ email: "", password: "", display_name: "", role: "user", allowed_tenant_ids: activeTenantId });
     await loadUsers();
     setMessage("Benutzer angelegt.");
   }
@@ -942,6 +958,10 @@ function UserAdmin({ apiFetch, currentUser }) {
     await loadUsers();
   }
 
+  function updateUserDraft(userId, field, value) {
+    setUsers((accounts) => accounts.map((account) => (account.id === userId ? { ...account, [field]: value } : account)));
+  }
+
   return (
     <section className="admin-panel">
       <div className="section-header">
@@ -956,6 +976,11 @@ function UserAdmin({ apiFetch, currentUser }) {
           <option value="user">User</option>
           <option value="admin">Admin</option>
         </select>
+        <input
+          placeholder="Mandanten, komma-getrennt"
+          value={form.allowed_tenant_ids}
+          onChange={(event) => setForm({ ...form, allowed_tenant_ids: event.target.value })}
+        />
         <button type="submit">Anlegen</button>
       </form>
       {message ? <p className="notice">{message}</p> : null}
@@ -968,6 +993,13 @@ function UserAdmin({ apiFetch, currentUser }) {
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+            <input
+              aria-label={`Mandanten fuer ${account.email}`}
+              value={account.allowed_tenant_ids_text ?? (account.allowed_tenant_ids ?? []).join(", ")}
+              disabled={account.role === "admin"}
+              onChange={(event) => updateUserDraft(account.id, "allowed_tenant_ids_text", event.target.value)}
+              onBlur={(event) => updateUser(account.id, { allowed_tenant_ids: splitCommaList(event.target.value) })}
+            />
             <label className="inline-check">
               <input
                 type="checkbox"
@@ -987,6 +1019,7 @@ function UserAdmin({ apiFetch, currentUser }) {
 function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
+  const [accountingRules, setAccountingRules] = useState([]);
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -1003,6 +1036,16 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     default_cost_category: "material",
     default_assignment_code: "",
   });
+  const [accountingForm, setAccountingForm] = useState({
+    name: "",
+    supplier_match_text: "",
+    cost_category: "material",
+    debit_account: "",
+    credit_account: "",
+    tax_key: "",
+    tax_rate: "19.00",
+    discount_account: "",
+  });
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -1014,17 +1057,20 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
   }, [tenantProfile]);
 
   const loadMasterdata = useCallback(async () => {
-    const [assignmentsResponse, suppliersResponse] = await Promise.all([
+    const [assignmentsResponse, suppliersResponse, accountingResponse] = await Promise.all([
       apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`),
+      apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`),
     ]);
-    if (!assignmentsResponse.ok || !suppliersResponse.ok) {
+    if (!assignmentsResponse.ok || !suppliersResponse.ok || !accountingResponse.ok) {
       throw new Error("Stammdaten konnten nicht geladen werden.");
     }
     const assignmentsResult = await assignmentsResponse.json();
     const suppliersResult = await suppliersResponse.json();
+    const accountingResult = await accountingResponse.json();
     setAssignmentUnits(assignmentsResult.assignment_units ?? []);
     setSupplierRules(suppliersResult.supplier_rules ?? []);
+    setAccountingRules(accountingResult.accounting_rules ?? []);
   }, [apiFetch, tenantId]);
 
   useEffect(() => {
@@ -1126,6 +1172,55 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     });
     if (!response.ok) {
       setMessage(`Lieferantenregel konnte nicht aktualisiert werden: ${response.status}`);
+      return;
+    }
+    await loadMasterdata();
+  }
+
+  async function createAccountingRule(event) {
+    event.preventDefault();
+    const response = await apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emptyToNull(accountingForm)),
+    });
+    if (!response.ok) {
+      setMessage(`Kontierungsregel konnte nicht angelegt werden: ${response.status}`);
+      return;
+    }
+    setAccountingForm({
+      name: "",
+      supplier_match_text: "",
+      cost_category: "material",
+      debit_account: "",
+      credit_account: "",
+      tax_key: "",
+      tax_rate: "19.00",
+      discount_account: "",
+    });
+    await loadMasterdata();
+    setMessage("Kontierungsregel angelegt.");
+  }
+
+  async function updateAccountingRule(rule, payload) {
+    const response = await apiFetch(`/masterdata/accounting-rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: rule.name,
+        supplier_match_text: rule.supplier_match_text,
+        cost_category: rule.cost_category,
+        debit_account: rule.debit_account,
+        credit_account: rule.credit_account,
+        tax_key: rule.tax_key,
+        tax_rate: rule.tax_rate,
+        discount_account: rule.discount_account,
+        is_active: rule.is_active,
+        ...payload,
+      }),
+    });
+    if (!response.ok) {
+      setMessage(`Kontierungsregel konnte nicht aktualisiert werden: ${response.status}`);
       return;
     }
     await loadMasterdata();
@@ -1312,6 +1407,82 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                     type="checkbox"
                     checked={rule.is_active}
                     onChange={(event) => updateSupplierRule(rule, { is_active: event.target.checked })}
+                  />
+                  <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
+                </label>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Buchungsentwurf und Export</p>
+              <h3>Kontierungsregeln</h3>
+            </div>
+            <StatusPill value={`${accountingRules.length} Regeln`} />
+          </div>
+          <form className="form-grid accounting-form" onSubmit={createAccountingRule}>
+            <FormField label="Name">
+              <input placeholder="Material 19%" value={accountingForm.name} onChange={(event) => setAccountingForm({ ...accountingForm, name: event.target.value })} required />
+            </FormField>
+            <FormField label="Lieferant enthält">
+              <input placeholder="optional, z.B. Lüchau" value={accountingForm.supplier_match_text} onChange={(event) => setAccountingForm({ ...accountingForm, supplier_match_text: event.target.value })} />
+            </FormField>
+            <FormField label="Kostenart">
+              <select value={accountingForm.cost_category} onChange={(event) => setAccountingForm({ ...accountingForm, cost_category: event.target.value })}>
+                <option value="">Alle Kostenarten</option>
+                <option value="material">Material</option>
+                <option value="subcontractor">Fremdleistung</option>
+                <option value="fuel_vehicle">Fahrzeug/Tanken</option>
+                <option value="software_subscription">Software/Abo</option>
+                <option value="security_subscription">Überwachung/Abo</option>
+                <option value="general_overhead">Sonstige Gemeinkosten</option>
+              </select>
+            </FormField>
+            <FormField label="Aufwandskonto">
+              <input placeholder="z.B. 3400" value={accountingForm.debit_account} onChange={(event) => setAccountingForm({ ...accountingForm, debit_account: event.target.value })} required />
+            </FormField>
+            <FormField label="Gegenkonto">
+              <input placeholder="z.B. Kreditor/Sammelkonto" value={accountingForm.credit_account} onChange={(event) => setAccountingForm({ ...accountingForm, credit_account: event.target.value })} required />
+            </FormField>
+            <FormField label="Steuerschlüssel">
+              <input placeholder="optional" value={accountingForm.tax_key} onChange={(event) => setAccountingForm({ ...accountingForm, tax_key: event.target.value })} />
+            </FormField>
+            <FormField label="Steuersatz">
+              <input placeholder="19.00" value={accountingForm.tax_rate} onChange={(event) => setAccountingForm({ ...accountingForm, tax_rate: event.target.value })} />
+            </FormField>
+            <FormField label="Skontokonto">
+              <input placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
+            </FormField>
+            <button type="submit">Kontierungsregel anlegen</button>
+          </form>
+          <div className="data-table accounting-table">
+            <div className="data-row data-head">
+              <span>Name</span>
+              <span>Lieferant</span>
+              <span>Kostenart</span>
+              <span>Soll</span>
+              <span>Haben</span>
+              <span>Steuer</span>
+              <span>Skonto</span>
+              <span>Aktiv</span>
+            </div>
+            {accountingRules.map((rule) => (
+              <div className="data-row" key={rule.id}>
+                <strong>{rule.name}</strong>
+                <span>{rule.supplier_match_text || "-"}</span>
+                <span>{formatCostCategory(rule.cost_category)}</span>
+                <span>{rule.debit_account}</span>
+                <span>{rule.credit_account}</span>
+                <span>{[rule.tax_key, rule.tax_rate ? `${rule.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"}</span>
+                <span>{rule.discount_account || "-"}</span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={rule.is_active}
+                    onChange={(event) => updateAccountingRule(rule, { is_active: event.target.checked })}
                   />
                   <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
                 </label>
@@ -1760,6 +1931,7 @@ function assignmentProfileFromRaw(rawResult) {
 }
 
 function formatCostCategory(value) {
+  if (!value) return "-";
   const labels = {
     fuel_vehicle: "Fahrzeug/Tanken",
     general_overhead: "Sonstige Gemeinkosten",
@@ -1835,6 +2007,13 @@ function legacyDiscountedAmount(rawResult) {
 
 function splitAliases(value) {
   return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitCommaList(value) {
+  return String(value ?? "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);

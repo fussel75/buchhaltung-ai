@@ -945,6 +945,10 @@ code {
   grid-template-columns: minmax(180px, 1.35fr) minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(170px, 1fr) minmax(130px, 0.8fr) minmax(100px, 0.6fr);
 }
 
+.accounting-table .data-row {
+  grid-template-columns: minmax(150px, 1.1fr) minmax(130px, 0.9fr) minmax(150px, 1fr) minmax(90px, 0.65fr) minmax(110px, 0.75fr) minmax(110px, 0.75fr) minmax(100px, 0.7fr) minmax(90px, 0.55fr);
+}
+
 .switch,
 .inline-check {
   display: inline-flex;
