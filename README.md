@@ -76,6 +76,9 @@ Das Session-Cookie ist HTTP-only, SameSite=Lax und wird bei Aktivitaet verlaenge
 - `POST /api/documents/{document_id}/approve`
 
 Uploads werden unter `STORAGE_ROOT` abgelegt und mit Metadaten in PostgreSQL gespeichert.
+Erlaubt sind aktuell PDF, gaengige Bildformate und XML-Dateien; das Limit steuert
+`MAX_UPLOAD_SIZE_BYTES` (Default: 25 MB). Dateien werden in Chunks geschrieben und
+beim Ueberschreiten des Limits wieder verworfen.
 Die Review-Queue liest die persistierten Belege je Mandant.
 Die Extraktion ist aktuell ein austauschbarer Mock-Adapter, der erste Rechnungsfelder erzeugt
 und Audit-Events fuer Upload, Dublette, Start und Abschluss schreibt.

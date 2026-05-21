@@ -31,6 +31,7 @@ from app.services.storage import (
     delete_stored_document_path,
     resolve_stored_document_path,
     store_original_document,
+    UploadRejectedError,
 )
 from app.routes.users import require_document_access, require_tenant_access
 
@@ -153,7 +154,10 @@ async def upload_document(
 ) -> dict[str, Any]:
     tenant_id = _normalize_tenant_id(tenant_id)
     require_tenant_access(request, tenant_id)
-    stored = await store_original_document(file=file, tenant_id=tenant_id)
+    try:
+        stored = await store_original_document(file=file, tenant_id=tenant_id)
+    except UploadRejectedError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
     document, is_duplicate = create_document_record(tenant_id=tenant_id, stored=stored)
     if is_duplicate:
         delete_stored_document(stored)

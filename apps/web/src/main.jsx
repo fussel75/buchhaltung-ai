@@ -274,7 +274,8 @@ function UploadApp() {
       });
 
       if (!response.ok) {
-        throw new Error(`Upload fehlgeschlagen: ${response.status}`);
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.detail || `Upload fehlgeschlagen: ${response.status}`);
       }
 
       const result = await response.json();

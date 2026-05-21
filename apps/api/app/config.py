@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     session_cookie_name: str = "buchhaltung_session"
     session_cookie_secure: bool = True
     session_days: int = 30
+    max_upload_size_bytes: int = 25 * 1024 * 1024
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
