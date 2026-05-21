@@ -4,6 +4,14 @@ import "./styles.css";
 
 const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const AuthContext = createContext(null);
+const COST_CATEGORY_OPTIONS = [
+  ["material", "Material"],
+  ["subcontractor", "Fremdleistung"],
+  ["fuel_vehicle", "Fahrzeug/Tanken"],
+  ["software_subscription", "Software/Abo"],
+  ["security_subscription", "Ueberwachung/Abo"],
+  ["general_overhead", "Sonstige Gemeinkosten"],
+];
 
 function resolveApiBaseUrl(configuredUrl) {
   if (typeof window === "undefined") return configuredUrl;
@@ -1121,7 +1129,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     match_text: "",
     supplier_name: "",
     customer_number: "",
-    default_cost_category: "material",
+    default_cost_category: ["material"],
     default_assignment_code: "",
   });
   const [accountingForm, setAccountingForm] = useState({
@@ -1282,7 +1290,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       setMessage(`Lieferantenregel konnte nicht angelegt werden: ${response.status}`);
       return;
     }
-    setSupplierForm({ match_text: "", supplier_name: "", customer_number: "", default_cost_category: "material", default_assignment_code: "" });
+    setSupplierForm({ match_text: "", supplier_name: "", customer_number: "", default_cost_category: ["material"], default_assignment_code: "" });
     await loadMasterdata();
     setMessage("Lieferantenregel angelegt.");
   }
@@ -1295,7 +1303,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
         match_text: rule.match_text,
         supplier_name: rule.supplier_name,
         customer_number: rule.customer_number,
-        default_cost_category: rule.default_cost_category,
+        default_cost_category: supplierCostCategories(rule),
         default_assignment_code: rule.default_assignment_code,
         is_active: rule.is_active,
         ...payload,
@@ -1315,7 +1323,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
       match_text: rule.match_text || "",
       supplier_name: rule.supplier_name || "",
       customer_number: rule.customer_number || "",
-      default_cost_category: rule.default_cost_category || "material",
+      default_cost_category: supplierCostCategories(rule),
       default_assignment_code: rule.default_assignment_code || "",
       is_active: rule.is_active,
     });
@@ -1614,14 +1622,10 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
               <input placeholder="109324" value={supplierForm.customer_number} onChange={(event) => setSupplierForm({ ...supplierForm, customer_number: event.target.value })} />
             </FormField>
             <FormField label="Kostenart">
-              <select value={supplierForm.default_cost_category} onChange={(event) => setSupplierForm({ ...supplierForm, default_cost_category: event.target.value })}>
-                <option value="material">Material</option>
-                <option value="subcontractor">Fremdleistung</option>
-                <option value="fuel_vehicle">Fahrzeug/Tanken</option>
-                <option value="software_subscription">Software/Abo</option>
-                <option value="security_subscription">Überwachung/Abo</option>
-                <option value="general_overhead">Sonstige Gemeinkosten</option>
-              </select>
+              <CategoryChecklist
+                value={supplierForm.default_cost_category}
+                onChange={(categories) => setSupplierForm({ ...supplierForm, default_cost_category: categories })}
+              />
             </FormField>
             <FormField label={tenantProfile.assignment_code_label}>
               <input list="assignment-code-options" placeholder="optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
@@ -1668,19 +1672,10 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                         value={supplierEditForm.customer_number}
                         onChange={(event) => setSupplierEditForm({ ...supplierEditForm, customer_number: event.target.value })}
                       />
-                      <select
-                        aria-label="Kostenart"
-                        value={supplierEditForm.default_cost_category || ""}
-                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, default_cost_category: event.target.value })}
-                      >
-                        <option value="">Kein Default</option>
-                        <option value="material">Material</option>
-                        <option value="subcontractor">Fremdleistung</option>
-                        <option value="fuel_vehicle">Fahrzeug/Tanken</option>
-                        <option value="software_subscription">Software/Abo</option>
-                        <option value="security_subscription">Überwachung/Abo</option>
-                        <option value="general_overhead">Sonstige Gemeinkosten</option>
-                      </select>
+                      <CategoryChecklist
+                        value={supplierEditForm.default_cost_category}
+                        onChange={(categories) => setSupplierEditForm({ ...supplierEditForm, default_cost_category: categories })}
+                      />
                       <input
                         aria-label={tenantProfile.assignment_code_label}
                         list="assignment-code-options"
@@ -1706,7 +1701,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                       <strong>{rule.supplier_name}</strong>
                       <span>{rule.match_text}</span>
                       <span>{rule.customer_number || "-"}</span>
-                      <span>{formatCostCategory(rule.default_cost_category)}</span>
+                      <span>{formatCostCategory(supplierCostCategories(rule))}</span>
                       <span>{rule.default_assignment_code || "-"}</span>
                       <label className="switch">
                         <input
@@ -1809,10 +1804,33 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
 
 function FormField({ label, children }) {
   return (
-    <label className="form-field">
+    <div className="form-field">
       <span>{label}</span>
       {children}
-    </label>
+    </div>
+  );
+}
+
+function CategoryChecklist({ value, onChange }) {
+  const selected = costCategoryList(value);
+  return (
+    <div className="check-list" role="group" aria-label="Kostenarten">
+      {COST_CATEGORY_OPTIONS.map(([category, label]) => (
+        <label className="check-pill" key={category}>
+          <input
+            type="checkbox"
+            checked={selected.includes(category)}
+            onChange={(event) => {
+              const next = event.target.checked
+                ? [...selected, category]
+                : selected.filter((entry) => entry !== category);
+              onChange(next);
+            }}
+          />
+          <span>{label}</span>
+        </label>
+      ))}
+    </div>
   );
 }
 
@@ -2243,16 +2261,26 @@ function assignmentProfileFromRaw(rawResult) {
 }
 
 function formatCostCategory(value) {
-  if (!value) return "-";
-  const labels = {
-    fuel_vehicle: "Fahrzeug/Tanken",
-    general_overhead: "Sonstige Gemeinkosten",
-    material: "Material",
-    security_subscription: "Überwachung/Abo",
-    software_subscription: "Software/Abo",
-    subcontractor: "Fremdleistung",
-  };
-  return labels[value] ?? value;
+  const categories = costCategoryList(value);
+  if (!categories.length) return "-";
+  return categories.map((category) => costCategoryLabel(category)).join(", ");
+}
+
+function costCategoryLabel(value) {
+  return COST_CATEGORY_OPTIONS.find(([category]) => category === value)?.[1] ?? value;
+}
+
+function costCategoryList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return String(value)
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function supplierCostCategories(rule) {
+  return costCategoryList(rule.default_cost_categories?.length ? rule.default_cost_categories : rule.default_cost_category);
 }
 
 function industryLabel(value) {

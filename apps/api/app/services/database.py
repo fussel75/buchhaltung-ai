@@ -10,6 +10,15 @@ from psycopg.types.json import Jsonb
 from app.config import get_settings
 from app.services.storage import StoredDocument, rename_stored_document
 
+VALID_COST_CATEGORIES = {
+    "material",
+    "subcontractor",
+    "fuel_vehicle",
+    "software_subscription",
+    "security_subscription",
+    "general_overhead",
+}
+
 
 def _connect() -> psycopg.Connection:
     settings = get_settings()
@@ -1719,7 +1728,7 @@ def create_supplier_rule(
     match_text: str,
     supplier_name: str,
     customer_number: str | None = None,
-    default_cost_category: str | None = None,
+    default_cost_category: str | list[str] | None = None,
     default_assignment_code: str | None = None,
     is_active: bool = True,
 ) -> dict[str, Any]:
@@ -1742,7 +1751,7 @@ def create_supplier_rule(
                     match_text.strip(),
                     supplier_name.strip(),
                     customer_number.strip() if customer_number else None,
-                    default_cost_category or None,
+                    _normalize_cost_categories(default_cost_category),
                     default_assignment_code.strip() if default_assignment_code else None,
                     is_active,
                     now,
@@ -1757,7 +1766,7 @@ def update_supplier_rule(
     match_text: str,
     supplier_name: str,
     customer_number: str | None,
-    default_cost_category: str | None,
+    default_cost_category: str | list[str] | None,
     default_assignment_code: str | None,
     is_active: bool,
 ) -> dict[str, Any] | None:
@@ -1781,7 +1790,7 @@ def update_supplier_rule(
                     match_text.strip(),
                     supplier_name.strip(),
                     customer_number.strip() if customer_number else None,
-                    default_cost_category or None,
+                    _normalize_cost_categories(default_cost_category),
                     default_assignment_code.strip() if default_assignment_code else None,
                     is_active,
                     datetime.now(UTC),
@@ -2013,6 +2022,27 @@ def _normalize_allowed_tenant_ids(tenant_ids: list[str] | None, role: str) -> li
     return normalized or ["demo-mandant"]
 
 
+def _split_cost_categories(value: str | list[str] | None) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = value.replace(";", ",").split(",")
+    return list(
+        dict.fromkeys(
+            item.strip()
+            for item in raw_values
+            if item and item.strip() in VALID_COST_CATEGORIES
+        )
+    )
+
+
+def _normalize_cost_categories(value: str | list[str] | None) -> str | None:
+    categories = _split_cost_categories(value)
+    return ",".join(categories) if categories else None
+
+
 def _serialize_tenant_profile(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "tenant_id": row["tenant_id"],
@@ -2046,6 +2076,7 @@ def _serialize_assignment_unit(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:
+    cost_categories = _split_cost_categories(row["default_cost_category"])
     return {
         "id": str(row["id"]),
         "tenant_id": row["tenant_id"],
@@ -2053,6 +2084,7 @@ def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:
         "supplier_name": row["supplier_name"],
         "customer_number": row["customer_number"],
         "default_cost_category": row["default_cost_category"],
+        "default_cost_categories": cost_categories,
         "default_assignment_code": row["default_assignment_code"],
         "is_active": row["is_active"],
         "created_at": _serialize_date(row["created_at"]),

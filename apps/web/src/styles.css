@@ -880,9 +880,12 @@ code {
 }
 
 .supplier-form > .form-field:nth-child(3),
-.supplier-form > .form-field:nth-child(4),
 .supplier-form > .form-field:nth-child(5) {
   grid-column: span 2;
+}
+
+.supplier-form > .form-field:nth-child(4) {
+  grid-column: span 3;
 }
 
 .supplier-form > button {
@@ -928,10 +931,38 @@ code {
 
 .toggle-field input,
 .switch input,
-.inline-check input {
+.inline-check input,
+.check-pill input {
   width: auto;
   min-height: auto;
   accent-color: var(--primary);
+}
+
+.check-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 42px;
+  align-items: center;
+}
+
+.check-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 720;
+}
+
+.check-pill span {
+  color: inherit;
+  font-size: inherit;
 }
 
 .data-table {

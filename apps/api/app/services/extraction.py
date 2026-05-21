@@ -20,6 +20,15 @@ from app.services.database import (
     save_document_extraction,
 )
 
+VALID_COST_CATEGORIES = {
+    "material",
+    "subcontractor",
+    "fuel_vehicle",
+    "software_subscription",
+    "security_subscription",
+    "general_overhead",
+}
+
 
 def run_mock_extraction(document_id: UUID) -> dict:
     document = get_document(document_id)
@@ -197,8 +206,7 @@ def _build_cii_xml_result(
     assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
-    cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
-    cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
+    cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
         assignment=assignment,
@@ -352,8 +360,7 @@ def _build_ubl_xml_result(
     assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
-    cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
-    cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
+    cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
         assignment=assignment,
@@ -533,8 +540,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         allocation.get("assignment_code") for allocation in allocation_lines
     )
     assignment_type = "assignment_split" if len(allocation_lines) > 1 else _assignment_type(delivery_address, assignment)
-    cost_category = supplier_rule["default_cost_category"] if supplier_rule else None
-    cost_category = cost_category or _cost_category(supplier_name, product_name, text, assignment_type)
+    cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
         assignment=assignment,
@@ -1107,6 +1113,40 @@ def _assignment_type(delivery_address: str | None, assignment: dict | None) -> s
     if delivery_address:
         return "assignment_unresolved"
     return "general_cost"
+
+
+def _cost_category_for_supplier_rule(
+    supplier_rule: dict | None,
+    supplier_name: str | None,
+    product_name: str | None,
+    text: str,
+    assignment_type: str,
+) -> str | None:
+    detected = _cost_category(supplier_name, product_name, text, assignment_type)
+    allowed_categories = _split_cost_categories(supplier_rule.get("default_cost_category") if supplier_rule else None)
+    if not allowed_categories:
+        return detected
+    if len(allowed_categories) == 1:
+        return allowed_categories[0]
+    if detected in allowed_categories:
+        return detected
+    return None
+
+
+def _split_cost_categories(value: str | list[str] | None) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = value.replace(";", ",").split(",")
+    return list(
+        dict.fromkeys(
+            item.strip()
+            for item in raw_values
+            if item and item.strip() in VALID_COST_CATEGORIES
+        )
+    )
 
 
 def _cost_category(

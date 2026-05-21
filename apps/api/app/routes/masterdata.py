@@ -48,7 +48,7 @@ class SupplierRuleRequest(BaseModel):
     match_text: str
     supplier_name: str
     customer_number: str | None = None
-    default_cost_category: str | None = None
+    default_cost_category: str | list[str] | None = None
     default_assignment_code: str | None = None
     is_active: bool = True
 

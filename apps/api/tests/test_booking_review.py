@@ -6,7 +6,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from app.services import database as database_service
-from app.services.extraction import _normalized_invoice_filename, _payment_terms
+from app.services.extraction import _cost_category_for_supplier_rule, _normalized_invoice_filename, _payment_terms
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.routes.users import user_can_access_tenant
 from app.services.database import (
@@ -485,6 +485,58 @@ class BookingSuggestionTests(TestCase):
         params = cursor.statements[0][1]
         self.assertIsNone(params[4])
         self.assertIsNone(rule["default_assignment_code"])
+
+    def test_supplier_rule_update_accepts_multiple_cost_categories(self):
+        rule_id = uuid4()
+        row = {
+            "id": rule_id,
+            "tenant_id": "demo-mandant",
+            "match_text": "konzept 54",
+            "supplier_name": "konzept 54 GmbH & Co.KG",
+            "customer_number": "10019",
+            "default_cost_category": "material,subcontractor",
+            "default_assignment_code": None,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            rule = database_service.update_supplier_rule(
+                rule_id=rule_id,
+                match_text="konzept 54",
+                supplier_name="konzept 54 GmbH & Co.KG",
+                customer_number="10019",
+                default_cost_category=["material", "subcontractor"],
+                default_assignment_code=None,
+                is_active=True,
+            )
+
+        params = cursor.statements[0][1]
+        self.assertEqual(params[3], "material,subcontractor")
+        self.assertEqual(rule["default_cost_categories"], ["material", "subcontractor"])
+
+    def test_multi_cost_supplier_rule_uses_detected_allowed_category(self):
+        rule = {"default_cost_category": "material,subcontractor"}
+
+        subcontractor = _cost_category_for_supplier_rule(
+            supplier_rule=rule,
+            supplier_name="konzept 54 GmbH & Co.KG",
+            product_name="Malerarbeiten",
+            text="Ausfuehrung Fremdleistung Maler",
+            assignment_type="assigned",
+        )
+        unclear = _cost_category_for_supplier_rule(
+            supplier_rule=rule,
+            supplier_name="konzept 54 GmbH & Co.KG",
+            product_name="Eingangsrechnung",
+            text="Monatliche Verwaltungspauschale",
+            assignment_type="general_cost",
+        )
+
+        self.assertEqual(subcontractor, "subcontractor")
+        self.assertIsNone(unclear)
 
     def test_assignment_unit_update_can_edit_code_and_clear_project_number(self):
         assignment_id = uuid4()
