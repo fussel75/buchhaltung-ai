@@ -404,7 +404,8 @@ function UploadApp() {
         });
 
         if (!response.ok) {
-          throw new Error(`Finale Freigabe fehlgeschlagen: ${response.status}`);
+          const result = await response.json().catch(() => ({}));
+          throw new Error(formatApprovalError(result.detail, response.status));
         }
 
         const result = await response.json();
@@ -2003,6 +2004,14 @@ function legacyDiscountedAmount(rawResult) {
   if (rawResult?.discounted_payable_amount) return rawResult.discounted_payable_amount;
   if (!rawResult?.gross_amount || !rawResult?.discount_amount) return null;
   return Number(rawResult.gross_amount) - Math.abs(Number(rawResult.discount_amount));
+}
+
+function formatApprovalError(detail, status) {
+  if (detail?.errors?.length) {
+    return `${detail.message || "Freigabe blockiert"}:\n${detail.errors.map((entry) => `- ${entry}`).join("\n")}`;
+  }
+  if (typeof detail === "string") return detail;
+  return `Finale Freigabe fehlgeschlagen: ${status}`;
 }
 
 function splitAliases(value) {

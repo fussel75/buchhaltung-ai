@@ -575,6 +575,10 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
         if document is None:
             return None
 
+    approval_errors = validate_document_review(document)
+    if approval_errors:
+        raise ReviewApprovalError(approval_errors)
+
     now = datetime.now(UTC)
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -603,6 +607,112 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
         details={"suggestion_count": len(document.get("booking_suggestions") or [])},
     )
     return get_document(document_id)
+
+
+class ReviewApprovalError(ValueError):
+    def __init__(self, errors: list[str]):
+        super().__init__("review approval blocked")
+        self.errors = errors
+
+
+def validate_document_review(document: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    extraction = document.get("extraction") or {}
+    raw_result = extraction.get("raw_result") or {}
+    suggestions = document.get("booking_suggestions") or []
+    supplier_name = extraction.get("supplier_name")
+
+    required_extraction_fields = {
+        "supplier_name": "Lieferant",
+        "invoice_number": "Belegnummer",
+        "invoice_date": "Belegdatum",
+        "net_amount": "Netto",
+        "tax_amount": "USt",
+        "gross_amount": "Brutto",
+        "currency": "Waehrung",
+    }
+    for field_name, label in required_extraction_fields.items():
+        if extraction.get(field_name) in (None, ""):
+            errors.append(f"Pflichtfeld fehlt: {label}.")
+
+    confidence = _decimal_or_none(extraction.get("confidence"))
+    if confidence is not None and confidence < Decimal("0.80"):
+        errors.append("Extraktion ist zu unsicher fuer finale Freigabe.")
+    if raw_result.get("document_type") in (None, ""):
+        errors.append("Pflichtfeld fehlt: Belegart.")
+    if extraction.get("warnings"):
+        errors.append("Offene Extraktionswarnungen muessen vor finaler Freigabe geklaert werden.")
+
+    if not suggestions:
+        errors.append("Keine Buchungsvorschlaege vorhanden.")
+
+    for suggestion in suggestions:
+        line_no = suggestion.get("line_no") or "?"
+        if not suggestion.get("booking_type"):
+            errors.append(f"Zeile {line_no}: Belegart fehlt.")
+        if not suggestion.get("cost_category"):
+            errors.append(f"Zeile {line_no}: Kostenart fehlt.")
+        if not suggestion.get("description"):
+            errors.append(f"Zeile {line_no}: Beschreibung fehlt.")
+        for amount_field, label in (
+            ("net_amount", "Netto"),
+            ("tax_amount", "USt"),
+            ("gross_amount", "Brutto"),
+        ):
+            if _decimal_or_none(suggestion.get(amount_field)) is None:
+                errors.append(f"Zeile {line_no}: {label} fehlt.")
+
+        accounting_rule = find_accounting_rule(
+            tenant_id=document.get("tenant_id"),
+            supplier_name=supplier_name,
+            cost_category=suggestion.get("cost_category"),
+        )
+        if not accounting_rule:
+            errors.append(f"Zeile {line_no}: Kontierungsregel fehlt.")
+        elif not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account"):
+            errors.append(f"Zeile {line_no}: Kontierungsregel ist unvollstaendig.")
+
+    if suggestions and (len(suggestions) > 1 or raw_result.get("allocation_lines")):
+        errors.extend(_validate_split_totals(suggestions, extraction))
+
+    payment_terms = _payment_terms_from_extraction(extraction)
+    payment_decision = document.get("payment_decision")
+    if len(payment_terms) > 1 and not payment_decision:
+        errors.append("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewaehlt werden.")
+    payment_decision = payment_decision or _default_payment_decision(extraction)
+    payment_delta = _payment_delta(extraction, payment_decision)
+    if payment_delta is not None and payment_delta != Decimal("0.00") and suggestions:
+        first_suggestion = suggestions[0]
+        accounting_rule = find_accounting_rule(
+            tenant_id=document.get("tenant_id"),
+            supplier_name=supplier_name,
+            cost_category=first_suggestion.get("cost_category"),
+        )
+        if not accounting_rule:
+            errors.append("Zahlungsdifferenz/Skonto: Kontierungsregel fehlt.")
+        elif not accounting_rule.get("discount_account"):
+            errors.append("Zahlungsdifferenz/Skonto: Skontokonto fehlt in der Kontierungsregel.")
+
+    return errors
+
+
+def _validate_split_totals(suggestions: list[dict[str, Any]], extraction: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for amount_field, label in (
+        ("net_amount", "Netto"),
+        ("tax_amount", "USt"),
+        ("gross_amount", "Brutto"),
+    ):
+        expected = _decimal_or_none(extraction.get(amount_field))
+        if expected is None:
+            continue
+        values = [_decimal_or_none(suggestion.get(amount_field)) for suggestion in suggestions]
+        if any(value is None for value in values):
+            continue
+        actual = sum((value for value in values if value is not None), Decimal("0.00"))
+        if abs(_round_money(actual) - _round_money(expected)) > Decimal("0.02"):
+            errors.append(f"Split-Summe {label} passt nicht zum Beleggesamtbetrag.")
+    return errors
 
 
 def reopen_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:

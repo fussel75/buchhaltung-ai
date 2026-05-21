@@ -20,8 +20,10 @@ from app.services.database import (
     list_documents_for_month,
     prepare_document_review,
     reopen_document_review,
+    ReviewApprovalError,
     select_payment_decision,
     update_booking_suggestion,
+    validate_document_review,
 )
 from app.services.extraction import run_mock_extraction
 from app.services.storage import (
@@ -213,6 +215,24 @@ def export_booking_rows(
     tenant_id = _normalize_tenant_id(tenant_id)
     require_tenant_access(request, tenant_id)
     documents = list_documents_for_month(tenant_id=tenant_id, year=year, month=month)
+    invalid_documents = []
+    for document in documents:
+        if document.get("status") != "review_approved":
+            continue
+        errors = validate_document_review(document)
+        if errors:
+            invalid_documents.append(
+                {
+                    "document_id": document.get("id"),
+                    "filename": document.get("original_filename"),
+                    "errors": errors,
+                }
+            )
+    if invalid_documents:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Buchungsentwurf blockiert", "documents": invalid_documents},
+        )
     rows = build_booking_export_rows(documents)
     if not rows:
         raise HTTPException(status_code=404, detail="no approved booking rows found for export")
@@ -270,7 +290,10 @@ def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
     require_document_access(request, document_id)
     user = getattr(request.state, "user", None) or {}
     actor = user.get("email") or "system"
-    document = approve_document_review(document_id, actor=actor)
+    try:
+        document = approve_document_review(document_id, actor=actor)
+    except ReviewApprovalError as error:
+        raise HTTPException(status_code=409, detail={"message": "Freigabe blockiert", "errors": error.errors}) from error
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
     return {"document": document}

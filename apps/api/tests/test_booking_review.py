@@ -9,7 +9,12 @@ from app.services import database as database_service
 from app.services.extraction import _normalized_invoice_filename, _payment_terms
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.routes.users import user_can_access_tenant
-from app.services.database import _booking_suggestions_from_extraction, build_booking_export_rows, find_accounting_rule
+from app.services.database import (
+    _booking_suggestions_from_extraction,
+    build_booking_export_rows,
+    find_accounting_rule,
+    validate_document_review,
+)
 
 
 class RecordingCursor:
@@ -449,6 +454,150 @@ class BookingSuggestionTests(TestCase):
             )
 
         self.assertEqual(rule["name"], "Luechau Material")
+
+    def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "RE1574023.pdf",
+            "extraction": {
+                "supplier_name": "Luechau Baustoffe GmbH",
+                "invoice_number": "RE1574023",
+                "invoice_date": "2026-05-07",
+                "net_amount": "278.92",
+                "tax_amount": "52.99",
+                "gross_amount": "331.91",
+                "currency": "EUR",
+                "confidence": Decimal("0.88"),
+                "warnings": [],
+                "raw_result": {
+                    "document_type": "incoming_invoice",
+                    "payment_terms": [
+                        {"type": "full_amount", "label": "Ohne Abzug", "amount": "331.91"},
+                        {"type": "cash_discount", "label": "Skonto", "amount": "324.63", "discount_amount": "7.28"},
+                    ],
+                },
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "PE-Folie",
+                    "net_amount": "278.92",
+                    "tax_amount": "52.99",
+                    "gross_amount": "331.91",
+                    "currency": "EUR",
+                }
+            ],
+        }
+
+        with patch.object(database_service, "list_accounting_rules", return_value=[]):
+            errors = validate_document_review(document)
+
+        self.assertIn("Zeile 1: Kontierungsregel fehlt.", errors)
+        self.assertIn("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewaehlt werden.", errors)
+
+    def test_review_validation_accepts_complete_review(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "RE1574023.pdf",
+            "extraction": {
+                "supplier_name": "Luechau Baustoffe GmbH",
+                "invoice_number": "RE1574023",
+                "invoice_date": "2026-05-07",
+                "net_amount": "278.92",
+                "tax_amount": "52.99",
+                "gross_amount": "331.91",
+                "currency": "EUR",
+                "confidence": Decimal("0.88"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "PE-Folie",
+                    "net_amount": "278.92",
+                    "tax_amount": "52.99",
+                    "gross_amount": "331.91",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "331.91"},
+        }
+        rules = [
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            errors = validate_document_review(document)
+
+        self.assertEqual(errors, [])
+
+    def test_review_validation_blocks_warnings_and_split_mismatch(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "RE1574023.pdf",
+            "extraction": {
+                "supplier_name": "Luechau Baustoffe GmbH",
+                "invoice_number": "RE1574023",
+                "invoice_date": "2026-05-07",
+                "net_amount": "278.92",
+                "tax_amount": "52.99",
+                "gross_amount": "331.91",
+                "currency": "EUR",
+                "confidence": Decimal("0.88"),
+                "warnings": ["Splittung pruefen."],
+                "raw_result": {"document_type": "incoming_invoice", "allocation_lines": [{"amount": "278.00"}]},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "PE-Folie",
+                    "net_amount": "278.00",
+                    "tax_amount": "52.82",
+                    "gross_amount": "330.82",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "331.91"},
+        }
+        rules = [
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            errors = validate_document_review(document)
+
+        self.assertIn("Offene Extraktionswarnungen muessen vor finaler Freigabe geklaert werden.", errors)
+        self.assertIn("Split-Summe Brutto passt nicht zum Beleggesamtbetrag.", errors)
 
     def test_tenant_access_requires_admin_or_explicit_assignment(self):
         self.assertTrue(user_can_access_tenant({"role": "admin", "allowed_tenant_ids": []}, "fremd-mandant"))
