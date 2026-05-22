@@ -217,18 +217,36 @@ function UploadApp() {
   const [exporting, setExporting] = useState("");
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [uploadBatch, setUploadBatch] = useState(null);
+  const [extractionBatch, setExtractionBatch] = useState(null);
+  const [reviewBatch, setReviewBatch] = useState(null);
+  const [reviewFilter, setReviewFilter] = useState("all");
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
   const isUploading = uploadBatch?.state === "running";
+  const isBulkExtracting = extractionBatch?.state === "running";
+  const isBulkPreparingReview = reviewBatch?.state === "running";
   const queueStats = useMemo(
     () => ({
       pending: documents.filter((document) => document.status === "review_pending").length,
       extracted: documents.filter((document) => document.status === "extracted").length,
+      ready: documents.filter((document) => document.status === "review_ready").length,
       approved: documents.filter((document) => document.status === "review_approved").length,
     }),
     [documents],
+  );
+  const filteredDocuments = useMemo(
+    () => documents.filter((document) => reviewFilter === "all" || document.status === reviewFilter),
+    [documents, reviewFilter],
+  );
+  const extractableDocuments = useMemo(
+    () => filteredDocuments.filter((document) => !document.extraction && document.status === "review_pending"),
+    [filteredDocuments],
+  );
+  const reviewableDocuments = useMemo(
+    () => filteredDocuments.filter((document) => document.extraction && !document.booking_suggestions?.length),
+    [filteredDocuments],
   );
 
   const loadDocuments = useCallback(async () => {
@@ -403,6 +421,158 @@ function UploadApp() {
     },
     [apiFetch, loadDocuments],
   );
+
+  const startBulkExtraction = useCallback(async () => {
+    const targets = extractableDocuments;
+    if (!targets.length || isBulkExtracting) return;
+
+    const results = {
+      done: [],
+      failed: [],
+    };
+
+    setError("");
+    setNotice("");
+    setExtractionBatch({
+      state: "running",
+      total: targets.length,
+      done: 0,
+      current: targets[0]?.original_filename || "",
+      failed: 0,
+    });
+    setExtractingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
+
+    for (const [index, document] of targets.entries()) {
+      setExtractionBatch((current) => ({
+        ...(current || {}),
+        state: "running",
+        total: targets.length,
+        done: index,
+        current: document.original_filename,
+        failed: results.failed.length,
+      }));
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/extract`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        results.done.push(document.original_filename);
+      } catch (extractError) {
+        results.failed.push({
+          name: document.original_filename,
+          message: extractError.message,
+        });
+      } finally {
+        setExtractionBatch((current) => ({
+          ...(current || {}),
+          state: "running",
+          total: targets.length,
+          done: index + 1,
+          current: "",
+          failed: results.failed.length,
+        }));
+        setExtractingIds((current) => current.filter((id) => id !== document.id));
+      }
+    }
+
+    await loadDocuments();
+    setExtractionBatch({
+      state: "done",
+      total: targets.length,
+      done: targets.length,
+      current: "",
+      failed: results.failed.length,
+    });
+    setNotice(`Bulk-Extraktion abgeschlossen: ${results.done.length} extrahiert, ${results.failed.length} fehlgeschlagen.`);
+
+    if (results.failed.length) {
+      setError(
+        `Nicht extrahiert: ${results.failed
+          .slice(0, 3)
+          .map((failure) => `${failure.name} (${failure.message})`)
+          .join("; ")}${results.failed.length > 3 ? " ..." : ""}`,
+      );
+    }
+  }, [apiFetch, extractableDocuments, isBulkExtracting, loadDocuments]);
+
+  const startBulkReviewPreparation = useCallback(async () => {
+    const targets = reviewableDocuments;
+    if (!targets.length || isBulkPreparingReview) return;
+
+    const results = {
+      done: [],
+      failed: [],
+    };
+
+    setError("");
+    setNotice("");
+    setReviewBatch({
+      state: "running",
+      total: targets.length,
+      done: 0,
+      current: targets[0]?.original_filename || "",
+      failed: 0,
+    });
+    setApprovingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
+
+    for (const [index, document] of targets.entries()) {
+      setReviewBatch((current) => ({
+        ...(current || {}),
+        state: "running",
+        total: targets.length,
+        done: index,
+        current: document.original_filename,
+        failed: results.failed.length,
+      }));
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/review`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        results.done.push(document.original_filename);
+      } catch (reviewError) {
+        results.failed.push({
+          name: document.original_filename,
+          message: reviewError.message,
+        });
+      } finally {
+        setReviewBatch((current) => ({
+          ...(current || {}),
+          state: "running",
+          total: targets.length,
+          done: index + 1,
+          current: "",
+          failed: results.failed.length,
+        }));
+        setApprovingIds((current) => current.filter((id) => id !== document.id));
+      }
+    }
+
+    await loadDocuments();
+    setReviewBatch({
+      state: "done",
+      total: targets.length,
+      done: targets.length,
+      current: "",
+      failed: results.failed.length,
+    });
+    setNotice(`Buchungsvorschlaege erstellt: ${results.done.length} erstellt, ${results.failed.length} fehlgeschlagen.`);
+
+    if (results.failed.length) {
+      setError(
+        `Kein Vorschlag erstellt: ${results.failed
+          .slice(0, 3)
+          .map((failure) => `${failure.name} (${failure.message})`)
+          .join("; ")}${results.failed.length > 3 ? " ..." : ""}`,
+      );
+    }
+  }, [apiFetch, isBulkPreparingReview, loadDocuments, reviewableDocuments]);
 
   const deleteDocument = useCallback(
     async (document) => {
@@ -790,9 +960,23 @@ function UploadApp() {
         <div className="section-header">
           <div>
             <h2>Review-Queue</h2>
-            <span>{documents.length} Belege</span>
+            <span>{filteredDocuments.length} von {documents.length} Belegen</span>
           </div>
           <div className="queue-tools">
+            <button
+              type="button"
+              onClick={startBulkExtraction}
+              disabled={!extractableDocuments.length || isBulkExtracting}
+            >
+              {isBulkExtracting ? "Extrahiert..." : `Offene extrahieren (${extractableDocuments.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={startBulkReviewPreparation}
+              disabled={!reviewableDocuments.length || isBulkPreparingReview}
+            >
+              {isBulkPreparingReview ? "Erstellt..." : `Vorschlaege erstellen (${reviewableDocuments.length})`}
+            </button>
             <button
               className="secondary-button"
               type="button"
@@ -823,11 +1007,44 @@ function UploadApp() {
             </button>
           </div>
         </div>
+        <div className="filter-tabs" aria-label="Review-Filter">
+          <button type="button" className={reviewFilter === "all" ? "active" : ""} onClick={() => setReviewFilter("all")}>
+            Alle
+          </button>
+          <button type="button" className={reviewFilter === "review_pending" ? "active" : ""} onClick={() => setReviewFilter("review_pending")}>
+            Offen {queueStats.pending}
+          </button>
+          <button type="button" className={reviewFilter === "extracted" ? "active" : ""} onClick={() => setReviewFilter("extracted")}>
+            Extrahiert {queueStats.extracted}
+          </button>
+          <button type="button" className={reviewFilter === "review_ready" ? "active" : ""} onClick={() => setReviewFilter("review_ready")}>
+            Vorschlag {queueStats.ready}
+          </button>
+          <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => setReviewFilter("review_approved")}>
+            Freigegeben {queueStats.approved}
+          </button>
+        </div>
+        {extractionBatch ? (
+          <div className="batch-progress" aria-live="polite">
+            <strong>{extractionBatch.done} / {extractionBatch.total} extrahiert</strong>
+            {extractionBatch.current ? <span>{extractionBatch.current}</span> : null}
+            <small>{extractionBatch.failed} fehlgeschlagen</small>
+          </div>
+        ) : null}
+        {reviewBatch ? (
+          <div className="batch-progress" aria-live="polite">
+            <strong>{reviewBatch.done} / {reviewBatch.total} Vorschlaege</strong>
+            {reviewBatch.current ? <span>{reviewBatch.current}</span> : null}
+            <small>{reviewBatch.failed} fehlgeschlagen</small>
+          </div>
+        ) : null}
         {documents.length === 0 ? (
-          <p className="empty">Noch keine Belege für diesen Mandanten.</p>
+          <p className="empty">Noch keine Belege fuer diesen Mandanten.</p>
+        ) : filteredDocuments.length === 0 ? (
+          <p className="empty">Keine Belege in diesem Filter.</p>
         ) : (
           <div className="queue">
-            {documents.map((document) => (
+            {filteredDocuments.map((document) => (
               <article key={document.id} className="document-card">
                 <div className="document-head">
                   <div className="document-title">

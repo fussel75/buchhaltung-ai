@@ -437,6 +437,42 @@ button:disabled {
   gap: 10px;
 }
 
+.filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.filter-tabs button {
+  min-height: 34px;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0 12px;
+}
+
+.filter-tabs button.active {
+  border-color: var(--text);
+  background: var(--text);
+  color: #fff;
+}
+
+.batch-progress {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(--surface-subtle);
+}
+
+.batch-progress span,
+.batch-progress small {
+  color: var(--muted);
+}
+
 .month-export {
   display: grid;
   gap: 5px;
