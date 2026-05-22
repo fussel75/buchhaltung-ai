@@ -1,11 +1,14 @@
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import call, patch
 from uuid import uuid4
 
 from pydantic import ValidationError
 from fastapi import HTTPException
 
+from app.routes import documents as documents_route
+from app.services import bulk_jobs as bulk_job_service
 from app.services import database as database_service
 from app.services import extraction as extraction_service
 from app.services.extraction import _cost_category_for_supplier_rule, _normalized_invoice_filename, _payment_terms, run_mock_extraction
@@ -618,6 +621,100 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(context.exception.status_code, 409)
         save_document_extraction.assert_not_called()
+
+    def test_bulk_extraction_validation_blocks_non_pending_documents(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkJobRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+        )
+
+        with patch.object(
+            documents_route,
+            "require_document_access",
+            return_value={
+                "id": str(document_id),
+                "tenant_id": "demo-mandant",
+                "status": "extracted",
+                "extraction": {"id": str(uuid4())},
+                "booking_suggestions": [],
+            },
+        ):
+            with self.assertRaises(HTTPException) as context:
+                documents_route._validated_bulk_documents(request, payload, "extract")
+
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht offen fuer Extraktion.")
+
+    def test_bulk_job_runner_records_item_failure_and_continues(self):
+        job_id = uuid4()
+        first_document_id = uuid4()
+        second_document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "extract",
+            "status": "running",
+            "items": [
+                {"document_id": str(first_document_id), "status": "queued"},
+                {"document_id": str(second_document_id), "status": "queued"},
+            ],
+        }
+
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(first_document_id)}),
+            patch.object(bulk_job_service, "release_document_bulk_claim") as release_claim,
+            patch.object(
+                bulk_job_service,
+                "run_mock_extraction",
+                side_effect=[None, HTTPException(status_code=409, detail="blockiert")],
+            ),
+            patch.object(bulk_job_service, "mark_document_bulk_job_item") as mark_item,
+            patch.object(bulk_job_service, "finish_document_bulk_job") as finish_job,
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        mark_item.assert_has_calls(
+            [
+                call(job_id, first_document_id, "running"),
+                call(job_id, first_document_id, "succeeded"),
+                call(job_id, second_document_id, "running"),
+                call(job_id, second_document_id, "failed", "blockiert"),
+            ]
+        )
+        finish_job.assert_called_once_with(job_id, "completed")
+        self.assertEqual(release_claim.call_count, 2)
+
+    def test_bulk_job_runner_skips_document_that_cannot_be_claimed(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "extract",
+            "status": "running",
+            "items": [{"document_id": str(document_id), "status": "queued"}],
+        }
+
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value=None),
+            patch.object(bulk_job_service, "run_mock_extraction") as run_extraction,
+            patch.object(bulk_job_service, "mark_document_bulk_job_item") as mark_item,
+            patch.object(bulk_job_service, "finish_document_bulk_job") as finish_job,
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        mark_item.assert_has_calls(
+            [
+                call(job_id, document_id, "running"),
+                call(job_id, document_id, "skipped", "Beleg ist nicht mehr im passenden Status."),
+            ]
+        )
+        run_extraction.assert_not_called()
+        finish_job.assert_called_once_with(job_id, "completed")
 
     def test_assignment_unit_update_can_edit_code_and_clear_project_number(self):
         assignment_id = uuid4()

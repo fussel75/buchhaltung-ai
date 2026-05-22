@@ -427,11 +427,6 @@ function UploadApp() {
     const targets = extractableDocuments;
     if (!targets.length || isBulkExtracting) return;
 
-    const results = {
-      done: [],
-      failed: [],
-    };
-
     setError("");
     setNotice("");
     setExtractionBatch({
@@ -443,71 +438,37 @@ function UploadApp() {
     });
     setExtractingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
 
-    for (const [index, document] of targets.entries()) {
-      setExtractionBatch((current) => ({
-        ...(current || {}),
-        state: "running",
-        total: targets.length,
-        done: index,
-        current: document.original_filename,
-        failed: results.failed.length,
-      }));
-
-      try {
-        const response = await apiFetch(`/documents/${document.id}/extract`, {
-          method: "POST",
-        });
-        if (!response.ok) {
-          const result = await response.json().catch(() => ({}));
-          throw new Error(result.detail || `HTTP ${response.status}`);
-        }
-        results.done.push(document.original_filename);
-      } catch (extractError) {
-        results.failed.push({
-          name: document.original_filename,
-          message: extractError.message,
-        });
-      } finally {
-        setExtractionBatch((current) => ({
-          ...(current || {}),
-          state: "running",
-          total: targets.length,
-          done: index + 1,
-          current: "",
-          failed: results.failed.length,
-        }));
-        setExtractingIds((current) => current.filter((id) => id !== document.id));
+    try {
+      const response = await apiFetch("/documents/bulk/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: activeTenantId,
+          document_ids: targets.map((document) => document.id),
+        }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result.detail, `Bulk-Extraktion fehlgeschlagen: ${response.status}`));
       }
+      const result = await response.json();
+      setExtractionBatch(batchStateFromJob(result.job));
+      const job = await waitForBulkJob(apiFetch, result.job.id, setExtractionBatch);
+      await loadDocuments();
+      setNotice(`Bulk-Extraktion abgeschlossen: ${job.succeeded_count} extrahiert, ${job.failed_count} fehlgeschlagen.`);
+      if (job.failed_count) {
+        setError(formatBulkJobFailures(job, "Nicht extrahiert"));
+      }
+    } catch (extractError) {
+      setError(extractError.message);
+    } finally {
+      setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
-
-    await loadDocuments();
-    setExtractionBatch({
-      state: "done",
-      total: targets.length,
-      done: targets.length,
-      current: "",
-      failed: results.failed.length,
-    });
-    setNotice(`Bulk-Extraktion abgeschlossen: ${results.done.length} extrahiert, ${results.failed.length} fehlgeschlagen.`);
-
-    if (results.failed.length) {
-      setError(
-        `Nicht extrahiert: ${results.failed
-          .slice(0, 3)
-          .map((failure) => `${failure.name} (${failure.message})`)
-          .join("; ")}${results.failed.length > 3 ? " ..." : ""}`,
-      );
-    }
-  }, [apiFetch, extractableDocuments, isBulkExtracting, loadDocuments]);
+  }, [activeTenantId, apiFetch, extractableDocuments, isBulkExtracting, loadDocuments]);
 
   const startBulkReviewPreparation = useCallback(async () => {
     const targets = reviewableDocuments;
     if (!targets.length || isBulkPreparingReview) return;
-
-    const results = {
-      done: [],
-      failed: [],
-    };
 
     setError("");
     setNotice("");
@@ -520,61 +481,33 @@ function UploadApp() {
     });
     setApprovingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
 
-    for (const [index, document] of targets.entries()) {
-      setReviewBatch((current) => ({
-        ...(current || {}),
-        state: "running",
-        total: targets.length,
-        done: index,
-        current: document.original_filename,
-        failed: results.failed.length,
-      }));
-
-      try {
-        const response = await apiFetch(`/documents/${document.id}/review`, {
-          method: "POST",
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        results.done.push(document.original_filename);
-      } catch (reviewError) {
-        results.failed.push({
-          name: document.original_filename,
-          message: reviewError.message,
-        });
-      } finally {
-        setReviewBatch((current) => ({
-          ...(current || {}),
-          state: "running",
-          total: targets.length,
-          done: index + 1,
-          current: "",
-          failed: results.failed.length,
-        }));
-        setApprovingIds((current) => current.filter((id) => id !== document.id));
+    try {
+      const response = await apiFetch("/documents/bulk/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: activeTenantId,
+          document_ids: targets.map((document) => document.id),
+        }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result.detail, `Bulk-Vorschlaege fehlgeschlagen: ${response.status}`));
       }
+      const result = await response.json();
+      setReviewBatch(batchStateFromJob(result.job));
+      const job = await waitForBulkJob(apiFetch, result.job.id, setReviewBatch);
+      await loadDocuments();
+      setNotice(`Buchungsvorschlaege erstellt: ${job.succeeded_count} erstellt, ${job.failed_count} fehlgeschlagen.`);
+      if (job.failed_count) {
+        setError(formatBulkJobFailures(job, "Kein Vorschlag erstellt"));
+      }
+    } catch (reviewError) {
+      setError(reviewError.message);
+    } finally {
+      setApprovingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
-
-    await loadDocuments();
-    setReviewBatch({
-      state: "done",
-      total: targets.length,
-      done: targets.length,
-      current: "",
-      failed: results.failed.length,
-    });
-    setNotice(`Buchungsvorschlaege erstellt: ${results.done.length} erstellt, ${results.failed.length} fehlgeschlagen.`);
-
-    if (results.failed.length) {
-      setError(
-        `Kein Vorschlag erstellt: ${results.failed
-          .slice(0, 3)
-          .map((failure) => `${failure.name} (${failure.message})`)
-          .join("; ")}${results.failed.length > 3 ? " ..." : ""}`,
-      );
-    }
-  }, [apiFetch, isBulkPreparingReview, loadDocuments, reviewableDocuments]);
+  }, [activeTenantId, apiFetch, isBulkPreparingReview, loadDocuments, reviewableDocuments]);
 
   const deleteDocument = useCallback(
     async (document) => {
@@ -2469,6 +2402,67 @@ async function downloadResponse(response, fallbackFilename) {
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+async function waitForBulkJob(apiFetch, jobId, setBatch) {
+  let job = null;
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    await delay(750);
+    const response = await apiFetch(`/documents/bulk-jobs/${jobId}`);
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(formatApiError(result.detail, `Bulk-Job konnte nicht geladen werden: ${response.status}`));
+    }
+    const result = await response.json();
+    job = result.job;
+    setBatch(batchStateFromJob(job));
+    if (!["queued", "running"].includes(job.status)) return job;
+  }
+  throw new Error("Bulk-Job laeuft zu lange. Bitte spaeter erneut pruefen.");
+}
+
+function batchStateFromJob(job) {
+  const currentItem = job.items?.find((item) => item.status === "running")
+    || job.items?.find((item) => item.status === "queued");
+  const active = ["queued", "running"].includes(job.status);
+  return {
+    state: active ? "running" : "done",
+    jobId: job.id,
+    total: job.requested_total,
+    done: job.processed_count,
+    current: currentItem?.document?.original_filename || "",
+    failed: job.failed_count,
+    succeeded: job.succeeded_count,
+  };
+}
+
+function formatBulkJobFailures(job, prefix) {
+  const failedItems = (job.items || []).filter((item) => ["failed", "skipped"].includes(item.status));
+  if (!failedItems.length) return "";
+  const details = failedItems
+    .slice(0, 3)
+    .map((item) => `${item.document?.original_filename || item.document_id} (${item.error || "unbekannter Fehler"})`)
+    .join("; ");
+  return `${prefix}: ${details}${failedItems.length > 3 ? " ..." : ""}`;
+}
+
+function formatApiError(detail, fallback) {
+  if (typeof detail === "string") return detail;
+  if (detail?.documents?.length) {
+    const details = detail.documents
+      .slice(0, 3)
+      .map((entry) => `${entry.document_id}: ${entry.reason}`)
+      .join("; ");
+    return `${detail.message || fallback}: ${details}${detail.documents.length > 3 ? " ..." : ""}`;
+  }
+  if (detail?.message) return detail.message;
+  return fallback;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
 }
 
 function filenameFromDisposition(disposition) {

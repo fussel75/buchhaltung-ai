@@ -7,15 +7,18 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.database import (
     approve_document_review,
+    BulkJobConflictError,
     build_booking_export_rows,
+    create_document_bulk_job,
     create_document_record,
     delete_document,
+    get_document_bulk_job,
     list_documents,
     list_documents_for_month,
     prepare_document_review,
@@ -25,6 +28,7 @@ from app.services.database import (
     update_booking_suggestion,
     validate_document_review,
 )
+from app.services.bulk_jobs import run_document_bulk_job
 from app.services.extraction import run_mock_extraction
 from app.services.storage import (
     delete_stored_document,
@@ -41,6 +45,11 @@ router = APIRouter()
 class DocumentExportRequest(BaseModel):
     document_ids: list[UUID] = Field(min_length=1, max_length=200)
     tenant_id: str | None = None
+
+
+class DocumentBulkJobRequest(BaseModel):
+    tenant_id: str
+    document_ids: list[UUID] = Field(min_length=1, max_length=500)
 
 
 class BookingSuggestionUpdate(BaseModel):
@@ -144,6 +153,67 @@ def _zip_documents(documents: list[dict[str, Any]], archive_name: str) -> Stream
     buffer.seek(0)
     headers = {"Content-Disposition": f'attachment; filename="{archive_name}"'}
     return StreamingResponse(buffer, media_type="application/zip", headers=headers)
+
+
+def _actor(request: Request) -> str:
+    user = getattr(request.state, "user", None) or {}
+    return user.get("email") or "system"
+
+
+def _ensure_not_processing(document: dict[str, Any]) -> None:
+    if document.get("processing_job_id"):
+        raise HTTPException(status_code=409, detail="Beleg wird gerade von einem Bulk-Job verarbeitet.")
+
+
+def _validated_bulk_documents(
+    request: Request,
+    payload: DocumentBulkJobRequest,
+    action: Literal["extract", "prepare_review"],
+) -> tuple[str, list[UUID]]:
+    tenant_id = _normalize_tenant_id(payload.tenant_id)
+    require_tenant_access(request, tenant_id)
+    document_ids = list(dict.fromkeys(payload.document_ids))
+    invalid_documents: list[dict[str, str]] = []
+
+    for document_id in document_ids:
+        document = require_document_access(request, document_id)
+        if document["tenant_id"] != tenant_id:
+            invalid_documents.append({"document_id": str(document_id), "reason": "Beleg gehoert nicht zum Mandanten."})
+            continue
+        if action == "extract":
+            if document["status"] != "review_pending" or document.get("extraction"):
+                invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht offen fuer Extraktion."})
+        elif document["status"] != "extracted" or not document.get("extraction") or document.get("booking_suggestions"):
+            invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit fuer Vorschlaege."})
+
+    if invalid_documents:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Bulk-Job blockiert", "documents": invalid_documents},
+        )
+    return tenant_id, document_ids
+
+
+def _start_bulk_job(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: DocumentBulkJobRequest,
+    action: Literal["extract", "prepare_review"],
+) -> dict[str, Any]:
+    tenant_id, document_ids = _validated_bulk_documents(request, payload, action)
+    actor = _actor(request)
+    try:
+        job = create_document_bulk_job(
+            tenant_id=tenant_id,
+            action=action,
+            document_ids=document_ids,
+            actor=actor,
+        )
+    except BulkJobConflictError as error:
+        raise HTTPException(status_code=409, detail="Aktiver Bulk-Job fuer diesen Mandanten laeuft bereits.") from error
+
+    background_tasks.add_task(run_document_bulk_job, UUID(job["id"]), actor)
+    return {"job": job}
 
 
 @router.post("/upload")
@@ -252,6 +322,33 @@ def export_booking_rows(
     return StreamingResponse(BytesIO(content), media_type="text/csv; charset=utf-8", headers=headers)
 
 
+@router.post("/bulk/extract", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_extraction(
+    payload: DocumentBulkJobRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    return _start_bulk_job(request, background_tasks, payload, "extract")
+
+
+@router.post("/bulk/review", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_review_preparation(
+    payload: DocumentBulkJobRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    return _start_bulk_job(request, background_tasks, payload, "prepare_review")
+
+
+@router.get("/bulk-jobs/{job_id}")
+def get_bulk_job(job_id: UUID, request: Request) -> dict[str, Any]:
+    job = get_document_bulk_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="bulk job not found")
+    require_tenant_access(request, job["tenant_id"])
+    return {"job": job}
+
+
 @router.get("/{document_id}/file")
 def get_document_file(
     document_id: UUID,
@@ -280,9 +377,9 @@ def extract_document(document_id: UUID, request: Request) -> dict[str, Any]:
 
 @router.post("/{document_id}/review")
 def prepare_review(document_id: UUID, request: Request) -> dict[str, Any]:
-    require_document_access(request, document_id)
-    user = getattr(request.state, "user", None) or {}
-    actor = user.get("email") or "system"
+    document = require_document_access(request, document_id)
+    _ensure_not_processing(document)
+    actor = _actor(request)
     document = prepare_document_review(document_id, actor=actor)
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
@@ -344,9 +441,9 @@ def update_document_payment_decision(
     payload: PaymentDecisionUpdate,
     request: Request,
 ) -> dict[str, Any]:
-    require_document_access(request, document_id)
-    user = getattr(request.state, "user", None) or {}
-    actor = user.get("email") or "system"
+    document = require_document_access(request, document_id)
+    _ensure_not_processing(document)
+    actor = _actor(request)
     try:
         document = select_payment_decision(
             document_id=document_id,
@@ -362,7 +459,8 @@ def update_document_payment_decision(
 
 @router.delete("/{document_id}")
 def remove_document(document_id: UUID, request: Request) -> dict[str, Any]:
-    require_document_access(request, document_id)
+    current_document = require_document_access(request, document_id)
+    _ensure_not_processing(current_document)
     document = delete_document(document_id)
 
     delete_stored_document_path(document["storage_path"])

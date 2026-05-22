@@ -18,6 +18,8 @@ VALID_COST_CATEGORIES = {
     "security_subscription",
     "general_overhead",
 }
+BULK_JOB_ACTIONS = {"extract", "prepare_review"}
+BULK_JOB_ACTIVE_STATUSES = {"queued", "running"}
 
 
 def _connect() -> psycopg.Connection:
@@ -47,10 +49,19 @@ def init_database() -> None:
                 """
             )
             cursor.execute("alter table documents add column if not exists normalized_filename text")
+            cursor.execute("alter table documents add column if not exists processing_job_id uuid")
+            cursor.execute("alter table documents add column if not exists processing_started_at timestamptz")
             cursor.execute(
                 """
                 create index if not exists documents_tenant_created_idx
                     on documents (tenant_id, created_at desc)
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists documents_processing_job_idx
+                    on documents (processing_job_id)
+                    where processing_job_id is not null
                 """
             )
             cursor.execute(
@@ -279,6 +290,56 @@ def init_database() -> None:
                     on tenant_accounting_rules (tenant_id, is_active, cost_category)
                 """
             )
+            cursor.execute(
+                """
+                create table if not exists document_bulk_jobs (
+                    id uuid primary key,
+                    tenant_id text not null,
+                    action text not null,
+                    status text not null,
+                    requested_total integer not null default 0,
+                    processed_count integer not null default 0,
+                    succeeded_count integer not null default 0,
+                    failed_count integer not null default 0,
+                    error text,
+                    created_by text not null,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null,
+                    started_at timestamptz,
+                    finished_at timestamptz,
+                    check (action in ('extract', 'prepare_review')),
+                    check (status in ('queued', 'running', 'completed', 'failed'))
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create table if not exists document_bulk_job_items (
+                    id uuid primary key,
+                    job_id uuid not null references document_bulk_jobs(id) on delete cascade,
+                    document_id uuid not null references documents(id) on delete cascade,
+                    status text not null,
+                    error text,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null,
+                    unique (job_id, document_id),
+                    check (status in ('queued', 'running', 'succeeded', 'failed', 'skipped'))
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create unique index if not exists document_bulk_jobs_active_tenant_action_idx
+                    on document_bulk_jobs (tenant_id, action)
+                    where status in ('queued', 'running')
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists document_bulk_job_items_job_idx
+                    on document_bulk_job_items (job_id, status)
+                """
+            )
     seed_demo_masterdata()
 
 
@@ -464,6 +525,211 @@ def delete_document(document_id: UUID) -> dict[str, Any] | None:
             cursor.execute("delete from documents where id = %s", (document_id,))
 
     return document
+
+
+class BulkJobConflictError(ValueError):
+    pass
+
+
+def create_document_bulk_job(
+    tenant_id: str,
+    action: str,
+    document_ids: list[UUID],
+    actor: str = "system",
+) -> dict[str, Any]:
+    if action not in BULK_JOB_ACTIONS:
+        raise ValueError("unsupported bulk action")
+
+    unique_document_ids = list(dict.fromkeys(document_ids))
+    if not unique_document_ids:
+        raise ValueError("bulk job requires documents")
+
+    now = datetime.now(UTC)
+    job_id = uuid4()
+    with _connect() as connection:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    insert into document_bulk_jobs (
+                        id, tenant_id, action, status, requested_total, processed_count,
+                        succeeded_count, failed_count, error, created_by,
+                        created_at, updated_at, started_at, finished_at
+                    )
+                    values (%s, %s, %s, 'queued', %s, 0, 0, 0, null, %s, %s, %s, null, null)
+                    returning *
+                    """,
+                    (job_id, tenant_id, action, len(unique_document_ids), actor, now, now),
+                )
+                job = cursor.fetchone()
+                for document_id in unique_document_ids:
+                    cursor.execute(
+                        """
+                        insert into document_bulk_job_items (
+                            id, job_id, document_id, status, error, created_at, updated_at
+                        )
+                        values (%s, %s, %s, 'queued', null, %s, %s)
+                        """,
+                        (uuid4(), job_id, document_id, now, now),
+                    )
+        except psycopg.errors.UniqueViolation as error:
+            connection.rollback()
+            raise BulkJobConflictError("active bulk job already exists") from error
+
+    insert_audit_event(
+        tenant_id=tenant_id,
+        event_type=f"document.bulk_{action}_queued",
+        actor=actor,
+        details={"job_id": str(job_id), "document_count": len(unique_document_ids)},
+    )
+    serialized = _serialize_bulk_job(job)
+    serialized["items"] = _list_document_bulk_job_items(job_id)
+    return serialized
+
+
+def get_document_bulk_job(job_id: UUID) -> dict[str, Any] | None:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("select * from document_bulk_jobs where id = %s", (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+    job = _serialize_bulk_job(row)
+    job["items"] = _list_document_bulk_job_items(job_id)
+    return job
+
+
+def mark_document_bulk_job_running(job_id: UUID) -> dict[str, Any] | None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_bulk_jobs
+                set status = 'running', started_at = coalesce(started_at, %s), updated_at = %s
+                where id = %s and status = 'queued'
+                returning *
+                """,
+                (now, now, job_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                cursor.execute("select * from document_bulk_jobs where id = %s", (job_id,))
+                row = cursor.fetchone()
+    if not row:
+        return None
+    job = _serialize_bulk_job(row)
+    job["items"] = _list_document_bulk_job_items(job_id)
+    return job
+
+
+def mark_document_bulk_job_item(
+    job_id: UUID,
+    document_id: UUID,
+    status: str,
+    error: str | None = None,
+) -> None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_bulk_job_items
+                set status = %s, error = %s, updated_at = %s
+                where job_id = %s and document_id = %s
+                """,
+                (status, error, now, job_id, document_id),
+            )
+            cursor.execute(
+                """
+                update document_bulk_jobs
+                set
+                    processed_count = (
+                        select count(*) from document_bulk_job_items
+                        where job_id = %s and status in ('succeeded', 'failed', 'skipped')
+                    ),
+                    succeeded_count = (
+                        select count(*) from document_bulk_job_items
+                        where job_id = %s and status = 'succeeded'
+                    ),
+                    failed_count = (
+                        select count(*) from document_bulk_job_items
+                        where job_id = %s and status in ('failed', 'skipped')
+                    ),
+                    updated_at = %s
+                where id = %s
+                """,
+                (job_id, job_id, job_id, now, job_id),
+            )
+
+
+def claim_document_for_bulk_job(document_id: UUID, job_id: UUID, expected_status: str) -> dict[str, Any] | None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update documents
+                set processing_job_id = %s, processing_started_at = %s, updated_at = %s
+                where id = %s and status = %s and processing_job_id is null
+                returning *
+                """,
+                (job_id, now, now, document_id, expected_status),
+            )
+            row = cursor.fetchone()
+    return _serialize_document(row) if row else None
+
+
+def release_document_bulk_claim(document_id: UUID, job_id: UUID) -> None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update documents
+                set processing_job_id = null, processing_started_at = null, updated_at = %s
+                where id = %s and processing_job_id = %s
+                """,
+                (now, document_id, job_id),
+            )
+
+
+def finish_document_bulk_job(job_id: UUID, status: str = "completed", error: str | None = None) -> dict[str, Any] | None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_bulk_jobs
+                set
+                    status = %s,
+                    processed_count = (
+                        select count(*) from document_bulk_job_items
+                        where job_id = %s and status in ('succeeded', 'failed', 'skipped')
+                    ),
+                    succeeded_count = (
+                        select count(*) from document_bulk_job_items
+                        where job_id = %s and status = 'succeeded'
+                    ),
+                    failed_count = (
+                        select count(*) from document_bulk_job_items
+                        where job_id = %s and status in ('failed', 'skipped')
+                    ),
+                    error = %s,
+                    updated_at = %s,
+                    finished_at = %s
+                where id = %s
+                returning *
+                """,
+                (status, job_id, job_id, job_id, error, now, now, job_id),
+            )
+            row = cursor.fetchone()
+    if not row:
+        return None
+    job = _serialize_bulk_job(row)
+    job["items"] = _list_document_bulk_job_items(job_id)
+    return job
 
 
 def save_document_extraction(
@@ -1960,6 +2226,8 @@ def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
         "size_bytes": row["size_bytes"],
         "storage_path": row["storage_path"],
         "status": row["status"],
+        "processing_job_id": str(row["processing_job_id"]) if row.get("processing_job_id") else None,
+        "processing_started_at": _serialize_date(row.get("processing_started_at")),
         "duplicate_of": str(row["duplicate_of"]) if row["duplicate_of"] else None,
         "created_at": row["created_at"].isoformat(),
         "updated_at": row["updated_at"].isoformat(),
@@ -2107,6 +2375,65 @@ def _serialize_accounting_rule(row: dict[str, Any]) -> dict[str, Any]:
         "is_active": row["is_active"],
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _list_document_bulk_job_items(job_id: UUID) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select
+                    i.*,
+                    d.original_filename,
+                    d.normalized_filename,
+                    d.status as document_status
+                from document_bulk_job_items i
+                left join documents d on d.id = i.document_id
+                where i.job_id = %s
+                order by i.created_at, i.id
+                """,
+                (job_id,),
+            )
+            return [_serialize_bulk_job_item(row) for row in cursor.fetchall()]
+
+
+def _serialize_bulk_job(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "tenant_id": row["tenant_id"],
+        "action": row["action"],
+        "status": row["status"],
+        "requested_total": row["requested_total"],
+        "processed_count": row["processed_count"],
+        "succeeded_count": row["succeeded_count"],
+        "failed_count": row["failed_count"],
+        "error": row["error"],
+        "created_by": row["created_by"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+        "started_at": _serialize_date(row["started_at"]),
+        "finished_at": _serialize_date(row["finished_at"]),
+    }
+
+
+def _serialize_bulk_job_item(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "job_id": str(row["job_id"]),
+        "document_id": str(row["document_id"]),
+        "status": row["status"],
+        "error": row["error"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+        "document": {
+            "id": str(row["document_id"]),
+            "original_filename": row.get("original_filename"),
+            "normalized_filename": row.get("normalized_filename"),
+            "status": row.get("document_status"),
+        }
+        if row.get("original_filename")
+        else None,
     }
 
 

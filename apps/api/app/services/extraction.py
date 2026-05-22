@@ -31,10 +31,13 @@ VALID_COST_CATEGORIES = {
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
 
 
-def run_mock_extraction(document_id: UUID) -> dict:
+def run_mock_extraction(document_id: UUID, processing_job_id: UUID | None = None) -> dict:
     document = get_document(document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
+    active_job_id = document.get("processing_job_id")
+    if active_job_id and active_job_id != str(processing_job_id):
+        raise HTTPException(status_code=409, detail="Beleg wird gerade von einem Bulk-Job verarbeitet.")
     if document.get("status") not in EXTRACTABLE_DOCUMENT_STATUSES:
         raise HTTPException(
             status_code=409,
