@@ -18,6 +18,9 @@ class ExtractionPdfTests(TestCase):
     def test_foerch_invoice_uses_filename_and_derives_net_amount(self):
         text = """
         THEO FOERCH GmbH & Co. KG
+        Auftragsnummer 108413169
+        Kundenreferenz Neusurenland 51
+        Kundennummer 425590
         Artikel Schrauben und Befestigungsmaterial
         Rechnungsbetrag 8,77
         MwSt 1,40
@@ -44,6 +47,7 @@ class ExtractionPdfTests(TestCase):
 
         self.assertEqual(result["supplier_name"], "Theo Foerch GmbH & Co. KG")
         self.assertEqual(result["invoice_number"], "3161691971")
+        self.assertEqual(result["customer_number"], "425590")
         self.assertEqual(result["invoice_date"], "2026-05-21")
         self.assertEqual(result["net_amount"], Decimal("7.37"))
         self.assertEqual(result["tax_amount"], Decimal("1.40"))
@@ -63,11 +67,58 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["confidence"], Decimal("0.88"))
         self.assertEqual(result["warnings"], [])
 
+    def test_foerch_invoice_reads_customer_number_and_interleaved_discount_table(self):
+        text = """
+        THEO FOERCH GmbH & Co. KG
+        Kundennummer 425590
+        Rechnungsbetrag 8,77
+        MwSt 1,40
+        Bei Zahlung bis
+        31.05.2026
+        Skonto %
+        3,0
+        Skonto netto €
+        0,22
+        Skonto MwSt. €
+        0,04
+        Skonto brutto €
+        0,26
+        Zahlungsziel Netto bis
+        20.06.2026
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "FOERCH_Rechnung_3161691971_21.05.2026.PDF",
+            "content_type": "application/pdf",
+            "storage_path": "foerch.pdf",
+            "size_bytes": 37000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["customer_number"], "425590")
+        self.assertEqual(result["due_date"], "2026-06-20")
+        self.assertEqual(result["discount_due_date"], "2026-05-31")
+        self.assertEqual(result["discount_percent"], Decimal("3.00"))
+        self.assertEqual(result["discount_net_amount"], Decimal("0.22"))
+        self.assertEqual(result["discount_tax_amount"], Decimal("0.04"))
+        self.assertEqual(result["discount_gross_amount"], Decimal("0.26"))
+        self.assertEqual(result["discount_amount"], Decimal("0.26"))
+        self.assertEqual(result["payment_terms"][1]["amount"], Decimal("8.51"))
+
     def test_customer_reference_assigns_known_construction_project(self):
         text = """
         THEO FOERCH GmbH & Co. KG
         Kundenreferenz
         Neusurenland 51
+        Kunden-Nr. Auftraggeber 425590
         Artikel Schrauben und Befestigungsmaterial
         Rechnungsbetrag 8,77
         MwSt 1,40
@@ -113,8 +164,53 @@ class ExtractionPdfTests(TestCase):
             result = _build_pdf_text_result(document)
 
         get_by_code.assert_not_called()
+        self.assertEqual(result["customer_number"], "425590")
         self.assertEqual(result["customer_reference"], "Neusurenland 51")
         self.assertEqual(result["assignment_code"], "Neula51")
         self.assertEqual(result["assignment_label"], "Neusurenland 51")
         self.assertEqual(result["assignment_type"], "assigned")
         self.assertEqual(result["project_code"], "Neula51")
+
+    def test_foerch_reads_customer_reference_from_column_text(self):
+        text = """
+        THEO FOERCH GmbH & Co. KG
+        Kundennummer
+        Kundenreferenz
+        425590
+        Neusurenland 51
+        Rechnungsbetrag 8,77
+        MwSt 1,40
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "FOERCH_Rechnung_3161691971_21.05.2026.PDF",
+            "content_type": "application/pdf",
+            "storage_path": "foerch.pdf",
+            "size_bytes": 37000,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Neula51",
+            "label": "Neusurenland 51",
+            "kind": "construction_project",
+            "project_number": None,
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text == "Neusurenland 51":
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["customer_number"], "425590")
+        self.assertEqual(result["customer_reference"], "Neusurenland 51")
+        self.assertEqual(result["assignment_code"], "Neula51")

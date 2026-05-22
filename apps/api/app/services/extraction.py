@@ -138,7 +138,11 @@ def _build_cii_xml_result(
     }
 
     invoice_number = _xml_text(root, ".//rsm:ExchangedDocument/ram:ID", ns)
-    customer_number = _xml_text(root, ".//ram:ApplicableHeaderTradeAgreement/ram:BuyerTradeParty/ram:ID", ns)
+    customer_number = _xml_text(
+        root,
+        ".//ram:ApplicableHeaderTradeAgreement/ram:BuyerTradeParty/ram:ID",
+        ns,
+    ) or _find_customer_number(text)
     invoice_date = _cii_date(
         _xml_text(root, ".//rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString", ns)
     )
@@ -339,7 +343,7 @@ def _build_ubl_xml_result(
     monetary_total_tag = "RequestedMonetaryTotal" if root_name == "CreditNote" else "LegalMonetaryTotal"
 
     invoice_number = _xml_text(root, "./cbc:ID", ns)
-    customer_number = _xml_text(root, "./cbc:BuyerReference", ns)
+    customer_number = _xml_text(root, "./cbc:BuyerReference", ns) or _find_customer_number(text)
     invoice_date = _xml_text(root, "./cbc:IssueDate", ns)
     due_date = _xml_text(root, "./cbc:DueDate", ns)
     supplier_name = _normalize_supplier_name(
@@ -493,16 +497,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         text,
         r"Belegnummer:\s*([A-Z]{1,5}\d+)",
     ) or _invoice_number_from_filename(document["original_filename"])
-    customer_number = _find_text(text, r"Kunden-Nr\.:\s*(\d+)") or _find_text(
-        text,
-        r"Kundennummer\s*:\s*([0-9/.-]+)",
-    ) or _find_text(
-        text,
-        r"([0-9/.-]+)\s*Kundennummer:",
-    ) or _find_text(
-        text,
-        r"Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*([0-9/.-]+)",
-    )
+    customer_number = _find_customer_number(text)
     invoice_date = _find_date(text, r"Datum:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"Datum\s*-\s*Zeit\s*:\s*(\d{2}\.\d{2}\.\d{4})",
@@ -890,6 +885,14 @@ def _find_tabular_discount_terms(text: str) -> dict[str, Decimal | str | None]:
         normalized,
     )
     if not match:
+        match = search(
+            r"Bei Zahlung bis\s+(\d{2}\.\d{2}\.\d{4})\s+Skonto\s*%\s+([0-9]+(?:,\d{1,2})?)\s+"
+            r"Skonto netto\s*(?:€|EUR)?\s+([0-9.]+,\d{2})\s+Skonto MwSt\.?\s*(?:€|EUR)?\s+"
+            r"([0-9.]+,\d{2})\s+Skonto brutto\s*(?:€|EUR)?\s+([0-9.]+,\d{2})\s+"
+            r"Zahlungsziel Netto bis\s+(\d{2}\.\d{2}\.\d{4})",
+            normalized,
+        )
+    if not match:
         return {}
 
     discount_due_date, percent_text, discount_net, discount_tax, discount_gross, due_date = match.groups()
@@ -1006,6 +1009,20 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
     return _find_money(text, pattern)
 
 
+def _find_customer_number(text: str) -> str | None:
+    return (
+        _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kunden-Nr\.\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kundennummer\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"([0-9][0-9/.-]*)\s*Kundennummer:")
+        or _find_text(
+            text,
+            r"Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*([0-9][0-9/.-]*)",
+        )
+    )
+
+
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
     luechau_total = search(
         r"\b\d{1,2}%\s+MwSt\.:\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})",
@@ -1096,7 +1113,14 @@ def _find_delivery_addresses(text: str) -> list[str]:
 
 
 def _find_customer_reference(text: str) -> str | None:
-    match = search(r"Kundenreferenz\s*:?\s*\n?\s*([^\n]+)", text)
+    match = search(
+        r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
+        text,
+    ) or search(
+        r"Kundenreferenz\s*:?\s*(?:\n\s*)?(.+?)(?=\s+(?:Kundennummer|Kunden-Nr\.?|Auftragsnummer|"
+        r"Artikel|Rechnungsbetrag|MwSt|Lieferanschrift|Sachbearbeiter)\b|\n|$)",
+        text,
+    )
     if not match:
         return None
     value = match.group(1).strip(" :-\t")
