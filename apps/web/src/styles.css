@@ -463,17 +463,25 @@ button:disabled {
 }
 
 .queue-tools {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(145px, 1fr));
-  align-items: end;
-  justify-content: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--surface);
 }
 
 .queue-tools button {
-  width: 100%;
-  min-height: 42px;
+  flex: 1 1 150px;
+  min-height: 40px;
   padding-inline: 12px;
+}
+
+.queue-tools button:nth-child(1),
+.queue-tools button:nth-child(2) {
+  flex-basis: 210px;
 }
 
 .filter-tabs {
@@ -582,13 +590,14 @@ button:disabled {
 
 .month-export {
   display: grid;
-  gap: 5px;
-  min-width: 0;
+  flex: 0 1 132px;
+  gap: 4px;
+  min-width: 132px;
 }
 
 .month-export input {
   width: 100%;
-  min-height: 42px;
+  min-height: 40px;
 }
 
 .section-header > div,
@@ -1317,6 +1326,14 @@ code {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .queue-tools button,
+  .queue-tools button:nth-child(1),
+  .queue-tools button:nth-child(2),
+  .month-export {
+    width: 100%;
+    min-width: 0;
   }
 
   .filter-tabs {
