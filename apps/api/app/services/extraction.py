@@ -200,6 +200,7 @@ def _build_cii_xml_result(
     # Some supplier XML files do not carry construction-site delivery text,
     # so the project assignment is enriched from the human-readable PDF.
     delivery_address = _xml_delivery_address(root, ns) or _find_delivery_address(text)
+    customer_reference = _find_customer_reference(text)
     due_date = (
         visible_discount.get("due_date")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+ohne Abzug")
@@ -212,7 +213,7 @@ def _build_cii_xml_result(
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text, supplier_rule)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
@@ -265,6 +266,7 @@ def _build_cii_xml_result(
         "supplier_name": supplier_name,
         "invoice_number": invoice_number,
         "customer_number": customer_number,
+        "customer_reference": customer_reference,
         "invoice_date": invoice_date,
         "due_date": due_date,
         "discount_due_date": discount_due_date,
@@ -362,11 +364,12 @@ def _build_ubl_xml_result(
     discount_amount = _signed_discount_amount(discount_amount, gross_amount)
 
     delivery_address = _ubl_delivery_address(root, ns) or _find_delivery_address(text)
+    customer_reference = _find_customer_reference(text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text, supplier_rule)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
@@ -416,6 +419,7 @@ def _build_ubl_xml_result(
         "supplier_name": supplier_name,
         "invoice_number": invoice_number,
         "customer_number": customer_number,
+        "customer_reference": customer_reference,
         "invoice_date": invoice_date,
         "due_date": due_date,
         "discount_due_date": None,
@@ -535,12 +539,13 @@ def _build_pdf_text_result(document: dict) -> dict:
     discount_amount = _signed_discount_amount(discount_amount, gross_amount)
     delivery_addresses = _find_delivery_addresses(text)
     delivery_address = delivery_addresses[0] if delivery_addresses else _find_delivery_address(text)
+    customer_reference = _find_customer_reference(text)
     supplier_name = _supplier_name(document, text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, text, supplier_rule)
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text, supplier_rule)
     if not assignment and delivery_addresses:
         assignment = _resolve_assignment_for_delivery_addresses(document["tenant_id"], delivery_addresses)
     product_name = _product_name(text)
@@ -585,6 +590,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "supplier_name": supplier_name,
         "invoice_number": invoice_number,
         "customer_number": customer_number,
+        "customer_reference": customer_reference,
         "invoice_date": invoice_date,
         "due_date": due_date,
         "discount_due_date": discount_due_date,
@@ -1031,6 +1037,14 @@ def _find_delivery_addresses(text: str) -> list[str]:
     return list(dict.fromkeys(addresses))
 
 
+def _find_customer_reference(text: str) -> str | None:
+    match = search(r"Kundenreferenz\s*:?\s*\n?\s*([^\n]+)", text)
+    if not match:
+        return None
+    value = match.group(1).strip(" :-\t")
+    return value or None
+
+
 def _find_allocation_lines(tenant_id: str, text: str) -> list[dict[str, str | None]]:
     normalized_text = sub(r"\s+", " ", text)
     allocations = []
@@ -1094,14 +1108,19 @@ def _normalize_supplier_name(value: str | None) -> str | None:
 def _assignment_unit(
     tenant_id: str,
     delivery_address: str | None,
+    customer_reference: str | None,
     text: str,
     supplier_rule: dict | None,
 ) -> dict | None:
+    for explicit_hint in (customer_reference, delivery_address):
+        assignment = find_assignment_unit_by_text(tenant_id, explicit_hint)
+        if assignment and assignment["is_active"]:
+            return assignment
     if supplier_rule and supplier_rule.get("default_assignment_code"):
         assignment = get_assignment_unit_by_code(tenant_id, supplier_rule["default_assignment_code"])
         if assignment and assignment["is_active"]:
             return assignment
-    return find_assignment_unit_by_text(tenant_id, delivery_address or text[:4000])
+    return find_assignment_unit_by_text(tenant_id, text[:4000])
 
 
 def _legacy_project_code(assignment: dict | None) -> str | None:

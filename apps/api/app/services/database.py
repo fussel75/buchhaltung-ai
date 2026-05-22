@@ -1705,17 +1705,28 @@ def delete_expired_sessions() -> None:
 def seed_demo_masterdata() -> None:
     ensure_tenant_profile("demo-mandant")
     existing = list_assignment_units("demo-mandant")
+    if not get_assignment_unit_by_code("demo-mandant", "Wewe20"):
+        create_assignment_unit(
+            tenant_id="demo-mandant",
+            code="Wewe20",
+            label="Weseler Weg 20",
+            kind="construction_project",
+            project_number="25-00008",
+            revenue_relevant=True,
+            aliases=["Weseler Weg 20", "Weseler Weg 20, 22045 Hamburg"],
+        )
+    if not get_assignment_unit_by_code("demo-mandant", "Neula51"):
+        create_assignment_unit(
+            tenant_id="demo-mandant",
+            code="Neula51",
+            label="Neusurenland 51",
+            kind="construction_project",
+            project_number=None,
+            revenue_relevant=True,
+            aliases=["Neusurenland 51", "Kundenreferenz Neusurenland 51"],
+        )
     if existing:
         return
-    create_assignment_unit(
-        tenant_id="demo-mandant",
-        code="Wewe20",
-        label="Weseler Weg 20",
-        kind="construction_project",
-        project_number="25-00008",
-        revenue_relevant=True,
-        aliases=["Weseler Weg 20", "Weseler Weg 20, 22045 Hamburg"],
-    )
     create_supplier_rule(
         tenant_id="demo-mandant",
         match_text="Holz Junge",

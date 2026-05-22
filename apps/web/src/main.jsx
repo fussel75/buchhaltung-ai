@@ -2336,7 +2336,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
         <div className="booking-edit-row booking-head">
           <span>Nr.</span>
           <span>Beschreibung</span>
-          <span>Zuordnung</span>
+          <span>{tenantProfile.assignment_code_label}</span>
           <span>Kostenart</span>
           <span>Netto</span>
           <span>USt</span>
@@ -2359,7 +2359,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
                   value={draft.assignment_code}
                   onChange={(event) => updateDraft(suggestion.id, { assignment_code: event.target.value })}
                   disabled={isLocked}
-                  aria-label={`Zuordnung Zeile ${suggestion.line_no}`}
+                  aria-label={`${tenantProfile.assignment_code_label} Zeile ${suggestion.line_no}`}
                 />
                 <select
                   value={draft.assignment_kind}
