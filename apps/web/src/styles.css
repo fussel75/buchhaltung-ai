@@ -283,16 +283,16 @@ button:disabled {
 .metric-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
 }
 
 .metric {
   display: grid;
-  gap: 8px;
-  min-height: 92px;
+  gap: 5px;
+  min-height: 62px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 17px 18px;
+  border-radius: 8px;
+  padding: 11px 14px;
   background: var(--surface);
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
@@ -311,7 +311,7 @@ button:disabled {
   display: block;
   min-width: 0;
   color: var(--text);
-  font-size: 1.45rem;
+  font-size: 1.25rem;
   font-variant-numeric: tabular-nums;
   font-weight: 720;
   line-height: 1.1;
@@ -442,9 +442,9 @@ button:disabled {
 
 .uploads > .queue-header {
   display: grid;
-  grid-template-columns: minmax(160px, 200px) minmax(320px, 1fr) minmax(320px, 360px);
+  grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
   gap: 14px;
-  align-items: end;
+  align-items: start;
 }
 
 .queue-heading {
@@ -455,23 +455,28 @@ button:disabled {
   display: grid;
   gap: 4px;
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1 / span 2;
 }
 
 .queue-tools {
-  display: grid;
-  align-items: start;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  justify-content: stretch;
-  justify-self: stretch;
-  width: 100%;
-  max-width: 360px;
+  justify-content: flex-start;
+  justify-self: start;
+  width: auto;
+  max-width: none;
   padding-top: 0;
+  grid-column: 2;
+  grid-row: 2;
 }
 
 .queue-primary-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .queue-tools button {
@@ -486,7 +491,7 @@ button:disabled {
 
 .queue-primary-actions > button {
   min-width: 0;
-  flex: 1 1 150px;
+  flex: 0 0 auto;
 }
 
 .export-menu,
@@ -561,6 +566,8 @@ button:disabled {
   justify-content: flex-start;
   align-self: end;
   margin: 0;
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .filter-tabs button {
