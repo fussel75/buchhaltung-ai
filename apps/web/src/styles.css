@@ -442,8 +442,8 @@ button:disabled {
 
 .uploads > .queue-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(360px, 1fr) minmax(320px, 520px);
+  gap: 22px;
   align-items: start;
 }
 
@@ -464,15 +464,18 @@ button:disabled {
 .queue-tools {
   display: grid;
   align-items: start;
-  gap: 6px;
-  justify-content: flex-start;
+  gap: 8px;
+  justify-content: stretch;
+  justify-self: end;
+  width: 100%;
+  max-width: 520px;
   padding-top: 2px;
 }
 
 .queue-primary-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 10px;
 }
 
 .queue-tools button {
@@ -486,7 +489,8 @@ button:disabled {
 }
 
 .queue-primary-actions > button {
-  min-width: 165px;
+  min-width: 0;
+  flex: 1 1 180px;
 }
 
 .export-menu,
@@ -1359,6 +1363,15 @@ code {
   .review-sidebar,
   .dropzone {
     position: static;
+  }
+
+  .uploads > .queue-header {
+    grid-template-columns: 1fr;
+  }
+
+  .queue-tools {
+    justify-self: stretch;
+    max-width: none;
   }
 }
 
