@@ -38,7 +38,7 @@ from app.services.storage import (
     store_original_document,
     UploadRejectedError,
 )
-from app.routes.users import require_document_access, require_tenant_access
+from app.routes.users import require_admin, require_document_access, require_tenant_access
 
 router = APIRouter()
 
@@ -51,6 +51,10 @@ class DocumentExportRequest(BaseModel):
 class DocumentBulkJobRequest(BaseModel):
     tenant_id: str
     document_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
+class DocumentReextractRequest(BaseModel):
+    confirm: bool = False
 
 
 class BookingSuggestionUpdate(BaseModel):
@@ -384,7 +388,17 @@ def get_document_file(
 @router.post("/{document_id}/extract")
 def extract_document(document_id: UUID, request: Request) -> dict[str, Any]:
     require_document_access(request, document_id)
-    return {"document": run_mock_extraction(document_id)}
+    return {"document": run_mock_extraction(document_id, actor=_actor(request))}
+
+
+@router.post("/{document_id}/reextract")
+def reextract_document(document_id: UUID, payload: DocumentReextractRequest, request: Request) -> dict[str, Any]:
+    require_admin(request)
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Neu-Extraktion erfordert explizite Bestätigung.")
+    document = require_document_access(request, document_id)
+    _ensure_not_processing(document)
+    return {"document": run_mock_extraction(document_id, force=True, actor=_actor(request))}
 
 
 @router.post("/{document_id}/review")

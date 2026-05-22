@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import TestCase
@@ -56,6 +57,17 @@ class RecordingConnection:
 
     def cursor(self):
         return self._cursor
+
+
+class SequenceCursor(RecordingCursor):
+    def __init__(self, fetchone_results=None, fetchall_result=None):
+        super().__init__(fetchall_result=fetchall_result)
+        self.fetchone_results = list(fetchone_results or [])
+
+    def fetchone(self):
+        if not self.fetchone_results:
+            return None
+        return self.fetchone_results.pop(0)
 
 
 class BookingSuggestionTests(TestCase):
@@ -625,6 +637,149 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(context.exception.status_code, 409)
         save_document_extraction.assert_not_called()
+
+    def test_force_reextract_allows_existing_extraction_and_audits(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_ready",
+            "original_filename": "rechnung.pdf",
+            "processing_job_id": None,
+            "extraction": {"id": str(uuid4())},
+        }
+        extraction = {
+            "supplier_name": "Theo Foerch GmbH & Co. KG",
+            "invoice_number": "3161691971",
+            "invoice_date": "2026-05-21",
+            "service_period": "2026-05",
+            "net_amount": Decimal("7.37"),
+            "tax_amount": Decimal("1.40"),
+            "gross_amount": Decimal("8.77"),
+            "currency": "EUR",
+            "confidence": Decimal("0.88"),
+            "warnings": [],
+            "normalized_filename": None,
+        }
+        saved_document = {**document, "status": "extracted"}
+
+        with (
+            patch.object(extraction_service, "get_document", return_value=document),
+            patch.object(extraction_service, "_build_extraction_result", return_value=extraction),
+            patch.object(extraction_service, "save_document_extraction", return_value=saved_document) as save_extraction,
+            patch.object(extraction_service, "insert_audit_event") as insert_audit_event,
+        ):
+            result = run_mock_extraction(document_id, force=True, actor="admin@example.com")
+
+        self.assertEqual(result["status"], "extracted")
+        save_extraction.assert_called_once()
+        insert_audit_event.assert_called_once()
+        self.assertEqual(insert_audit_event.call_args.kwargs["event_type"], "document.reextraction_started")
+        self.assertEqual(insert_audit_event.call_args.kwargs["actor"], "admin@example.com")
+        self.assertEqual(insert_audit_event.call_args.kwargs["details"], {"previous_status": "review_ready"})
+
+    def test_force_reextract_blocks_documents_without_existing_extraction(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_pending",
+            "original_filename": "rechnung.pdf",
+            "processing_job_id": None,
+            "extraction": None,
+        }
+
+        with (
+            patch.object(extraction_service, "get_document", return_value=document),
+            patch.object(extraction_service, "save_document_extraction") as save_extraction,
+            patch.object(extraction_service, "insert_audit_event") as insert_audit_event,
+        ):
+            with self.assertRaises(HTTPException) as context:
+                run_mock_extraction(document_id, force=True)
+
+        self.assertEqual(context.exception.status_code, 409)
+        save_extraction.assert_not_called()
+        insert_audit_event.assert_not_called()
+
+    def test_reextract_route_requires_explicit_confirmation(self):
+        request = SimpleNamespace(
+            state=SimpleNamespace(user={"role": "admin", "email": "admin@example.com", "allowed_tenant_ids": ["*"]})
+        )
+        payload = documents_route.DocumentReextractRequest(confirm=False)
+
+        with self.assertRaises(HTTPException) as context:
+            documents_route.reextract_document(uuid4(), payload, request)
+
+        self.assertEqual(context.exception.status_code, 400)
+
+    def test_save_extraction_clears_stale_payment_decision(self):
+        document_id = uuid4()
+        tenant_id = "demo-mandant"
+        now = datetime.now(UTC)
+        extraction_row = {
+            "id": uuid4(),
+            "document_id": document_id,
+            "tenant_id": tenant_id,
+            "supplier_name": "Theo Foerch GmbH & Co. KG",
+            "invoice_number": "3161691971",
+            "invoice_date": "2026-05-21",
+            "service_period": "2026-05",
+            "net_amount": Decimal("7.37"),
+            "tax_amount": Decimal("1.40"),
+            "gross_amount": Decimal("8.77"),
+            "currency": "EUR",
+            "confidence": Decimal("0.88"),
+            "warnings": [],
+            "raw_result": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        document_row = {
+            "id": document_id,
+            "tenant_id": tenant_id,
+            "original_filename": "rechnung.pdf",
+            "normalized_filename": None,
+            "content_type": "application/pdf",
+            "sha256": "abc",
+            "size_bytes": 123,
+            "storage_path": "demo-mandant/abc.pdf",
+            "status": "extracted",
+            "processing_job_id": None,
+            "processing_started_at": None,
+            "duplicate_of": None,
+            "created_at": now,
+            "updated_at": now,
+            "extraction": None,
+            "booking_suggestions": [],
+            "payment_decision": None,
+        }
+        cursor = SequenceCursor(fetchone_results=[extraction_row, document_row])
+
+        with (
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "insert_audit_event"),
+        ):
+            result = database_service.save_document_extraction(
+                document_id=document_id,
+                tenant_id=tenant_id,
+                extraction={
+                    "supplier_name": "Theo Foerch GmbH & Co. KG",
+                    "invoice_number": "3161691971",
+                    "invoice_date": "2026-05-21",
+                    "service_period": "2026-05",
+                    "net_amount": Decimal("7.37"),
+                    "tax_amount": Decimal("1.40"),
+                    "gross_amount": Decimal("8.77"),
+                    "currency": "EUR",
+                    "confidence": Decimal("0.88"),
+                    "warnings": [],
+                },
+            )
+
+        self.assertEqual(result["status"], "extracted")
+        self.assertTrue(
+            any(statement == "delete from document_payment_decisions where document_id = %s" for statement, _ in cursor.statements)
+        )
 
     def test_bulk_extraction_validation_blocks_non_pending_documents(self):
         document_id = uuid4()

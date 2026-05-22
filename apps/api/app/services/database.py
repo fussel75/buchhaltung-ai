@@ -828,6 +828,7 @@ def save_document_extraction(
             )
             saved = cursor.fetchone()
             cursor.execute("delete from document_booking_suggestions where document_id = %s", (document_id,))
+            cursor.execute("delete from document_payment_decisions where document_id = %s", (document_id,))
             cursor.execute(
                 """
                 update documents

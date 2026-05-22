@@ -461,6 +461,41 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const reextractDocument = useCallback(
+    async (document) => {
+      const confirmed = window.confirm(
+        `Beleg "${document.original_filename}" neu extrahieren? Vorhandene Buchungsvorschläge, Freigaben und Zahlungsentscheidungen werden verworfen.`,
+      );
+      if (!confirmed) return;
+
+      setError("");
+      setNotice("");
+      setExtractingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/reextract`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: true }),
+        });
+
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({}));
+          throw new Error(formatApiError(result.detail, `Neu-Extraktion fehlgeschlagen: ${response.status}`));
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Neu extrahiert: ${result.document.original_filename}`);
+      } catch (extractError) {
+        setError(extractError.message);
+      } finally {
+        setExtractingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   const startBulkExtraction = useCallback(async () => {
     const targets = extractableDocuments;
     if (!targets.length || isBulkExtracting) return;
@@ -1056,6 +1091,16 @@ function UploadApp() {
                     >
                       {exporting === document.id ? "Lädt..." : "Download"}
                     </button>
+                    {document.extraction ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => reextractDocument(document)}
+                        disabled={extractingIds.includes(document.id)}
+                      >
+                        {extractingIds.includes(document.id) ? "LÃ¤uft..." : "Neu extrahieren"}
+                      </button>
+                    ) : null}
                     {document.extraction && !document.booking_suggestions?.length ? (
                       <button
                         type="button"

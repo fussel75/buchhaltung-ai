@@ -29,16 +29,26 @@ VALID_COST_CATEGORIES = {
     "general_overhead",
 }
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
+REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready", "review_approved"}
 
 
-def run_mock_extraction(document_id: UUID, processing_job_id: UUID | None = None) -> dict:
+def run_mock_extraction(
+    document_id: UUID,
+    processing_job_id: UUID | None = None,
+    *,
+    force: bool = False,
+    actor: str = "system",
+) -> dict:
     document = get_document(document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
     active_job_id = document.get("processing_job_id")
     if active_job_id and active_job_id != str(processing_job_id):
         raise HTTPException(status_code=409, detail="Beleg wird gerade von einem Bulk-Job verarbeitet.")
-    if document.get("status") not in EXTRACTABLE_DOCUMENT_STATUSES:
+    if force:
+        if document.get("status") not in REEXTRACTABLE_DOCUMENT_STATUSES or not document.get("extraction"):
+            raise HTTPException(status_code=409, detail="Neu-Extraktion blockiert: Beleg hat noch keine Extraktion.")
+    elif document.get("status") not in EXTRACTABLE_DOCUMENT_STATUSES:
         raise HTTPException(
             status_code=409,
             detail="Extraktion blockiert: Beleg ist bereits im Review oder freigegeben.",
@@ -46,8 +56,10 @@ def run_mock_extraction(document_id: UUID, processing_job_id: UUID | None = None
 
     insert_audit_event(
         tenant_id=document["tenant_id"],
-        event_type="document.extraction_started",
+        event_type="document.reextraction_started" if force else "document.extraction_started",
         document_id=document_id,
+        actor=actor,
+        details={"previous_status": document.get("status")} if force else None,
     )
 
     extraction = _build_extraction_result(document)
