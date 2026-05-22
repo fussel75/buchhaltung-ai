@@ -1008,20 +1008,22 @@ function UploadApp() {
             </div>
           </div>
           <div className="queue-tools">
-            <button
-              type="button"
-              onClick={startBulkExtraction}
-              disabled={!extractableDocuments.length || isBulkExtracting}
-            >
-              {isBulkExtracting ? "Extrahiert..." : `Offene extrahieren (${extractableDocuments.length})`}
-            </button>
-            <button
-              type="button"
-              onClick={startBulkReviewPreparation}
-              disabled={!reviewableDocuments.length || isBulkPreparingReview}
-            >
-              {isBulkPreparingReview ? "Erstellt..." : `Vorschläge erstellen (${reviewableDocuments.length})`}
-            </button>
+            <div className="queue-primary-actions">
+              <button
+                type="button"
+                onClick={startBulkExtraction}
+                disabled={!extractableDocuments.length || isBulkExtracting}
+              >
+                {isBulkExtracting ? "Extrahiert..." : `Offene extrahieren (${extractableDocuments.length})`}
+              </button>
+              <button
+                type="button"
+                onClick={startBulkReviewPreparation}
+                disabled={!reviewableDocuments.length || isBulkPreparingReview}
+              >
+                {isBulkPreparingReview ? "Erstellt..." : `Vorschläge erstellen (${reviewableDocuments.length})`}
+              </button>
+            </div>
             <details className="export-menu">
               <summary>Export</summary>
               <div className="export-panel">

@@ -462,12 +462,17 @@ button:disabled {
 }
 
 .queue-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
+  align-items: start;
   gap: 6px;
   justify-content: flex-start;
   padding-top: 2px;
+}
+
+.queue-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .queue-tools button {
@@ -480,8 +485,7 @@ button:disabled {
   font-size: 0.82rem;
 }
 
-.queue-tools > button:nth-child(1),
-.queue-tools > button:nth-child(2) {
+.queue-primary-actions > button {
   min-width: 165px;
 }
 
@@ -1429,19 +1433,24 @@ code {
   }
 
   .queue-tools {
-    display: flex;
+    width: 100%;
+  }
+
+  .queue-primary-actions {
+    display: grid;
+    grid-template-columns: 1fr;
     width: 100%;
   }
 
   .queue-tools button,
+  .queue-primary-actions,
   .queue-tools .export-menu,
   .queue-tools .export-menu summary {
     width: 100%;
   }
 
   .queue-tools button,
-  .queue-tools button:nth-child(1),
-  .queue-tools button:nth-child(2),
+  .queue-primary-actions > button,
   .month-export {
     width: 100%;
     min-width: 0;
