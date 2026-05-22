@@ -442,23 +442,19 @@ button:disabled {
 
 .uploads > .queue-header {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(320px, 520px);
-  gap: 22px;
-  align-items: start;
+  grid-template-columns: minmax(180px, 230px) minmax(360px, 1fr) minmax(420px, 520px);
+  gap: 14px;
+  align-items: end;
 }
 
 .queue-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
+  display: contents;
 }
 
 .queue-heading > div:first-child {
   display: grid;
   gap: 4px;
-  min-width: 220px;
+  min-width: 0;
 }
 
 .queue-tools {
@@ -469,7 +465,7 @@ button:disabled {
   justify-self: end;
   width: 100%;
   max-width: 520px;
-  padding-top: 2px;
+  padding-top: 0;
 }
 
 .queue-primary-actions {
@@ -562,7 +558,8 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  align-self: end;
   margin: 0;
 }
 
@@ -1367,6 +1364,10 @@ code {
 
   .uploads > .queue-header {
     grid-template-columns: 1fr;
+  }
+
+  .queue-heading {
+    display: flex;
   }
 
   .queue-tools {
