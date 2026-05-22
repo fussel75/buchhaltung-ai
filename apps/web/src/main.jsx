@@ -1105,7 +1105,7 @@ function UploadApp() {
                     </div>
                   </div>
                   <div className="document-actions">
-                    <span className="status">{formatStatus(document.status)}</span>
+                    <span className={`status ${statusTone(document.status)}`}>{formatStatus(document.status)}</span>
                     {!document.extraction && document.status === "review_pending" ? (
                       <button
                         type="button"
@@ -1146,16 +1146,20 @@ function UploadApp() {
                     <button
                       className="secondary-button"
                       type="button"
+                      onClick={() => openDocument(document)}
+                    >
+                      Ansehen
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
                       onClick={() => toggleDocumentDetails(document.id)}
                     >
                       {isExpanded ? "Details ausblenden" : "Details"}
                     </button>
                     <details className="row-menu">
-                      <summary>Mehr</summary>
+                      <summary>Datei</summary>
                       <div className="row-menu-panel">
-                        <button className="secondary-button" type="button" onClick={() => openDocument(document)}>
-                          Ansehen
-                        </button>
                         <button
                           className="secondary-button"
                           type="button"
@@ -2679,6 +2683,16 @@ function formatStatus(status) {
     review_approved: "Freigegeben",
   };
   return labels[status] ?? status;
+}
+
+function statusTone(status) {
+  const tones = {
+    review_pending: "gray",
+    extracted: "blue",
+    review_ready: "orange",
+    review_approved: "green",
+  };
+  return tones[status] ?? "gray";
 }
 
 function formatBookingStatus(status) {
