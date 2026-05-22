@@ -189,10 +189,12 @@ def _build_cii_xml_result(
     xml_discount_base = discount_base
     if visible_discount_base is not None:
         discount_base = visible_discount_base
+    if discount_base is None and visible_discount.get("discount_net_amount") is not None and net_amount is not None:
+        discount_base = net_amount
     if visible_discount.get("discount_percent") is not None:
         discount_percent = visible_discount["discount_percent"]
-    discount_amount = None
-    if discount_base is not None and discount_percent is not None:
+    discount_amount = visible_discount.get("discount_amount")
+    if discount_amount is None and discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
     is_credit_note = gross_amount is not None and gross_amount < 0
     discount_amount = _signed_discount_amount(discount_amount, gross_amount)
@@ -297,6 +299,9 @@ def _build_cii_xml_result(
         "xml_discount_base": xml_discount_base,
         "discount_percent": discount_percent,
         "discount_amount": discount_amount,
+        "discount_net_amount": visible_discount.get("discount_net_amount"),
+        "discount_tax_amount": visible_discount.get("discount_tax_amount"),
+        "discount_gross_amount": visible_discount.get("discount_gross_amount"),
         "payment_terms": _payment_terms(
             gross_amount=due_payable_amount or gross_amount,
             due_date=due_date,
@@ -515,6 +520,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     )
     allocation_lines = _find_allocation_lines(document["tenant_id"], text)
     visible_discount = _find_visible_discount_terms(text)
+    due_date = due_date or visible_discount.get("due_date")
     discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent")
     discount_due_date = (
         _find_date(text, r"(\d{2}\.\d{2}\.\d{4})\s+3,00%\s+Skonto")
@@ -531,7 +537,14 @@ def _build_pdf_text_result(document: dict) -> dict:
     )
     if net_amount is None and tax_amount is not None and gross_amount is not None:
         net_amount = (gross_amount - tax_amount).quantize(Decimal("0.01"))
-    if discount_base is None and gross_amount is not None and (discount_percent is not None or discount_amount is not None):
+    if discount_base is None and visible_discount.get("discount_net_amount") is not None and net_amount is not None:
+        discount_base = net_amount
+    if (
+        discount_base is None
+        and visible_discount.get("discount_net_amount") is None
+        and gross_amount is not None
+        and (discount_percent is not None or discount_amount is not None)
+    ):
         discount_base = gross_amount
     if discount_amount is None and discount_base is not None and discount_percent is not None:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
@@ -618,6 +631,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_base": discount_base,
         "discount_percent": discount_percent,
         "discount_amount": discount_amount,
+        "discount_net_amount": visible_discount.get("discount_net_amount"),
+        "discount_tax_amount": visible_discount.get("discount_tax_amount"),
+        "discount_gross_amount": visible_discount.get("discount_gross_amount"),
         "discounted_payable_amount": visible_discount.get("discounted_payable_amount"),
         "is_credit_note": is_credit_note,
         "document_type": "credit_note" if is_credit_note else "incoming_invoice",
@@ -821,6 +837,7 @@ def _find_visible_discount_base(text: str) -> Decimal | None:
 
 
 def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
+    tabular_terms = _find_tabular_discount_terms(text)
     discount_due_date = _find_date(
         text,
         r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+([0-9]+,[0-9]{2})%\s+Skt=",
@@ -846,12 +863,45 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
         r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+([0-9.]+,\d{2})",
     )
     return {
-        "discount_due_date": discount_due_date,
-        "due_date": due_date,
-        "discount_percent": _money_to_decimal(percent_text) if percent_text else None,
+        "discount_due_date": discount_due_date or tabular_terms.get("discount_due_date"),
+        "due_date": due_date or tabular_terms.get("due_date"),
+        "discount_percent": (_money_to_decimal(percent_text) if percent_text else None)
+        or tabular_terms.get("discount_percent"),
         "discount_base": _find_visible_discount_base(text),
-        "discount_amount": discount_amount,
-        "discounted_payable_amount": discounted_payable_amount,
+        "discount_amount": discount_amount or tabular_terms.get("discount_amount"),
+        "discount_net_amount": tabular_terms.get("discount_net_amount"),
+        "discount_tax_amount": tabular_terms.get("discount_tax_amount"),
+        "discount_gross_amount": tabular_terms.get("discount_gross_amount"),
+        "discounted_payable_amount": discounted_payable_amount
+        or tabular_terms.get("discounted_payable_amount"),
+    }
+
+
+def _find_tabular_discount_terms(text: str) -> dict[str, Decimal | str | None]:
+    normalized = sub(r"\s+", " ", text).strip()
+    if "Bei Zahlung bis" not in normalized or "Skonto brutto" not in normalized:
+        return {}
+
+    match = search(
+        r"Bei Zahlung bis\s+Skonto\s*%\s+Skonto netto\s*(?:€|EUR)\s+Skonto MwSt\.?\s*(?:€|EUR)\s+"
+        r"Skonto brutto\s*(?:€|EUR)\s+Zahlungsziel Netto bis\s+"
+        r"(\d{2}\.\d{2}\.\d{4})\s+([0-9]+(?:,\d{1,2})?)\s+"
+        r"([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+(\d{2}\.\d{2}\.\d{4})",
+        normalized,
+    )
+    if not match:
+        return {}
+
+    discount_due_date, percent_text, discount_net, discount_tax, discount_gross, due_date = match.groups()
+    return {
+        "discount_due_date": _date_text_to_iso(discount_due_date),
+        "due_date": _date_text_to_iso(due_date),
+        "discount_percent": _percent_to_decimal(percent_text),
+        "discount_net_amount": _money_to_decimal(discount_net),
+        "discount_tax_amount": _money_to_decimal(discount_tax),
+        "discount_gross_amount": _money_to_decimal(discount_gross),
+        "discount_amount": _money_to_decimal(discount_gross),
+        "discounted_payable_amount": None,
     }
 
 
@@ -928,6 +978,10 @@ def _find_date(text: str, pattern: str) -> str | None:
     value = _find_text(text, pattern)
     if not value:
         return None
+    return _date_text_to_iso(value)
+
+
+def _date_text_to_iso(value: str) -> str:
     day, month, year = value.split(".")
     if len(year) == 2:
         year = f"20{year}"
@@ -1016,6 +1070,10 @@ def _discount_due_date_from_days(invoice_date: str | None, days: int | None) -> 
 
 def _money_to_decimal(value: str) -> Decimal:
     return Decimal(value.replace(".", "").replace(",", ".")).quantize(Decimal("0.01"))
+
+
+def _percent_to_decimal(value: str) -> Decimal:
+    return Decimal(value.replace(",", ".")).quantize(Decimal("0.01"))
 
 
 def _find_delivery_address(text: str) -> str | None:

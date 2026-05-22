@@ -21,6 +21,8 @@ class ExtractionPdfTests(TestCase):
         Artikel Schrauben und Befestigungsmaterial
         Rechnungsbetrag 8,77
         MwSt 1,40
+        Bei Zahlung bis     Skonto %     Skonto netto €     Skonto MwSt. €     Skonto brutto €     Zahlungsziel Netto bis
+        31.05.2026          3,0          0,22                 0,04                0,26                 20.06.2026
         Vielen Dank fuer Ihren Einkauf.
         """
         document = {
@@ -46,7 +48,17 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["net_amount"], Decimal("7.37"))
         self.assertEqual(result["tax_amount"], Decimal("1.40"))
         self.assertEqual(result["gross_amount"], Decimal("8.77"))
-        self.assertEqual(result["discount_base"], None)
+        self.assertEqual(result["due_date"], "2026-06-20")
+        self.assertEqual(result["discount_due_date"], "2026-05-31")
+        self.assertEqual(result["discount_percent"], Decimal("3.00"))
+        self.assertEqual(result["discount_base"], Decimal("7.37"))
+        self.assertEqual(result["discount_net_amount"], Decimal("0.22"))
+        self.assertEqual(result["discount_tax_amount"], Decimal("0.04"))
+        self.assertEqual(result["discount_gross_amount"], Decimal("0.26"))
+        self.assertEqual(result["discount_amount"], Decimal("0.26"))
+        self.assertEqual(result["payment_terms"][0]["due_date"], "2026-06-20")
+        self.assertEqual(result["payment_terms"][1]["due_date"], "2026-05-31")
+        self.assertEqual(result["payment_terms"][1]["amount"], Decimal("8.51"))
         self.assertEqual(result["cost_category"], "material")
         self.assertEqual(result["confidence"], Decimal("0.88"))
         self.assertEqual(result["warnings"], [])
