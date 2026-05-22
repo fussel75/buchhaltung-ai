@@ -1193,47 +1193,69 @@ function UploadApp() {
 
                 {isExpanded ? (
                   <>
-                    <div className="meta-grid">
-                      <span>Hash <code>{document.sha256.slice(0, 16)}</code></span>
-                      <span>Größe {formatSize(document.size_bytes)}</span>
-                    </div>
-
                     {document.extraction ? (
                       <div className="extraction-panel">
-                    <div className="extraction-grid">
-                      <Field label="Lieferant" value={document.extraction.supplier_name} />
-                      <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
-                      <Field label="Rechnung" value={document.extraction.invoice_number} />
-                      <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
-                      <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
-                      <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result, tenantProfile)} />
-                      <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                      <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />} />
-                      <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind, tenantProfile)} />
-                      <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
-                      <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
-                      <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
-                      <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
-                      <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
-                      <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
-                      <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
-                      <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
-                      <Field label="Confidence" value={`${Math.round(document.extraction.confidence * 100)} %`} />
-                    </div>
-                    <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
-                    <PaymentTerms
-                      document={document}
-                      rawResult={document.extraction.raw_result}
-                      onSelect={selectPaymentDecision}
-                      isSaving={savingPaymentIds.includes(document.id)}
-                    />
-                    <BookingSuggestions
-                      document={document}
-                      suggestions={document.booking_suggestions}
-                      tenantProfile={tenantProfile}
-                      onSave={saveBookingSuggestion}
-                      savingIds={savingSuggestionIds}
-                    />
+                        <div className="review-check-header">
+                          <div>
+                            <p className="eyebrow">Prüfung</p>
+                            <h3>Extraktion prüfen</h3>
+                          </div>
+                        </div>
+
+                        <div className="review-facts">
+                          <Field label="Lieferant" value={document.extraction.supplier_name} />
+                          <Field label="Rechnung" value={document.extraction.invoice_number} />
+                          <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
+                          <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result, tenantProfile)} />
+                          <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
+                          <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
+                          <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
+                          <Field label="Confidence" value={formatConfidence(document.extraction.confidence)} />
+                        </div>
+
+                        {document.extraction?.warnings?.length ? (
+                          <ul className="warnings">
+                            {document.extraction.warnings.map((warning, index) => (
+                              <li key={`${warning}-${index}`}>{warning}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+
+                        <section className="detail-section">
+                          <div className="detail-section-header">
+                            <div>
+                              <h3>Weitere Belegdaten</h3>
+                              <span>für Kontrolle und Buchung</span>
+                            </div>
+                          </div>
+                          <div className="extraction-grid">
+                            <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
+                            <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
+                            <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
+                            <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />} />
+                            <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind, tenantProfile)} />
+                            <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
+                            <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
+                            <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
+                            <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
+                            <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
+                          </div>
+                        </section>
+
+                        <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
+                        <PaymentTerms
+                          document={document}
+                          rawResult={document.extraction.raw_result}
+                          onSelect={selectPaymentDecision}
+                          isSaving={savingPaymentIds.includes(document.id)}
+                        />
+                        <BookingSuggestions
+                          document={document}
+                          suggestions={document.booking_suggestions}
+                          tenantProfile={tenantProfile}
+                          onSave={saveBookingSuggestion}
+                          savingIds={savingSuggestionIds}
+                        />
                       </div>
                     ) : (
                       <div className="pending-extraction">
@@ -1256,13 +1278,10 @@ function UploadApp() {
                       </div>
                     )}
 
-                    {document.extraction?.warnings?.length ? (
-                      <ul className="warnings">
-                        {document.extraction.warnings.map((warning) => (
-                          <li key={warning}>{warning}</li>
-                        ))}
-                      </ul>
-                    ) : null}
+                    <div className="meta-grid file-meta">
+                      <span>Hash <code>{document.sha256.slice(0, 16)}</code></span>
+                      <span>Größe {formatSize(document.size_bytes)}</span>
+                    </div>
                   </>
                 ) : null}
               </article>
@@ -2843,11 +2862,19 @@ function industryLabel(value) {
 }
 
 function formatMoney(value) {
-  if (!value) return "-";
-  return `${Number(value).toLocaleString("de-DE", {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  if (Number.isNaN(number)) return "-";
+  return `${number.toLocaleString("de-DE", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })} EUR`;
+}
+
+function formatConfidence(value) {
+  const number = Number(value);
+  if (Number.isNaN(number)) return "-";
+  return `${Math.round(number * 100)} %`;
 }
 
 function formatDate(value) {
