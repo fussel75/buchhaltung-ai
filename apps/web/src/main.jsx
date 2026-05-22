@@ -245,7 +245,7 @@ function UploadApp() {
     [filteredDocuments],
   );
   const reviewableDocuments = useMemo(
-    () => filteredDocuments.filter((document) => document.extraction && !document.booking_suggestions?.length),
+    () => filteredDocuments.filter((document) => document.status === "extracted" && document.extraction && !document.booking_suggestions?.length),
     [filteredDocuments],
   );
 
@@ -407,7 +407,8 @@ function UploadApp() {
         });
 
         if (!response.ok) {
-          throw new Error(`Extraktion fehlgeschlagen: ${response.status}`);
+          const result = await response.json().catch(() => ({}));
+          throw new Error(result.detail || `Extraktion fehlgeschlagen: ${response.status}`);
         }
 
         const result = await response.json();
@@ -457,7 +458,8 @@ function UploadApp() {
           method: "POST",
         });
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          const result = await response.json().catch(() => ({}));
+          throw new Error(result.detail || `HTTP ${response.status}`);
         }
         results.done.push(document.original_filename);
       } catch (extractError) {
@@ -1157,13 +1159,21 @@ function UploadApp() {
                   </div>
                 ) : (
                   <div className="pending-extraction">
-                    <span>Extraktion ausstehend</span>
+                    <span>
+                      {document.status === "review_pending"
+                        ? "Extraktion ausstehend"
+                        : "Extraktion fuer diesen Status gesperrt"}
+                    </span>
                     <button
                       type="button"
                       onClick={() => startExtraction(document.id)}
-                      disabled={extractingIds.includes(document.id)}
+                      disabled={document.status !== "review_pending" || extractingIds.includes(document.id)}
                     >
-                      {extractingIds.includes(document.id) ? "Läuft..." : "Extraktion starten"}
+                      {document.status !== "review_pending"
+                        ? "Gesperrt"
+                        : extractingIds.includes(document.id)
+                          ? "Laeuft..."
+                          : "Extraktion starten"}
                     </button>
                   </div>
                 )}

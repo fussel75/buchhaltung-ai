@@ -28,12 +28,18 @@ VALID_COST_CATEGORIES = {
     "security_subscription",
     "general_overhead",
 }
+EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
 
 
 def run_mock_extraction(document_id: UUID) -> dict:
     document = get_document(document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
+    if document.get("status") not in EXTRACTABLE_DOCUMENT_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Extraktion blockiert: Beleg ist bereits im Review oder freigegeben.",
+        )
 
     insert_audit_event(
         tenant_id=document["tenant_id"],

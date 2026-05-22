@@ -4,9 +4,11 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from pydantic import ValidationError
+from fastapi import HTTPException
 
 from app.services import database as database_service
-from app.services.extraction import _cost_category_for_supplier_rule, _normalized_invoice_filename, _payment_terms
+from app.services import extraction as extraction_service
+from app.services.extraction import _cost_category_for_supplier_rule, _normalized_invoice_filename, _payment_terms, run_mock_extraction
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.routes.users import user_can_access_tenant
 from app.services.database import (
@@ -578,6 +580,44 @@ class BookingSuggestionTests(TestCase):
         self.assertIsNone(params[7])
         self.assertIsNone(rule["supplier_match_text"])
         self.assertIsNone(rule["discount_account"])
+
+    def test_extraction_blocks_review_ready_documents(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_ready",
+            "original_filename": "rechnung.pdf",
+        }
+
+        with (
+            patch.object(extraction_service, "get_document", return_value=document),
+            patch.object(extraction_service, "insert_audit_event") as insert_audit_event,
+        ):
+            with self.assertRaises(HTTPException) as context:
+                run_mock_extraction(document_id)
+
+        self.assertEqual(context.exception.status_code, 409)
+        insert_audit_event.assert_not_called()
+
+    def test_extraction_blocks_already_extracted_documents(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "extracted",
+            "original_filename": "rechnung.pdf",
+        }
+
+        with (
+            patch.object(extraction_service, "get_document", return_value=document),
+            patch.object(extraction_service, "save_document_extraction") as save_document_extraction,
+        ):
+            with self.assertRaises(HTTPException) as context:
+                run_mock_extraction(document_id)
+
+        self.assertEqual(context.exception.status_code, 409)
+        save_document_extraction.assert_not_called()
 
     def test_assignment_unit_update_can_edit_code_and_clear_project_number(self):
         assignment_id = uuid4()
