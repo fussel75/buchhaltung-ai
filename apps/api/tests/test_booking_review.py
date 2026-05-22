@@ -23,9 +23,10 @@ from app.services.database import (
 
 
 class RecordingCursor:
-    def __init__(self, fetchone_result=None):
+    def __init__(self, fetchone_result=None, fetchall_result=None):
         self.statements = []
         self.fetchone_result = fetchone_result
+        self.fetchall_result = fetchall_result or []
 
     def __enter__(self):
         return self
@@ -38,6 +39,9 @@ class RecordingCursor:
 
     def fetchone(self):
         return self.fetchone_result
+
+    def fetchall(self):
+        return self.fetchall_result
 
 
 class RecordingConnection:
@@ -646,6 +650,65 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(context.exception.status_code, 409)
         self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht offen für Extraktion.")
+
+    def test_list_bulk_jobs_route_requires_tenant_access(self):
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        jobs = [
+            {
+                "id": str(uuid4()),
+                "tenant_id": "demo-mandant",
+                "action": "extract",
+                "status": "completed",
+                "requested_total": 3,
+                "processed_count": 3,
+                "succeeded_count": 3,
+                "failed_count": 0,
+            }
+        ]
+
+        with (
+            patch.object(documents_route, "require_tenant_access") as require_access,
+            patch.object(documents_route, "list_document_bulk_jobs", return_value=jobs) as list_jobs,
+        ):
+            result = documents_route.list_bulk_jobs(request, tenant_id=" demo-mandant ", limit=5)
+
+        require_access.assert_called_once_with(request, "demo-mandant")
+        list_jobs.assert_called_once_with(tenant_id="demo-mandant", limit=5)
+        self.assertEqual(result, {"jobs": jobs})
+
+    def test_list_document_bulk_jobs_orders_recent_jobs_for_tenant(self):
+        job_id = uuid4()
+        cursor = RecordingCursor(
+            fetchall_result=[
+                {
+                    "id": job_id,
+                    "tenant_id": "demo-mandant",
+                    "action": "extract",
+                    "status": "completed",
+                    "requested_total": 2,
+                    "processed_count": 2,
+                    "succeeded_count": 2,
+                    "failed_count": 0,
+                    "error": None,
+                    "created_by": "admin@example.com",
+                    "created_at": "2026-05-22T09:00:00+00:00",
+                    "updated_at": "2026-05-22T09:01:00+00:00",
+                    "started_at": "2026-05-22T09:00:10+00:00",
+                    "finished_at": "2026-05-22T09:01:00+00:00",
+                }
+            ]
+        )
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            jobs = database_service.list_document_bulk_jobs("demo-mandant", limit=100)
+
+        statement, params = cursor.statements[0]
+        self.assertIn("where tenant_id = %s", statement)
+        self.assertIn("order by created_at desc, id desc", statement)
+        self.assertEqual(params, ("demo-mandant", 50))
+        self.assertEqual(jobs[0]["id"], str(job_id))
+        self.assertEqual(jobs[0]["requested_total"], 2)
+        self.assertNotIn("items", jobs[0])
 
     def test_bulk_job_runner_records_item_failure_and_continues(self):
         job_id = uuid4()

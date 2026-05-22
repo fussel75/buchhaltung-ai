@@ -600,6 +600,25 @@ def get_document_bulk_job(job_id: UUID) -> dict[str, Any] | None:
     return job
 
 
+def list_document_bulk_jobs(tenant_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    capped_limit = max(1, min(limit, 50))
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from document_bulk_jobs
+                where tenant_id = %s
+                order by created_at desc, id desc
+                limit %s
+                """,
+                (tenant_id, capped_limit),
+            )
+            rows = cursor.fetchall()
+
+    return [_serialize_bulk_job(row) for row in rows]
+
+
 def mark_document_bulk_job_running(job_id: UUID) -> dict[str, Any] | None:
     now = datetime.now(UTC)
     with _connect() as connection:

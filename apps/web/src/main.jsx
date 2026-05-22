@@ -219,6 +219,7 @@ function UploadApp() {
   const [uploadBatch, setUploadBatch] = useState(null);
   const [extractionBatch, setExtractionBatch] = useState(null);
   const [reviewBatch, setReviewBatch] = useState(null);
+  const [bulkJobs, setBulkJobs] = useState([]);
   const [reviewFilter, setReviewFilter] = useState("all");
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
@@ -248,6 +249,10 @@ function UploadApp() {
     () => filteredDocuments.filter((document) => document.status === "extracted" && document.extraction && !document.booking_suggestions?.length),
     [filteredDocuments],
   );
+  const activeBulkJobs = useMemo(
+    () => bulkJobs.filter((job) => ["queued", "running"].includes(job.status)),
+    [bulkJobs],
+  );
 
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
@@ -265,9 +270,42 @@ function UploadApp() {
     setDocuments(result.documents ?? []);
   }, [activeTenantId, apiFetch]);
 
+  const loadBulkJobs = useCallback(async () => {
+    if (!activeTenantId) {
+      setBulkJobs([]);
+      return;
+    }
+
+    const response = await apiFetch(`/documents/bulk-jobs?tenant_id=${encodeURIComponent(activeTenantId)}&limit=8`);
+
+    if (!response.ok) {
+      throw new Error(`Auftragsverlauf konnte nicht geladen werden: ${response.status}`);
+    }
+
+    const result = await response.json();
+    setBulkJobs(result.jobs ?? []);
+  }, [activeTenantId, apiFetch]);
+
+  const rememberBulkJob = useCallback((job) => {
+    if (!job?.id) return;
+    setBulkJobs((current) => [job, ...current.filter((existingJob) => existingJob.id !== job.id)].slice(0, 8));
+  }, []);
+
   useEffect(() => {
     loadDocuments().catch((loadError) => setError(loadError.message));
   }, [loadDocuments]);
+
+  useEffect(() => {
+    loadBulkJobs().catch((loadError) => setError(loadError.message));
+  }, [loadBulkJobs]);
+
+  useEffect(() => {
+    if (!activeBulkJobs.length) return undefined;
+    const timer = window.setInterval(() => {
+      loadBulkJobs().catch((loadError) => setError(loadError.message));
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [activeBulkJobs.length, loadBulkJobs]);
 
   useEffect(() => {
     setSelectedDocumentIds((current) =>
@@ -452,8 +490,11 @@ function UploadApp() {
         throw new Error(formatApiError(result.detail, `Bulk-Extraktion fehlgeschlagen: ${response.status}`));
       }
       const result = await response.json();
+      rememberBulkJob(result.job);
       setExtractionBatch(batchStateFromJob(result.job));
       const job = await waitForBulkJob(apiFetch, result.job.id, setExtractionBatch);
+      rememberBulkJob(job);
+      await loadBulkJobs();
       await loadDocuments();
       setNotice(`Bulk-Extraktion abgeschlossen: ${job.succeeded_count} extrahiert, ${job.failed_count} fehlgeschlagen.`);
       if (job.failed_count) {
@@ -464,7 +505,7 @@ function UploadApp() {
     } finally {
       setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
-  }, [activeTenantId, apiFetch, extractableDocuments, isBulkExtracting, loadDocuments]);
+  }, [activeTenantId, apiFetch, extractableDocuments, isBulkExtracting, loadBulkJobs, loadDocuments, rememberBulkJob]);
 
   const startBulkReviewPreparation = useCallback(async () => {
     const targets = reviewableDocuments;
@@ -495,8 +536,11 @@ function UploadApp() {
         throw new Error(formatApiError(result.detail, `Bulk-Vorschläge fehlgeschlagen: ${response.status}`));
       }
       const result = await response.json();
+      rememberBulkJob(result.job);
       setReviewBatch(batchStateFromJob(result.job));
       const job = await waitForBulkJob(apiFetch, result.job.id, setReviewBatch);
+      rememberBulkJob(job);
+      await loadBulkJobs();
       await loadDocuments();
       setNotice(`Buchungsvorschläge erstellt: ${job.succeeded_count} erstellt, ${job.failed_count} fehlgeschlagen.`);
       if (job.failed_count) {
@@ -507,7 +551,7 @@ function UploadApp() {
     } finally {
       setApprovingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
-  }, [activeTenantId, apiFetch, isBulkPreparingReview, loadDocuments, reviewableDocuments]);
+  }, [activeTenantId, apiFetch, isBulkPreparingReview, loadBulkJobs, loadDocuments, rememberBulkJob, reviewableDocuments]);
 
   const deleteDocument = useCallback(
     async (document) => {
@@ -851,6 +895,7 @@ function UploadApp() {
 
       {activeView === "review" ? (
         <section className="review-board">
+          <aside className="review-sidebar">
           <section
             className={`dropzone${isDragging ? " active" : ""}${isUploading ? " uploading" : ""}`}
             onDragEnter={(event) => {
@@ -890,6 +935,8 @@ function UploadApp() {
               }}
             />
           </section>
+          <BulkJobHistory jobs={bulkJobs} />
+          </aside>
 
           <section className="uploads">
         <div className="section-header">
@@ -1143,6 +1190,47 @@ function Metric({ label, value }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function BulkJobHistory({ jobs }) {
+  const activeCount = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
+  return (
+    <section className="job-history">
+      <div className="card-header">
+        <div>
+          <span>Stapelverarbeitung</span>
+          <h2>Auftragsverlauf</h2>
+        </div>
+        <span className="status">{activeCount ? `${activeCount} läuft` : `${jobs.length} Einträge`}</span>
+      </div>
+      {jobs.length === 0 ? (
+        <p className="empty">Noch keine Aufträge für diesen Mandanten.</p>
+      ) : (
+        <div className="job-list">
+          {jobs.map((job) => (
+            <article key={job.id} className="job-row">
+              <div className="job-row-head">
+                <strong>{formatBulkAction(job.action)}</strong>
+                <span className="status">{formatBulkStatus(job.status)}</span>
+              </div>
+              <div className="job-progress-line">
+                <progress value={job.processed_count || 0} max={Math.max(job.requested_total || 0, 1)} />
+                <span>
+                  {job.processed_count || 0} / {job.requested_total || 0}
+                </span>
+              </div>
+              <div className="job-meta">
+                <span>{job.succeeded_count || 0} erfolgreich</span>
+                <span>{job.failed_count || 0} fehlgeschlagen</span>
+                <span>{formatDateTime(job.started_at || job.created_at)}</span>
+              </div>
+              {job.error ? <p className="job-error">{job.error}</p> : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2654,6 +2742,37 @@ function formatMoney(value) {
 function formatDate(value) {
   if (!value) return "-";
   return value.slice(0, 10);
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatBulkAction(action) {
+  const labels = {
+    extract: "Extraktion",
+    prepare_review: "Buchungsvorschläge",
+  };
+  return labels[action] ?? action;
+}
+
+function formatBulkStatus(status) {
+  const labels = {
+    queued: "Wartet",
+    running: "Läuft",
+    completed: "Abgeschlossen",
+    failed: "Fehlgeschlagen",
+  };
+  return labels[status] ?? status;
 }
 
 function discountedAmount(rawResult) {

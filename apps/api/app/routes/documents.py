@@ -19,6 +19,7 @@ from app.services.database import (
     create_document_record,
     delete_document,
     get_document_bulk_job,
+    list_document_bulk_jobs,
     list_documents,
     list_documents_for_month,
     prepare_document_review,
@@ -338,6 +339,17 @@ def start_bulk_review_preparation(
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
     return _start_bulk_job(request, background_tasks, payload, "prepare_review")
+
+
+@router.get("/bulk-jobs")
+def list_bulk_jobs(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+) -> dict[str, Any]:
+    tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, tenant_id)
+    return {"jobs": list_document_bulk_jobs(tenant_id=tenant_id, limit=limit)}
 
 
 @router.get("/bulk-jobs/{job_id}")
