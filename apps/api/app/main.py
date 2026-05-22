@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="buchhaltung-ai API",
-    description="Mandantenfaehige Buchhaltungs-Automation fuer Deutschland.",
+    description="Mandantenfähige Buchhaltungs-Automation für Deutschland.",
     version="0.1.0",
     lifespan=lifespan,
 )

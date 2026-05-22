@@ -645,7 +645,7 @@ class BookingSuggestionTests(TestCase):
                 documents_route._validated_bulk_documents(request, payload, "extract")
 
         self.assertEqual(context.exception.status_code, 409)
-        self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht offen fuer Extraktion.")
+        self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht offen für Extraktion.")
 
     def test_bulk_job_runner_records_item_failure_and_continues(self):
         job_id = uuid4()
@@ -857,7 +857,7 @@ class BookingSuggestionTests(TestCase):
                 "gross_amount": "331.91",
                 "currency": "EUR",
                 "confidence": Decimal("0.88"),
-                "warnings": ["Splittung pruefen."],
+                "warnings": ["Splittung prüfen."],
                 "raw_result": {"document_type": "incoming_invoice", "allocation_lines": [{"amount": "278.00"}]},
             },
             "booking_suggestions": [
@@ -891,7 +891,7 @@ class BookingSuggestionTests(TestCase):
         with patch.object(database_service, "list_accounting_rules", return_value=rules):
             errors = validate_document_review(document)
 
-        self.assertIn("Offene Extraktionswarnungen muessen vor finaler Freigabe geklaert werden.", errors)
+        self.assertIn("Offene Extraktionswarnungen müssen vor finaler Freigabe geklärt werden.", errors)
         self.assertIn("Split-Summe Brutto passt nicht zum Beleggesamtbetrag.", errors)
 
     def test_review_validation_blocks_structured_xml_validation_errors(self):
@@ -914,7 +914,7 @@ class BookingSuggestionTests(TestCase):
                     "source": "standalone_xml",
                     "xml_format": "ubl",
                     "structured_validation_errors": [
-                        "Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto."
+                        "Summenprüfung fehlgeschlagen: Netto plus USt passt nicht zu Brutto."
                     ],
                 },
             },

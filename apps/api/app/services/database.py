@@ -904,7 +904,7 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
         "net_amount": "Netto",
         "tax_amount": "USt",
         "gross_amount": "Brutto",
-        "currency": "Waehrung",
+        "currency": "Währung",
     }
     for field_name, label in required_extraction_fields.items():
         if extraction.get(field_name) in (None, ""):
@@ -912,17 +912,17 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
 
     confidence = _decimal_or_none(extraction.get("confidence"))
     if confidence is not None and confidence < Decimal("0.80"):
-        errors.append("Extraktion ist zu unsicher fuer finale Freigabe.")
+        errors.append("Extraktion ist zu unsicher für finale Freigabe.")
     if raw_result.get("document_type") in (None, ""):
         errors.append("Pflichtfeld fehlt: Belegart.")
     if extraction.get("warnings"):
-        errors.append("Offene Extraktionswarnungen muessen vor finaler Freigabe geklaert werden.")
+        errors.append("Offene Extraktionswarnungen müssen vor finaler Freigabe geklärt werden.")
     structured_validation = raw_result.get("structured_validation") or {}
     if raw_result.get("structured_validation_errors") or structured_validation.get("status") == "failed":
         errors.append("E-Rechnungsvalidierung ist fehlgeschlagen.")
 
     if not suggestions:
-        errors.append("Keine Buchungsvorschlaege vorhanden.")
+        errors.append("Keine Buchungsvorschläge vorhanden.")
 
     for suggestion in suggestions:
         line_no = suggestion.get("line_no") or "?"
@@ -948,7 +948,7 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
         if not accounting_rule:
             errors.append(f"Zeile {line_no}: Kontierungsregel fehlt.")
         elif not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account"):
-            errors.append(f"Zeile {line_no}: Kontierungsregel ist unvollstaendig.")
+            errors.append(f"Zeile {line_no}: Kontierungsregel ist unvollständig.")
 
     if suggestions and (len(suggestions) > 1 or raw_result.get("allocation_lines")):
         errors.extend(_validate_split_totals(suggestions, extraction))

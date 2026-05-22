@@ -473,7 +473,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     if len(text.strip()) < 80:
         result = _build_mock_result(document)
         result["warnings"] = [
-            "PDF-Text konnte nicht ausreichend gelesen werden. OCR wird fuer diesen Belegtyp benoetigt.",
+            "PDF-Text konnte nicht ausreichend gelesen werden. OCR wird für diesen Belegtyp benötigt.",
         ]
         return result
 
@@ -574,7 +574,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     warnings = []
     if len(delivery_addresses) > 1:
         warnings.append(
-            "Mehrere Lieferadressen/Zuordnungen erkannt: bitte Zuordnung oder Splittung pruefen."
+            "Mehrere Lieferadressen/Zuordnungen erkannt: bitte Zuordnung oder Splittung prüfen."
         )
     if delivery_address and not assignment and not allocation_lines_resolved:
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
@@ -642,7 +642,7 @@ def _build_mock_result(document: dict) -> dict:
     tax_amount = (gross_amount - net_amount).quantize(Decimal("0.01"))
 
     warnings = [
-        "Mock-Extraktion: Werte muessen fachlich geprueft werden.",
+        "Mock-Extraktion: Werte müssen fachlich geprüft werden.",
     ]
 
     return {
@@ -770,7 +770,7 @@ def _structured_xml_validation_errors(
         "Belegnummer": invoice_number,
         "Belegdatum": invoice_date,
         "Lieferant": supplier_name,
-        "Waehrung": currency,
+        "Währung": currency,
         "Netto": net_amount,
         "USt": tax_amount,
         "Brutto": gross_amount,
@@ -786,7 +786,7 @@ def _structured_xml_validation_errors(
     if net_amount is not None and tax_amount is not None and gross_amount is not None:
         expected_gross = (net_amount + tax_amount).quantize(Decimal("0.01"))
         if abs(expected_gross - gross_amount) > Decimal("0.02"):
-            errors.append("Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.")
+            errors.append("Summenprüfung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.")
 
     return errors
 
@@ -1165,7 +1165,7 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
-    if any(term in haystack for term in ["maler", "elektro", "sanitÃ¤r", "subunternehmer", "fremdleistung"]):
+    if any(term in haystack for term in ["maler", "elektro", "sanitär", "subunternehmer", "fremdleistung"]):
         return "subcontractor"
     if any(term in haystack for term in ["hobotec", "fermacell", "schalung", "gipsfaserplatte", "artikel", "material"]):
         return "material"
@@ -1175,7 +1175,7 @@ def _cost_category(
         return "fuel_vehicle"
     if any(term in haystack for term in ["software", "lizenz", "microsoft", "adobe", "cloud", "hosting", "saas"]):
         return "software_subscription"
-    if any(term in haystack for term in ["kamera", "camera", "ueberwachung", "überwachung", "security"]):
+    if any(term in haystack for term in ["kamera", "camera", "überwachung", "überwachung", "security"]):
         return "security_subscription"
     return "general_overhead"
 
@@ -1253,7 +1253,7 @@ def _filename_assignment_label(assignment: dict | None, assignment_type: str, te
     if assignment_type == "assignment_split":
         return f"{tenant_profile['assignment_label_plural']} aufgeteilt"
     if assignment_type == "assignment_unresolved":
-        return f"{tenant_profile['assignment_label_singular']} ungeklaert"
+        return f"{tenant_profile['assignment_label_singular']} ungeklärt"
     return "Allgemeine Kosten"
 
 

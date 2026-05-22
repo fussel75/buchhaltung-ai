@@ -9,7 +9,7 @@ const COST_CATEGORY_OPTIONS = [
   ["subcontractor", "Fremdleistung"],
   ["fuel_vehicle", "Fahrzeug/Tanken"],
   ["software_subscription", "Software/Abo"],
-  ["security_subscription", "Ueberwachung/Abo"],
+  ["security_subscription", "Überwachung/Abo"],
   ["general_overhead", "Sonstige Gemeinkosten"],
 ];
 
@@ -131,7 +131,7 @@ function AuthGate() {
   const isLoginPath = window.location.pathname === "/login";
 
   if (authState === "loading") {
-    return <main className="app"><p className="empty">Login wird geprueft ...</p></main>;
+    return <main className="app"><p className="empty">Login wird geprüft ...</p></main>;
   }
 
   if (authState === "authenticated" && isLoginPath) {
@@ -492,13 +492,13 @@ function UploadApp() {
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
-        throw new Error(formatApiError(result.detail, `Bulk-Vorschlaege fehlgeschlagen: ${response.status}`));
+        throw new Error(formatApiError(result.detail, `Bulk-Vorschläge fehlgeschlagen: ${response.status}`));
       }
       const result = await response.json();
       setReviewBatch(batchStateFromJob(result.job));
       const job = await waitForBulkJob(apiFetch, result.job.id, setReviewBatch);
       await loadDocuments();
-      setNotice(`Buchungsvorschlaege erstellt: ${job.succeeded_count} erstellt, ${job.failed_count} fehlgeschlagen.`);
+      setNotice(`Buchungsvorschläge erstellt: ${job.succeeded_count} erstellt, ${job.failed_count} fehlgeschlagen.`);
       if (job.failed_count) {
         setError(formatBulkJobFailures(job, "Kein Vorschlag erstellt"));
       }
@@ -910,7 +910,7 @@ function UploadApp() {
               onClick={startBulkReviewPreparation}
               disabled={!reviewableDocuments.length || isBulkPreparingReview}
             >
-              {isBulkPreparingReview ? "Erstellt..." : `Vorschlaege erstellen (${reviewableDocuments.length})`}
+              {isBulkPreparingReview ? "Erstellt..." : `Vorschläge erstellen (${reviewableDocuments.length})`}
             </button>
             <button
               className="secondary-button"
@@ -968,13 +968,13 @@ function UploadApp() {
         ) : null}
         {reviewBatch ? (
           <div className="batch-progress" aria-live="polite">
-            <strong>{reviewBatch.done} / {reviewBatch.total} Vorschlaege</strong>
+            <strong>{reviewBatch.done} / {reviewBatch.total} Vorschläge</strong>
             {reviewBatch.current ? <span>{reviewBatch.current}</span> : null}
             <small>{reviewBatch.failed} fehlgeschlagen</small>
           </div>
         ) : null}
         {documents.length === 0 ? (
-          <p className="empty">Noch keine Belege fuer diesen Mandanten.</p>
+          <p className="empty">Noch keine Belege für diesen Mandanten.</p>
         ) : filteredDocuments.length === 0 ? (
           <p className="empty">Keine Belege in diesem Filter.</p>
         ) : (
@@ -1095,7 +1095,7 @@ function UploadApp() {
                     <span>
                       {document.status === "review_pending"
                         ? "Extraktion ausstehend"
-                        : "Extraktion fuer diesen Status gesperrt"}
+                        : "Extraktion für diesen Status gesperrt"}
                     </span>
                     <button
                       type="button"
@@ -1105,7 +1105,7 @@ function UploadApp() {
                       {document.status !== "review_pending"
                         ? "Gesperrt"
                         : extractingIds.includes(document.id)
-                          ? "Laeuft..."
+                          ? "Läuft..."
                           : "Extraktion starten"}
                     </button>
                   </div>
@@ -1246,7 +1246,7 @@ function UserAdmin({ apiFetch, currentUser, activeTenantId }) {
               <option value="admin">Admin</option>
             </select>
             <input
-              aria-label={`Mandanten fuer ${account.email}`}
+              aria-label={`Mandanten für ${account.email}`}
               value={account.allowed_tenant_ids_text ?? (account.allowed_tenant_ids ?? []).join(", ")}
               disabled={account.role === "admin"}
               onChange={(event) => updateUserDraft(account.id, "allowed_tenant_ids_text", event.target.value)}
@@ -1993,7 +1993,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                         required
                       />
                       <input
-                        aria-label="Lieferant enthaelt"
+                        aria-label="Lieferant enthält"
                         placeholder="optional"
                         value={accountingEditForm.supplier_match_text}
                         onChange={(event) => setAccountingEditForm({ ...accountingEditForm, supplier_match_text: event.target.value })}
@@ -2017,7 +2017,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
                       />
                       <div className="inline-fields">
                         <input
-                          aria-label="Steuerschluessel"
+                          aria-label="Steuerschlüssel"
                           placeholder="Schl."
                           value={accountingEditForm.tax_key}
                           onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_key: event.target.value })}
@@ -2157,7 +2157,7 @@ function AllocationLines({ lines, tenantProfile }) {
                 ? formatAssignmentCode(line.assignment_code, line.assignment_kind, tenantProfile)
                 : line.project_code
                   ? `BV ${displayProjectCode(line.project_code)}`
-                  : `${tenantProfile.assignment_label_singular} ungeklaert`},{" "}
+                  : `${tenantProfile.assignment_label_singular} ungeklärt`},{" "}
               {line.address || line.delivery_address},{" "}
               {formatMoney(line.amount)} Netto
             </span>
@@ -2418,7 +2418,7 @@ async function waitForBulkJob(apiFetch, jobId, setBatch) {
     setBatch(batchStateFromJob(job));
     if (!["queued", "running"].includes(job.status)) return job;
   }
-  throw new Error("Bulk-Job laeuft zu lange. Bitte spaeter erneut pruefen.");
+  throw new Error("Bulk-Job läuft zu lange. Bitte später erneut prüfen.");
 }
 
 function batchStateFromJob(job) {
@@ -2518,10 +2518,10 @@ function formatAssignment(rawResult, tenantProfile = assignmentProfileFromRaw(ra
   if (rawResult?.project_code) return `BV ${rawResult.project_code}`;
   const labels = {
     general_cost: "Allgemeine Kosten",
-    assignment_unresolved: `${tenantProfile.assignment_label_singular} ungeklaert`,
+    assignment_unresolved: `${tenantProfile.assignment_label_singular} ungeklärt`,
     assignment_split: `${tenantProfile.assignment_label_plural} aufgeteilt`,
     project_split: "BV aufgeteilt",
-    project_unresolved: "BV ungeklaert",
+    project_unresolved: "BV ungeklärt",
     assigned: "Zugeordnet",
   };
   return labels[rawResult?.assignment_type] ?? null;
@@ -2560,7 +2560,7 @@ function projectSummaryLines(rawResult, tenantProfile = defaultTenantProfile("ge
           ? formatAssignmentCode(line.assignment_code, line.assignment_kind, tenantProfile)
           : line.project_code
             ? `BV ${displayProjectCode(line.project_code, { compact: true })}`
-            : `${tenantProfile.assignment_label_singular} ungeklaert`;
+            : `${tenantProfile.assignment_label_singular} ungeklärt`;
         return [displayProjectNumber(line), code].filter(Boolean).join(" ");
       });
   }

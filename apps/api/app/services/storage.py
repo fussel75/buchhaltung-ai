@@ -75,14 +75,14 @@ async def store_original_document(file: UploadFile, tenant_id: str) -> StoredDoc
                 size_bytes += len(chunk)
                 if size_bytes > settings.max_upload_size_bytes:
                     raise UploadRejectedError(
-                        f"Datei ist groesser als das Upload-Limit von {_format_bytes(settings.max_upload_size_bytes)}.",
+                        f"Datei ist größer als das Upload-Limit von {_format_bytes(settings.max_upload_size_bytes)}.",
                         status_code=413,
                     )
                 digest.update(chunk)
                 handle.write(chunk)
 
         if size_bytes == 0:
-            raise UploadRejectedError("Leere Dateien koennen nicht hochgeladen werden.")
+            raise UploadRejectedError("Leere Dateien können nicht hochgeladen werden.")
 
         hex_digest = digest.hexdigest()
         target = target_dir / f"{hex_digest[:16]}-{uuid4().hex}{suffix}"

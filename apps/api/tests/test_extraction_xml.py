@@ -132,9 +132,9 @@ class ExtractionXmlTests(TestCase):
         self.assertEqual(result["structured_validation"]["status"], "failed")
         self.assertEqual(
             result["structured_validation_errors"],
-            ["Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto."],
+            ["Summenprüfung fehlgeschlagen: Netto plus USt passt nicht zu Brutto."],
         )
         self.assertIn(
-            "E-Rechnungsvalidierung: Summenpruefung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.",
+            "E-Rechnungsvalidierung: Summenprüfung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.",
             result["warnings"],
         )

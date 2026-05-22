@@ -178,13 +178,13 @@ def _validated_bulk_documents(
     for document_id in document_ids:
         document = require_document_access(request, document_id)
         if document["tenant_id"] != tenant_id:
-            invalid_documents.append({"document_id": str(document_id), "reason": "Beleg gehoert nicht zum Mandanten."})
+            invalid_documents.append({"document_id": str(document_id), "reason": "Beleg gehört nicht zum Mandanten."})
             continue
         if action == "extract":
             if document["status"] != "review_pending" or document.get("extraction"):
-                invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht offen fuer Extraktion."})
+                invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht offen für Extraktion."})
         elif document["status"] != "extracted" or not document.get("extraction") or document.get("booking_suggestions"):
-            invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit fuer Vorschlaege."})
+            invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit für Vorschläge."})
 
     if invalid_documents:
         raise HTTPException(
@@ -210,7 +210,7 @@ def _start_bulk_job(
             actor=actor,
         )
     except BulkJobConflictError as error:
-        raise HTTPException(status_code=409, detail="Aktiver Bulk-Job fuer diesen Mandanten laeuft bereits.") from error
+        raise HTTPException(status_code=409, detail="Aktiver Bulk-Job für diesen Mandanten läuft bereits.") from error
 
     background_tasks.add_task(run_document_bulk_job, UUID(job["id"]), actor)
     return {"job": job}
