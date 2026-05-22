@@ -1027,6 +1027,122 @@ code {
   background: #f8fafc;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 36%);
+}
+
+.approval-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(1040px, 100%);
+  max-height: min(86vh, 820px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  background: var(--surface);
+  box-shadow: 0 26px 70px rgb(15 23 42 / 24%);
+}
+
+.approval-header,
+.approval-lines-head,
+.approval-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approval-note {
+  border: 1px solid #f3d0b6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #7a3a22;
+  background: #fff2ea;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.approval-blocker {
+  border: 1px solid #f0bbb6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.approval-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.approval-facts .field:nth-child(1),
+.approval-facts .field:nth-child(2),
+.approval-facts .field:nth-child(8),
+.approval-facts .field:nth-child(9) {
+  grid-column: span 2;
+}
+
+.approval-warnings {
+  margin: 0;
+}
+
+.approval-lines {
+  display: grid;
+  gap: 10px;
+}
+
+.approval-line-table {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.approval-line-row {
+  display: grid;
+  grid-template-columns: 44px minmax(210px, 1.5fr) minmax(150px, 1fr) minmax(130px, 0.8fr) minmax(96px, 0.7fr) minmax(96px, 0.7fr) minmax(96px, 0.7fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 900px;
+  border-top: 1px solid #edf0f3;
+  padding: 10px 12px;
+}
+
+.approval-line-row:first-child {
+  border-top: 0;
+}
+
+.approval-line-head,
+.approval-line-total {
+  background: var(--surface-muted);
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.approval-line-row span,
+.approval-line-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  justify-content: flex-end;
+  border-top: 1px solid #edf0f3;
+  padding-top: 14px;
+}
+
 .allocation-table,
 .payment-table,
 .booking-table {
@@ -1490,6 +1606,7 @@ code {
   .metric-strip,
   .meta-grid,
   .review-facts,
+  .approval-facts,
   .extraction-grid,
   .form-grid,
   .form-grid > .form-field,
@@ -1567,8 +1684,20 @@ code {
   }
 
   .review-check-header,
-  .detail-section-header {
+  .detail-section-header,
+  .approval-header,
+  .approval-lines-head,
+  .approval-actions {
     display: grid;
+  }
+
+  .approval-dialog {
+    max-height: 92vh;
+    padding: 16px;
+  }
+
+  .approval-facts .field:nth-child(n) {
+    grid-column: span 1;
   }
 
   .export-panel,

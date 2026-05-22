@@ -865,10 +865,8 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
     if document is None or not document.get("extraction"):
         return None
 
-    if not document.get("booking_suggestions"):
-        document = prepare_document_review(document_id, actor=actor)
-        if document is None:
-            return None
+    if document.get("status") != "review_ready":
+        raise ReviewApprovalError(["Finale Freigabe ist nur im Status Vorschlag möglich."])
 
     approval_errors = validate_document_review(document)
     if approval_errors:
@@ -976,7 +974,7 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
     payment_terms = _payment_terms_from_extraction(extraction)
     payment_decision = document.get("payment_decision")
     if len(payment_terms) > 1 and not payment_decision:
-        errors.append("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewaehlt werden.")
+        errors.append("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewählt werden.")
     payment_decision = payment_decision or _default_payment_decision(extraction)
     payment_delta = _payment_delta(extraction, payment_decision)
     if payment_delta is not None and payment_delta != Decimal("0.00") and suggestions:
@@ -1763,7 +1761,7 @@ TENANT_PROFILE_TEMPLATES = {
     },
     "container_transport": {
         "assignment_label_singular": "Bauvorhaben / Stellplatz",
-        "assignment_label_plural": "Bauvorhaben / Stellplaetze",
+        "assignment_label_plural": "Bauvorhaben / Stellplätze",
         "assignment_code_label": "Bauvorhaben / Stellplatz",
         "assignment_code_prefix": None,
         "default_assignment_kind": "construction_or_dropoff_site",

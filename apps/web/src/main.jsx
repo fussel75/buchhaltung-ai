@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -222,6 +222,8 @@ function UploadApp() {
   const [bulkJobs, setBulkJobs] = useState([]);
   const [reviewFilter, setReviewFilter] = useState("all");
   const [expandedDocumentIds, setExpandedDocumentIds] = useState([]);
+  const [approvalDocumentId, setApprovalDocumentId] = useState(null);
+  const [approvalError, setApprovalError] = useState("");
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -253,6 +255,10 @@ function UploadApp() {
   const activeBulkJobs = useMemo(
     () => bulkJobs.filter((job) => ["queued", "running"].includes(job.status)),
     [bulkJobs],
+  );
+  const approvalDocument = useMemo(
+    () => documents.find((document) => document.id === approvalDocumentId) ?? null,
+    [approvalDocumentId, documents],
   );
 
   const loadDocuments = useCallback(async () => {
@@ -325,6 +331,19 @@ function UploadApp() {
   useEffect(() => {
     loadTenantProfile();
   }, [loadTenantProfile]);
+
+  useEffect(() => {
+    if (!approvalDocumentId) return undefined;
+
+    function handleEscape(event) {
+      if (event.key === "Escape" && !approvingIds.includes(approvalDocumentId)) {
+        setApprovalDocumentId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [approvalDocumentId, approvingIds]);
 
   const uploadFile = useCallback(
     async (file) => {
@@ -649,11 +668,14 @@ function UploadApp() {
 
   const approveDocument = useCallback(
     async (document) => {
-      const confirmed = window.confirm(
-        `Beleg "${document.original_filename}" final freigeben? Danach sind die Vorschlagszeilen gesperrt.`,
-      );
-      if (!confirmed) return;
+      if (document.status !== "review_ready") {
+        const message = "Finale Freigabe ist nur im Status Vorschlag möglich.";
+        setApprovalError(message);
+        setError(message);
+        return;
+      }
 
+      setApprovalError("");
       setError("");
       setNotice("");
       setApprovingIds((current) => [...current, document.id]);
@@ -670,8 +692,10 @@ function UploadApp() {
 
         const result = await response.json();
         await loadDocuments();
+        setApprovalDocumentId(null);
         setNotice(`Beleg final freigegeben: ${result.document.original_filename}`);
       } catch (approveError) {
+        setApprovalError(approveError.message);
         setError(approveError.message);
       } finally {
         setApprovingIds((current) => current.filter((id) => id !== document.id));
@@ -1115,19 +1139,22 @@ function UploadApp() {
                         {extractingIds.includes(document.id) ? "Läuft..." : "Extrahieren"}
                       </button>
                     ) : null}
-                    {document.extraction && !document.booking_suggestions?.length ? (
+                    {document.extraction && (!document.booking_suggestions?.length || (document.status !== "review_ready" && document.status !== "review_approved")) ? (
                       <button
                         type="button"
                         onClick={() => prepareReview(document)}
                         disabled={approvingIds.includes(document.id)}
                       >
-                        {approvingIds.includes(document.id) ? "Erstellt..." : "Vorschlag"}
+                        {approvingIds.includes(document.id) ? "Erstellt..." : document.booking_suggestions?.length ? "Vorschlag neu" : "Vorschlag"}
                       </button>
                     ) : null}
-                    {document.booking_suggestions?.length && document.status !== "review_approved" ? (
+                    {document.booking_suggestions?.length && document.status === "review_ready" ? (
                       <button
                         type="button"
-                        onClick={() => approveDocument(document)}
+                        onClick={() => {
+                          setApprovalError("");
+                          setApprovalDocumentId(document.id);
+                        }}
                         disabled={approvingIds.includes(document.id)}
                       >
                         {approvingIds.includes(document.id) ? "Gibt frei..." : "Final freigeben"}
@@ -1293,6 +1320,17 @@ function UploadApp() {
         </section>
       ) : null}
 
+      <ApprovalDialog
+        document={approvalDocument}
+        tenantProfile={tenantProfile}
+        isApproving={approvalDocument ? approvingIds.includes(approvalDocument.id) : false}
+        error={approvalError}
+        onCancel={() => setApprovalDocumentId(null)}
+        onConfirm={() => {
+          if (approvalDocument) approveDocument(approvalDocument);
+        }}
+      />
+
       {activeView === "masterdata" && user?.role === "admin" ? (
         <MasterdataAdmin apiFetch={apiFetch} tenantId={activeTenantId} tenantProfile={tenantProfile} onProfileSaved={setTenantProfile} />
       ) : null}
@@ -1351,6 +1389,157 @@ function BulkJobHistory({ jobs }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ApprovalDialog({ document, tenantProfile, isApproving, error, onCancel, onConfirm }) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    if (!document) return undefined;
+
+    const dialog = dialogRef.current;
+    const focusableSelector = [
+      "button:not([disabled])",
+      "[href]",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const focusableElements = Array.from(dialog?.querySelectorAll(focusableSelector) || []);
+    const firstElement = focusableElements[0];
+    const previousActiveElement = window.document.activeElement;
+    firstElement?.focus();
+
+    function trapFocus(event) {
+      if (event.key !== "Tab" || focusableElements.length === 0) return;
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && window.document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && window.document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    }
+
+    dialog?.addEventListener("keydown", trapFocus);
+    return () => {
+      dialog?.removeEventListener("keydown", trapFocus);
+      previousActiveElement?.focus?.();
+    };
+  }, [document]);
+
+  if (!document) return null;
+
+  const extraction = document.extraction || {};
+  const rawResult = extraction.raw_result || {};
+  const suggestions = document.booking_suggestions || [];
+  const payment = approvalPaymentSummary(document);
+  const paymentTerms = paymentTermLinesForDocument(document);
+  const requiresPaymentDecision = paymentTerms.length > 1 && !document.payment_decision;
+  const totalNet = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.net_amount), 0);
+  const totalTax = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.tax_amount), 0);
+  const totalGross = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.gross_amount), 0);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="approval-title" ref={dialogRef}>
+        <div className="approval-header">
+          <div>
+            <p className="eyebrow">Finale Freigabe</p>
+            <h2 id="approval-title">Beleg wirklich freigeben?</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={onCancel} disabled={isApproving}>
+            Schließen
+          </button>
+        </div>
+
+        <p className="approval-note">
+          Nach der Freigabe werden die gespeicherten Buchungszeilen gesperrt. Ungespeicherte Änderungen in der Tabelle sind nicht enthalten.
+        </p>
+
+        {requiresPaymentDecision ? (
+          <p className="approval-blocker">
+            Zahlungsentscheidung fehlt: Bitte zuerst Skonto, ohne Abzug oder Gutschrift-Verrechnung wählen.
+          </p>
+        ) : null}
+        {error ? <p className="approval-blocker">{error}</p> : null}
+
+        <div className="approval-facts">
+          <Field label="Datei" value={document.original_filename} />
+          <Field label="Lieferant" value={extraction.supplier_name} />
+          <Field label="Rechnung" value={extraction.invoice_number} />
+          <Field label="Datum" value={formatDate(extraction.invoice_date)} />
+          <Field label="Belegart" value={formatDocumentType(rawResult.document_type)} />
+          <Field label="Kunden-Nr." value={rawResult.customer_number} />
+          <Field label="Brutto" value={formatMoney(extraction.gross_amount)} />
+          <Field label="Zuordnung" value={formatAssignment(rawResult, tenantProfile)} />
+          <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={rawResult} tenantProfile={tenantProfile} />} />
+          <Field label="Zahlung" value={payment.label} />
+          <Field label="Fällig" value={formatDate(payment.due_date)} />
+          <Field label="Zahlbetrag" value={formatMoney(payment.amount)} />
+        </div>
+
+        {extraction.warnings?.length ? (
+          <ul className="warnings approval-warnings">
+            {extraction.warnings.map((warning, index) => (
+              <li key={`${warning}-${index}`}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="approval-lines">
+          <div className="approval-lines-head">
+            <h3>Buchungszeilen</h3>
+            <StatusPill value={`${suggestions.length} Zeilen`} />
+          </div>
+          <div className="approval-line-table">
+            <div className="approval-line-row approval-line-head">
+              <span>Nr.</span>
+              <span>Beschreibung</span>
+              <span>{tenantProfile.assignment_code_label}</span>
+              <span>Kostenart</span>
+              <span>Netto</span>
+              <span>USt</span>
+              <span>Brutto</span>
+            </div>
+            {suggestions.map((suggestion) => (
+              <div className="approval-line-row" key={suggestion.id}>
+                <strong>{suggestion.line_no}</strong>
+                <span>{suggestion.description || "-"}</span>
+                <span>{[suggestion.assignment_code, formatAssignmentKind(suggestion.assignment_kind, tenantProfile)].filter(Boolean).join(" / ") || "-"}</span>
+                <span>{formatCostCategory(suggestion.cost_category)}</span>
+                <span>{formatMoney(suggestion.net_amount)}</span>
+                <span>{formatMoney(suggestion.tax_amount)}</span>
+                <span>{formatMoney(suggestion.gross_amount)}</span>
+              </div>
+            ))}
+            <div className="approval-line-row approval-line-total">
+              <span>Summe</span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <strong>{formatMoney(totalNet)}</strong>
+              <strong>{formatMoney(totalTax)}</strong>
+              <strong>{formatMoney(totalGross)}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="approval-actions">
+          <button className="secondary-button" type="button" onClick={onCancel} disabled={isApproving}>
+            Abbrechen
+          </button>
+          <button type="button" onClick={onConfirm} disabled={isApproving || document.status !== "review_ready" || requiresPaymentDecision}>
+            {isApproving ? "Gibt frei..." : "Final freigeben"}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -2944,6 +3133,55 @@ function paymentTermLines(rawResult) {
     });
   }
   return terms;
+}
+
+function approvalPaymentSummary(document) {
+  const decision = document?.payment_decision;
+  if (decision) {
+    return {
+      label: decision.label || paymentTypeLabel(decision.payment_type),
+      due_date: decision.due_date,
+      amount: decision.amount,
+    };
+  }
+
+  const terms = paymentTermLinesForDocument(document);
+  if (terms.length === 1) {
+    return {
+      label: `${terms[0].label} (Standard)`,
+      due_date: terms[0].due_date,
+      amount: terms[0].amount,
+    };
+  }
+
+  return {
+    label: "Keine Zahlungsentscheidung gewählt",
+    due_date: null,
+    amount: null,
+  };
+}
+
+function paymentTermLinesForDocument(document) {
+  const extraction = document?.extraction || {};
+  const rawResult = extraction.raw_result || {};
+  return paymentTermLines({
+    ...rawResult,
+    gross_amount: rawResult.gross_amount ?? extraction.gross_amount,
+  });
+}
+
+function paymentTypeLabel(type) {
+  const labels = {
+    full_amount: "Ohne Abzug zahlen",
+    cash_discount: "Skontozahlung",
+    credit_note_settlement: "Gutschrift verrechnen",
+  };
+  return labels[type] ?? type ?? "-";
+}
+
+function numberOrZero(value) {
+  const number = Number(value);
+  return Number.isNaN(number) ? 0 : number;
 }
 
 function legacyDiscountedAmount(rawResult) {

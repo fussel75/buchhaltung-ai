@@ -230,6 +230,48 @@ class BookingSuggestionTests(TestCase):
         audit_event.assert_called_once()
         self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.review_reopened")
 
+    def test_approve_review_requires_review_ready_status(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "extracted",
+            "extraction": {"invoice_number": "RE1574023"},
+            "booking_suggestions": [{"id": str(uuid4()), "status": "reviewed"}],
+        }
+
+        with patch.object(database_service, "get_document", return_value=document):
+            with self.assertRaises(database_service.ReviewApprovalError) as context:
+                database_service.approve_document_review(document_id, actor="admin@example.com")
+
+        self.assertIn("Status Vorschlag", context.exception.errors[0])
+
+    def test_approve_review_allows_review_ready_status(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_ready",
+            "extraction": {"invoice_number": "RE1574023"},
+            "booking_suggestions": [{"id": str(uuid4()), "status": "reviewed"}],
+        }
+        approved_document = {**document, "status": "review_approved"}
+        cursor = RecordingCursor()
+
+        with (
+            patch.object(database_service, "get_document", side_effect=[document, approved_document]),
+            patch.object(database_service, "validate_document_review", return_value=[]),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "insert_audit_event") as audit_event,
+        ):
+            result = database_service.approve_document_review(document_id, actor="admin@example.com")
+
+        self.assertEqual(result["status"], "review_approved")
+        self.assertTrue(any("status = 'approved'" in statement for statement, _ in cursor.statements))
+        self.assertTrue(any("status = 'review_approved'" in statement for statement, _ in cursor.statements))
+        audit_event.assert_called_once()
+        self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.review_approved")
+
     def test_payment_terms_for_incoming_invoice_discount(self):
         terms = _payment_terms(
             gross_amount=Decimal("1441.03"),
@@ -545,7 +587,7 @@ class BookingSuggestionTests(TestCase):
             supplier_rule=rule,
             supplier_name="konzept 54 GmbH & Co.KG",
             product_name="Malerarbeiten",
-            text="Ausfuehrung Fremdleistung Maler",
+            text="Ausführung Fremdleistung Maler",
             assignment_type="assigned",
         )
         unclear = _cost_category_for_supplier_rule(
@@ -1009,7 +1051,7 @@ class BookingSuggestionTests(TestCase):
             errors = validate_document_review(document)
 
         self.assertIn("Zeile 1: Kontierungsregel fehlt.", errors)
-        self.assertIn("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewaehlt werden.", errors)
+        self.assertIn("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewählt werden.", errors)
 
     def test_review_validation_accepts_complete_review(self):
         document = {
