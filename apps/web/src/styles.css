@@ -442,7 +442,7 @@ button:disabled {
 
 .uploads > .queue-header {
   display: grid;
-  grid-template-columns: minmax(180px, 230px) minmax(360px, 1fr) minmax(420px, 520px);
+  grid-template-columns: minmax(160px, 200px) minmax(320px, 1fr) minmax(320px, 360px);
   gap: 14px;
   align-items: end;
 }
@@ -462,9 +462,9 @@ button:disabled {
   align-items: start;
   gap: 8px;
   justify-content: stretch;
-  justify-self: end;
+  justify-self: stretch;
   width: 100%;
-  max-width: 520px;
+  max-width: 360px;
   padding-top: 0;
 }
 
@@ -486,7 +486,7 @@ button:disabled {
 
 .queue-primary-actions > button {
   min-width: 0;
-  flex: 1 1 180px;
+  flex: 1 1 150px;
 }
 
 .export-menu,
