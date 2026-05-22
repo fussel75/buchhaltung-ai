@@ -441,16 +441,31 @@ button:disabled {
   margin-bottom: 14px;
 }
 
-.uploads > .section-header {
+.uploads > .queue-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 420px);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
+}
+
+.queue-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.queue-heading > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
 }
 
 .queue-tools {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
+  grid-template-columns: repeat(4, minmax(145px, 1fr));
+  align-items: end;
   justify-content: stretch;
   gap: 8px;
 }
@@ -458,13 +473,15 @@ button:disabled {
 .queue-tools button {
   width: 100%;
   min-height: 42px;
+  padding-inline: 12px;
 }
 
 .filter-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 14px;
+  justify-content: flex-end;
+  margin: 0;
 }
 
 .filter-tabs button {
@@ -1285,12 +1302,14 @@ code {
   }
 
   .card-header,
-  .section-header {
+  .section-header,
+  .queue-heading {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .uploads > .section-header {
+  .uploads > .section-header,
+  .uploads > .queue-header {
     grid-template-columns: 1fr;
   }
 
@@ -1298,6 +1317,10 @@ code {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .filter-tabs {
+    justify-content: flex-start;
   }
 
   .document-title {

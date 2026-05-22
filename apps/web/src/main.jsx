@@ -974,10 +974,29 @@ function UploadApp() {
           </aside>
 
           <section className="uploads">
-        <div className="section-header">
-          <div>
-            <h2>Review-Queue</h2>
-            <span>{filteredDocuments.length} von {documents.length} Belegen</span>
+        <div className="section-header queue-header">
+          <div className="queue-heading">
+            <div>
+              <h2>Review-Queue</h2>
+              <span>{filteredDocuments.length} von {documents.length} Belegen</span>
+            </div>
+            <div className="filter-tabs" aria-label="Review-Filter">
+              <button type="button" className={reviewFilter === "all" ? "active" : ""} onClick={() => setReviewFilter("all")}>
+                Alle
+              </button>
+              <button type="button" className={reviewFilter === "review_pending" ? "active" : ""} onClick={() => setReviewFilter("review_pending")}>
+                Offen {queueStats.pending}
+              </button>
+              <button type="button" className={reviewFilter === "extracted" ? "active" : ""} onClick={() => setReviewFilter("extracted")}>
+                Extrahiert {queueStats.extracted}
+              </button>
+              <button type="button" className={reviewFilter === "review_ready" ? "active" : ""} onClick={() => setReviewFilter("review_ready")}>
+                Vorschlag {queueStats.ready}
+              </button>
+              <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => setReviewFilter("review_approved")}>
+                Freigegeben {queueStats.approved}
+              </button>
+            </div>
           </div>
           <div className="queue-tools">
             <button
@@ -1023,23 +1042,6 @@ function UploadApp() {
               {exporting === "bookings" ? "Erstellt..." : "Buchungsentwurf CSV"}
             </button>
           </div>
-        </div>
-        <div className="filter-tabs" aria-label="Review-Filter">
-          <button type="button" className={reviewFilter === "all" ? "active" : ""} onClick={() => setReviewFilter("all")}>
-            Alle
-          </button>
-          <button type="button" className={reviewFilter === "review_pending" ? "active" : ""} onClick={() => setReviewFilter("review_pending")}>
-            Offen {queueStats.pending}
-          </button>
-          <button type="button" className={reviewFilter === "extracted" ? "active" : ""} onClick={() => setReviewFilter("extracted")}>
-            Extrahiert {queueStats.extracted}
-          </button>
-          <button type="button" className={reviewFilter === "review_ready" ? "active" : ""} onClick={() => setReviewFilter("review_ready")}>
-            Vorschlag {queueStats.ready}
-          </button>
-          <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => setReviewFilter("review_approved")}>
-            Freigegeben {queueStats.approved}
-          </button>
         </div>
         {extractionBatch ? (
           <div className="batch-progress" aria-live="polite">
