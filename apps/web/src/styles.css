@@ -217,7 +217,6 @@ button {
 button:hover {
   border-color: var(--primary-hover);
   background: var(--primary-hover);
-  transform: translateY(-1px);
 }
 
 button:disabled {
@@ -481,9 +480,74 @@ button:disabled {
   font-size: 0.82rem;
 }
 
-.queue-tools button:nth-child(1),
-.queue-tools button:nth-child(2) {
+.queue-tools > button:nth-child(1),
+.queue-tools > button:nth-child(2) {
   min-width: 165px;
+}
+
+.export-menu,
+.row-menu {
+  position: relative;
+}
+
+.export-menu summary,
+.row-menu summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+
+.export-menu summary::-webkit-details-marker,
+.row-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.export-menu[open] summary,
+.row-menu[open] summary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.export-panel,
+.row-menu-panel {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.export-panel {
+  top: calc(100% + 8px);
+  width: min(280px, calc(100vw - 40px));
+}
+
+.row-menu-panel {
+  top: calc(100% + 6px);
+  width: 190px;
+}
+
+.export-panel button,
+.row-menu-panel button {
+  width: 100%;
 }
 
 .filter-tabs {
@@ -610,7 +674,7 @@ button:disabled {
   font-size: 0.82rem;
 }
 
-.section-header > div,
+.section-header > div:not(.queue-heading):not(.queue-tools),
 .card-header > div {
   display: grid;
   gap: 4px;
@@ -621,7 +685,7 @@ button:disabled {
 .admin-panel,
 .admin-grid {
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 
 .document-card,
@@ -634,8 +698,8 @@ button:disabled {
 
 .document-card {
   display: grid;
-  gap: 18px;
-  padding: 20px;
+  gap: 12px;
+  padding: 16px 18px;
 }
 
 .admin-card {
@@ -650,9 +714,9 @@ button:disabled {
 
 .document-head {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
 }
 
 .document-head > div:first-child {
@@ -674,7 +738,7 @@ button:disabled {
 
 .document-file-names {
   display: grid;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -687,6 +751,29 @@ button:disabled {
 
 .document-file-names span {
   line-height: 1.45;
+}
+
+.document-summary-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.document-summary-line span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.document-summary-line span + span::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  margin-right: 10px;
+  border-radius: 999px;
+  background: #c7cdd4;
 }
 
 .document-head strong {
@@ -715,14 +802,15 @@ button:disabled {
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 7px;
+  gap: 6px;
 }
 
-.document-actions button {
-  min-height: 34px;
+.document-actions button,
+.document-actions .row-menu summary {
+  min-height: 32px;
   border-radius: 7px;
-  padding: 0 11px;
-  font-size: 0.84rem;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .meta-grid {
@@ -746,11 +834,11 @@ button:disabled {
 
 .field {
   display: grid;
-  gap: 6px;
-  min-height: 80px;
+  gap: 4px;
+  min-height: 0;
   border: 1px solid #e2e6eb;
   border-radius: var(--radius);
-  padding: 12px 13px;
+  padding: 10px 11px;
   background: var(--surface-subtle);
 }
 
@@ -1308,6 +1396,7 @@ code {
   .assignment-table .data-row,
   .supplier-table .data-row,
   .accounting-table .data-row,
+  .payment-row,
   .booking-row,
   .booking-edit-row,
   .assignment-edit,
@@ -1344,7 +1433,9 @@ code {
     width: 100%;
   }
 
-  .queue-tools button {
+  .queue-tools button,
+  .queue-tools .export-menu,
+  .queue-tools .export-menu summary {
     width: 100%;
   }
 
@@ -1353,6 +1444,24 @@ code {
   .queue-tools button:nth-child(2),
   .month-export {
     width: 100%;
+    min-width: 0;
+  }
+
+  .export-panel,
+  .row-menu-panel {
+    position: static;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: none;
+  }
+
+  .row-menu,
+  .row-menu summary {
+    width: 100%;
+  }
+
+  .payment-row,
+  .booking-edit-row {
     min-width: 0;
   }
 

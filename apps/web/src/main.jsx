@@ -221,6 +221,7 @@ function UploadApp() {
   const [reviewBatch, setReviewBatch] = useState(null);
   const [bulkJobs, setBulkJobs] = useState([]);
   const [reviewFilter, setReviewFilter] = useState("all");
+  const [expandedDocumentIds, setExpandedDocumentIds] = useState([]);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -775,6 +776,14 @@ function UploadApp() {
     );
   }, []);
 
+  const toggleDocumentDetails = useCallback((documentId) => {
+    setExpandedDocumentIds((current) =>
+      current.includes(documentId)
+        ? current.filter((id) => id !== documentId)
+        : [...current, documentId],
+    );
+  }, []);
+
   const openDocument = useCallback((document) => {
     window.open(apiUrl(`/documents/${document.id}/file?disposition=inline`), "_blank", "noopener");
   }, []);
@@ -1013,34 +1022,39 @@ function UploadApp() {
             >
               {isBulkPreparingReview ? "Erstellt..." : `Vorschläge erstellen (${reviewableDocuments.length})`}
             </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={exportSelectedDocuments}
-              disabled={!selectedDocumentIds.length || exporting === "selected"}
-            >
-              {exporting === "selected" ? "Erstellt..." : `Auswahl ZIP (${selectedDocumentIds.length})`}
-            </button>
-            <label className="month-export">
-              <span>Monat</span>
-              <input type="month" value={exportMonth} onChange={(event) => setExportMonth(event.target.value)} />
-            </label>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={exportMonthDocuments}
-              disabled={exporting === "month"}
-            >
-              {exporting === "month" ? "Erstellt..." : "Monat ZIP"}
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={exportBookingRows}
-              disabled={exporting === "bookings"}
-            >
-              {exporting === "bookings" ? "Erstellt..." : "Buchungsentwurf CSV"}
-            </button>
+            <details className="export-menu">
+              <summary>Export</summary>
+              <div className="export-panel">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={exportSelectedDocuments}
+                  disabled={!selectedDocumentIds.length || exporting === "selected"}
+                >
+                  {exporting === "selected" ? "Erstellt..." : `Auswahl ZIP (${selectedDocumentIds.length})`}
+                </button>
+                <label className="month-export">
+                  <span>Monat</span>
+                  <input type="month" value={exportMonth} onChange={(event) => setExportMonth(event.target.value)} />
+                </label>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={exportMonthDocuments}
+                  disabled={exporting === "month"}
+                >
+                  {exporting === "month" ? "Erstellt..." : "Monat ZIP"}
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={exportBookingRows}
+                  disabled={exporting === "bookings"}
+                >
+                  {exporting === "bookings" ? "Erstellt..." : "Buchungsentwurf CSV"}
+                </button>
+              </div>
+            </details>
           </div>
         </div>
         {extractionBatch ? (
@@ -1063,7 +1077,9 @@ function UploadApp() {
           <p className="empty">Keine Belege in diesem Filter.</p>
         ) : (
           <div className="queue">
-            {filteredDocuments.map((document) => (
+            {filteredDocuments.map((document) => {
+              const isExpanded = expandedDocumentIds.includes(document.id);
+              return (
               <article key={document.id} className="document-card">
                 <div className="document-head">
                   <div className="document-title">
@@ -1078,29 +1094,23 @@ function UploadApp() {
                     <div className="document-file-names">
                       <strong>{document.original_filename}</strong>
                       <span>{safeVisibleFilename(document.normalized_filename || document.tenant_id)}</span>
+                      <div className="document-summary-line">
+                        <span>{document.extraction?.supplier_name || "Extraktion ausstehend"}</span>
+                        <span>{formatDate(document.extraction?.invoice_date)}</span>
+                        <span>{formatMoney(document.extraction?.gross_amount)}</span>
+                        {document.extraction?.warnings?.length ? <span>{document.extraction.warnings.length} Hinweise</span> : null}
+                      </div>
                     </div>
                   </div>
                   <div className="document-actions">
                     <span className="status">{formatStatus(document.status)}</span>
-                    <button className="secondary-button" type="button" onClick={() => openDocument(document)}>
-                      Ansehen
-                    </button>
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={() => downloadDocument(document)}
-                      disabled={exporting === document.id}
-                    >
-                      {exporting === document.id ? "Lädt..." : "Download"}
-                    </button>
-                    {document.extraction ? (
+                    {!document.extraction && document.status === "review_pending" ? (
                       <button
-                        className="secondary-button"
                         type="button"
-                        onClick={() => reextractDocument(document)}
+                        onClick={() => startExtraction(document.id)}
                         disabled={extractingIds.includes(document.id)}
                       >
-                        {extractingIds.includes(document.id) ? "LÃ¤uft..." : "Neu extrahieren"}
+                        {extractingIds.includes(document.id) ? "Läuft..." : "Extrahieren"}
                       </button>
                     ) : null}
                     {document.extraction && !document.booking_suggestions?.length ? (
@@ -1132,23 +1142,58 @@ function UploadApp() {
                       </button>
                     ) : null}
                     <button
-                      className="secondary-button danger-button"
+                      className="secondary-button"
                       type="button"
-                      onClick={() => deleteDocument(document)}
-                      disabled={deletingIds.includes(document.id)}
+                      onClick={() => toggleDocumentDetails(document.id)}
                     >
-                      {deletingIds.includes(document.id) ? "Löscht..." : "Löschen"}
+                      {isExpanded ? "Details ausblenden" : "Details"}
                     </button>
+                    <details className="row-menu">
+                      <summary>Mehr</summary>
+                      <div className="row-menu-panel">
+                        <button className="secondary-button" type="button" onClick={() => openDocument(document)}>
+                          Ansehen
+                        </button>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => downloadDocument(document)}
+                          disabled={exporting === document.id}
+                        >
+                          {exporting === document.id ? "Lädt..." : "Download"}
+                        </button>
+                        {document.extraction ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => reextractDocument(document)}
+                            disabled={extractingIds.includes(document.id)}
+                          >
+                            {extractingIds.includes(document.id) ? "Läuft..." : "Neu extrahieren"}
+                          </button>
+                        ) : null}
+                        <button
+                          className="secondary-button danger-button"
+                          type="button"
+                          onClick={() => deleteDocument(document)}
+                          disabled={deletingIds.includes(document.id)}
+                        >
+                          {deletingIds.includes(document.id) ? "Löscht..." : "Löschen"}
+                        </button>
+                      </div>
+                    </details>
                   </div>
                 </div>
 
-                <div className="meta-grid">
-                  <span>Hash <code>{document.sha256.slice(0, 16)}</code></span>
-                  <span>Größe {formatSize(document.size_bytes)}</span>
-                </div>
+                {isExpanded ? (
+                  <>
+                    <div className="meta-grid">
+                      <span>Hash <code>{document.sha256.slice(0, 16)}</code></span>
+                      <span>Größe {formatSize(document.size_bytes)}</span>
+                    </div>
 
-                {document.extraction ? (
-                  <div className="extraction-panel">
+                    {document.extraction ? (
+                      <div className="extraction-panel">
                     <div className="extraction-grid">
                       <Field label="Lieferant" value={document.extraction.supplier_name} />
                       <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
@@ -1183,9 +1228,9 @@ function UploadApp() {
                       onSave={saveBookingSuggestion}
                       savingIds={savingSuggestionIds}
                     />
-                  </div>
-                ) : (
-                  <div className="pending-extraction">
+                      </div>
+                    ) : (
+                      <div className="pending-extraction">
                     <span>
                       {document.status === "review_pending"
                         ? "Extraktion ausstehend"
@@ -1202,18 +1247,21 @@ function UploadApp() {
                           ? "Läuft..."
                           : "Extraktion starten"}
                     </button>
-                  </div>
-                )}
+                      </div>
+                    )}
 
-                {document.extraction?.warnings?.length ? (
-                  <ul className="warnings">
-                    {document.extraction.warnings.map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
+                    {document.extraction?.warnings?.length ? (
+                      <ul className="warnings">
+                        {document.extraction.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
                 ) : null}
               </article>
-            ))}
+              );
+            })}
           </div>
         )}
           </section>
