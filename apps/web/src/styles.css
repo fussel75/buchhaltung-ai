@@ -465,39 +465,43 @@ button:disabled {
 .queue-tools {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px;
-  background: var(--surface);
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-start;
+  padding-top: 2px;
 }
 
 .queue-tools button {
-  flex: 1 1 150px;
-  min-height: 40px;
-  padding-inline: 12px;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 32px;
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .queue-tools button:nth-child(1),
 .queue-tools button:nth-child(2) {
-  flex-basis: 210px;
+  min-width: 165px;
 }
 
 .filter-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   justify-content: flex-end;
   margin: 0;
 }
 
 .filter-tabs button {
-  min-height: 34px;
+  min-height: 31px;
   border-color: var(--border);
+  border-radius: 7px;
   background: var(--surface);
   color: var(--muted);
-  padding: 0 12px;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .filter-tabs button.active {
@@ -590,14 +594,20 @@ button:disabled {
 
 .month-export {
   display: grid;
-  flex: 0 1 132px;
-  gap: 4px;
-  min-width: 132px;
+  flex: 0 0 108px;
+  gap: 3px;
+  min-width: 108px;
+}
+
+.month-export span {
+  font-size: 0.72rem;
 }
 
 .month-export input {
   width: 100%;
-  min-height: 40px;
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 0.82rem;
 }
 
 .section-header > div,
@@ -705,7 +715,14 @@ button:disabled {
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 9px;
+  gap: 7px;
+}
+
+.document-actions button {
+  min-height: 34px;
+  border-radius: 7px;
+  padding: 0 11px;
+  font-size: 0.84rem;
 }
 
 .meta-grid {
@@ -1323,8 +1340,11 @@ code {
   }
 
   .queue-tools {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    width: 100%;
+  }
+
+  .queue-tools button {
     width: 100%;
   }
 
