@@ -1257,6 +1257,72 @@ code {
   box-shadow: 0 26px 70px rgb(15 23 42 / 24%);
 }
 
+.review-focus-backdrop {
+  align-items: stretch;
+  padding: 14px;
+}
+
+.review-focus-dialog {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 14px;
+  width: min(1560px, 100%);
+  max-height: calc(100vh - 28px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--surface);
+  box-shadow: 0 26px 70px rgb(15 23 42 / 24%);
+}
+
+.review-focus-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  border-bottom: 1px solid #edf0f3;
+  padding-bottom: 12px;
+}
+
+.review-focus-header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.review-focus-header span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.review-focus-body {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.08fr) minmax(520px, 0.92fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.review-focus-data,
+.review-focus-below {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.review-focus-dialog .document-preview {
+  position: sticky;
+  top: 0;
+}
+
+.review-focus-dialog .document-preview-frame {
+  min-height: min(72vh, 880px);
+  aspect-ratio: auto;
+}
+
 .approval-header,
 .approval-lines-head,
 .approval-actions {
@@ -1830,6 +1896,14 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .review-focus-body {
+    grid-template-columns: 1fr;
+  }
+
+  .review-focus-dialog .document-preview {
+    position: static;
+  }
+
   .review-sidebar,
   .dropzone,
   .document-preview {
@@ -1854,6 +1928,23 @@ code {
   .app {
     width: 100%;
     padding: 20px 14px 56px;
+  }
+
+  .review-focus-backdrop {
+    padding: 8px;
+  }
+
+  .review-focus-dialog {
+    max-height: calc(100vh - 16px);
+    padding: 12px;
+  }
+
+  .review-focus-header {
+    display: grid;
+  }
+
+  .review-focus-dialog .document-preview-frame {
+    min-height: 62vh;
   }
 
   .header-controls,

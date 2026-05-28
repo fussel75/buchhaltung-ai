@@ -224,6 +224,7 @@ function UploadApp() {
   const [reviewFilter, setReviewFilter] = useState("all");
   const [expandedDocumentIds, setExpandedDocumentIds] = useState([]);
   const [approvalDocumentId, setApprovalDocumentId] = useState(null);
+  const [focusedReviewDocumentId, setFocusedReviewDocumentId] = useState(null);
   const [approvalError, setApprovalError] = useState("");
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
@@ -260,6 +261,10 @@ function UploadApp() {
   const approvalDocument = useMemo(
     () => documents.find((document) => document.id === approvalDocumentId) ?? null,
     [approvalDocumentId, documents],
+  );
+  const focusedReviewDocument = useMemo(
+    () => documents.find((document) => document.id === focusedReviewDocumentId) ?? null,
+    [focusedReviewDocumentId, documents],
   );
 
   const loadDocuments = useCallback(async () => {
@@ -345,6 +350,26 @@ function UploadApp() {
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [approvalDocumentId, approvingIds]);
+
+  useEffect(() => {
+    if (!focusedReviewDocumentId) return undefined;
+
+    function handleEscape(event) {
+      if (
+        savingExtractionIds.includes(focusedReviewDocumentId) ||
+        savingPaymentIds.includes(focusedReviewDocumentId) ||
+        savingSuggestionIds.includes(focusedReviewDocumentId)
+      ) {
+        return;
+      }
+      if (event.key === "Escape") {
+        setFocusedReviewDocumentId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [focusedReviewDocumentId, savingExtractionIds, savingPaymentIds, savingSuggestionIds]);
 
   const uploadFile = useCallback(
     async (file) => {
@@ -1248,7 +1273,7 @@ function UploadApp() {
                   </div>
                 </div>
 
-                {isExpanded ? (
+                {isExpanded && focusedReviewDocumentId !== document.id ? (
                   <>
                     {document.extraction ? (
                       <div className="extraction-panel">
@@ -1257,6 +1282,13 @@ function UploadApp() {
                             <p className="eyebrow">Prüfung</p>
                             <h3>Beleg prüfen</h3>
                           </div>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => setFocusedReviewDocumentId(document.id)}
+                          >
+                            Groß prüfen
+                          </button>
                         </div>
 
                         <div className="review-workspace">
@@ -1341,6 +1373,20 @@ function UploadApp() {
         onConfirm={() => {
           if (approvalDocument) approveDocument(approvalDocument);
         }}
+      />
+
+      <ReviewFocusDialog
+        document={focusedReviewDocument}
+        tenantProfile={tenantProfile}
+        isSavingExtraction={focusedReviewDocument ? savingExtractionIds.includes(focusedReviewDocument.id) : false}
+        isSavingPayment={focusedReviewDocument ? savingPaymentIds.includes(focusedReviewDocument.id) : false}
+        isSavingSuggestion={focusedReviewDocument ? savingSuggestionIds.includes(focusedReviewDocument.id) : false}
+        savingPaymentIds={savingPaymentIds}
+        savingSuggestionIds={savingSuggestionIds}
+        onClose={() => setFocusedReviewDocumentId(null)}
+        onSaveExtraction={saveExtraction}
+        onSelectPayment={selectPaymentDecision}
+        onSaveSuggestion={saveBookingSuggestion}
       />
 
       {activeView === "masterdata" && user?.role === "admin" ? (
@@ -1812,6 +1858,123 @@ function DocumentPreview({ document }) {
         )}
       </div>
     </aside>
+  );
+}
+
+function ReviewFocusDialog({
+  document,
+  tenantProfile,
+  isSavingExtraction,
+  isSavingPayment,
+  isSavingSuggestion,
+  savingPaymentIds,
+  savingSuggestionIds,
+  onClose,
+  onSaveExtraction,
+  onSelectPayment,
+  onSaveSuggestion,
+}) {
+  const dialogRef = useRef(null);
+  const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion;
+
+  useEffect(() => {
+    if (!document) return undefined;
+
+    const previousActiveElement = window.document.activeElement;
+    const closeButton = dialogRef.current?.querySelector("button");
+    closeButton?.focus();
+
+    return () => {
+      previousActiveElement?.focus?.();
+    };
+  }, [document?.id]);
+
+  useEffect(() => {
+    if (!document) return undefined;
+
+    function trapFocus(event) {
+      if (event.key !== "Tab") return;
+
+      const focusableSelector = [
+        "button:not([disabled])",
+        "[href]",
+        "input:not([disabled])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        "[tabindex]:not([tabindex='-1'])",
+      ].join(",");
+      const focusableElements = Array.from(dialogRef.current?.querySelectorAll(focusableSelector) || []);
+      if (!focusableElements.length) return;
+
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && window.document.activeElement === firstFocusable) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && window.document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    }
+
+    const dialog = dialogRef.current;
+    dialog?.addEventListener("keydown", trapFocus);
+    return () => dialog?.removeEventListener("keydown", trapFocus);
+  }, [document?.id]);
+
+  if (!document?.extraction) return null;
+
+  return (
+    <div className="modal-backdrop review-focus-backdrop" role="presentation">
+      <section className="review-focus-dialog" role="dialog" aria-modal="true" aria-labelledby="review-focus-title" ref={dialogRef}>
+        <header className="review-focus-header">
+          <div>
+            <p className="eyebrow">Prüfung</p>
+            <h2 id="review-focus-title">Beleg groß prüfen</h2>
+            <span>{document.original_filename}</span>
+          </div>
+          <button className="secondary-button" type="button" onClick={onClose} disabled={isBusy}>
+            Schließen
+          </button>
+        </header>
+
+        <div className="review-focus-body">
+          <DocumentPreview document={document} />
+          <div className="review-focus-data">
+            <ExtractionEditForm
+              document={document}
+              tenantProfile={tenantProfile}
+              isSaving={isSavingExtraction}
+              onSave={onSaveExtraction}
+            />
+            {document.extraction?.warnings?.length ? (
+              <ul className="warnings">
+                {document.extraction.warnings.map((warning, index) => (
+                  <li key={`${warning}-${index}`}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="review-focus-below">
+          <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
+          <PaymentTerms
+            document={document}
+            rawResult={document.extraction.raw_result}
+            onSelect={onSelectPayment}
+            isSaving={savingPaymentIds.includes(document.id)}
+          />
+          <BookingSuggestions
+            document={document}
+            suggestions={document.booking_suggestions}
+            tenantProfile={tenantProfile}
+            onSave={onSaveSuggestion}
+            savingIds={savingSuggestionIds}
+          />
+        </div>
+      </section>
+    </div>
   );
 }
 
