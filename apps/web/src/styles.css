@@ -1298,6 +1298,28 @@ code {
   overflow-wrap: anywhere;
 }
 
+.review-focus-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.review-focus-actions > span {
+  min-width: 54px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 720;
+  text-align: center;
+}
+
+.review-focus-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.8rem;
+}
+
 .review-focus-body {
   display: grid;
   grid-template-columns: minmax(420px, 1.08fr) minmax(520px, 0.92fr);

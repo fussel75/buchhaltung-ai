@@ -254,6 +254,10 @@ function UploadApp() {
     () => filteredDocuments.filter((document) => document.status === "extracted" && document.extraction && !document.booking_suggestions?.length),
     [filteredDocuments],
   );
+  const focusableReviewDocuments = useMemo(
+    () => documents.filter((document) => document.extraction),
+    [documents],
+  );
   const activeBulkJobs = useMemo(
     () => bulkJobs.filter((job) => ["queued", "running"].includes(job.status)),
     [bulkJobs],
@@ -266,6 +270,13 @@ function UploadApp() {
     () => documents.find((document) => document.id === focusedReviewDocumentId) ?? null,
     [focusedReviewDocumentId, documents],
   );
+  const focusedReviewIndex = useMemo(
+    () => focusableReviewDocuments.findIndex((document) => document.id === focusedReviewDocumentId),
+    [focusableReviewDocuments, focusedReviewDocumentId],
+  );
+  const focusedReviewPositionLabel = focusedReviewIndex >= 0
+    ? `${focusedReviewIndex + 1} / ${focusableReviewDocuments.length}`
+    : "";
 
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
@@ -351,25 +362,18 @@ function UploadApp() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [approvalDocumentId, approvingIds]);
 
-  useEffect(() => {
-    if (!focusedReviewDocumentId) return undefined;
+  function moveFocusedReview(delta) {
+    if (focusedReviewIndex < 0 || focusableReviewDocuments.length < 2) return;
 
-    function handleEscape(event) {
-      if (
-        savingExtractionIds.includes(focusedReviewDocumentId) ||
-        savingPaymentIds.includes(focusedReviewDocumentId) ||
-        savingSuggestionIds.includes(focusedReviewDocumentId)
-      ) {
-        return;
-      }
-      if (event.key === "Escape") {
-        setFocusedReviewDocumentId(null);
-      }
-    }
+    const nextIndex = focusedReviewIndex + delta;
+    if (nextIndex < 0 || nextIndex >= focusableReviewDocuments.length) return;
 
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [focusedReviewDocumentId, savingExtractionIds, savingPaymentIds, savingSuggestionIds]);
+    const nextDocumentId = focusableReviewDocuments[nextIndex].id;
+    setFocusedReviewDocumentId(nextDocumentId);
+    setExpandedDocumentIds((current) =>
+      current.includes(nextDocumentId) ? current : [...current, nextDocumentId],
+    );
+  }
 
   const uploadFile = useCallback(
     async (file) => {
@@ -1381,9 +1385,14 @@ function UploadApp() {
         isSavingExtraction={focusedReviewDocument ? savingExtractionIds.includes(focusedReviewDocument.id) : false}
         isSavingPayment={focusedReviewDocument ? savingPaymentIds.includes(focusedReviewDocument.id) : false}
         isSavingSuggestion={focusedReviewDocument ? savingSuggestionIds.includes(focusedReviewDocument.id) : false}
+        hasPrevious={focusedReviewIndex > 0}
+        hasNext={focusedReviewIndex >= 0 && focusedReviewIndex < focusableReviewDocuments.length - 1}
+        positionLabel={focusedReviewPositionLabel}
         savingPaymentIds={savingPaymentIds}
         savingSuggestionIds={savingSuggestionIds}
         onClose={() => setFocusedReviewDocumentId(null)}
+        onPrevious={() => moveFocusedReview(-1)}
+        onNext={() => moveFocusedReview(1)}
         onSaveExtraction={saveExtraction}
         onSelectPayment={selectPaymentDecision}
         onSaveSuggestion={saveBookingSuggestion}
@@ -1450,13 +1459,25 @@ function BulkJobHistory({ jobs }) {
   );
 }
 
-function ExtractionEditForm({ document, tenantProfile, isSaving, onSave }) {
+function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, onSave }) {
   const [form, setForm] = useState(() => extractionFormFromDocument(document));
+  const baselineForm = useMemo(
+    () => extractionFormFromDocument(document),
+    [document.id, document.extraction?.updated_at],
+  );
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(baselineForm),
+    [baselineForm, form],
+  );
   const isApproved = document.status === "review_approved";
 
   useEffect(() => {
-    setForm(extractionFormFromDocument(document));
-  }, [document.id, document.extraction?.updated_at]);
+    setForm(baselineForm);
+  }, [baselineForm]);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -1476,6 +1497,9 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onSave }) {
         </div>
         <StatusPill value={formatConfidence(document.extraction.confidence) || "geprüft"} tone="blue" />
       </div>
+      {isDirty && !isApproved ? (
+        <p className="inline-note">Ungespeicherte Änderungen. Bitte speichern, bevor du den Beleg wechselst.</p>
+      ) : null}
       {document.status === "review_ready" ? (
         <p className="inline-note">Speichern verwirft bestehende Vorschläge. Danach bitte „Vorschlag neu“ erstellen.</p>
       ) : null}
@@ -1867,22 +1891,57 @@ function ReviewFocusDialog({
   isSavingExtraction,
   isSavingPayment,
   isSavingSuggestion,
+  hasPrevious,
+  hasNext,
+  positionLabel,
   savingPaymentIds,
   savingSuggestionIds,
   onClose,
+  onPrevious,
+  onNext,
   onSaveExtraction,
   onSelectPayment,
   onSaveSuggestion,
 }) {
   const dialogRef = useRef(null);
+  const [hasUnsavedExtractionChanges, setHasUnsavedExtractionChanges] = useState(false);
+  const [navigationWarning, setNavigationWarning] = useState("");
   const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion;
+
+  useEffect(() => {
+    setHasUnsavedExtractionChanges(false);
+    setNavigationWarning("");
+  }, [document?.id]);
+
+  function canLeaveCurrentDocument() {
+    if (!hasUnsavedExtractionChanges) return true;
+    setNavigationWarning("Bitte erst speichern oder die Änderung zurücksetzen, bevor du den Beleg wechselst.");
+    return false;
+  }
+
+  function requestClose() {
+    if (hasUnsavedExtractionChanges) {
+      const confirmed = window.confirm("Ungespeicherte Änderungen verwerfen und Prüfung schließen?");
+      if (!confirmed) return;
+    }
+    onClose();
+  }
+
+  function requestPrevious() {
+    if (!canLeaveCurrentDocument()) return;
+    onPrevious();
+  }
+
+  function requestNext() {
+    if (!canLeaveCurrentDocument()) return;
+    onNext();
+  }
 
   useEffect(() => {
     if (!document) return undefined;
 
     const previousActiveElement = window.document.activeElement;
-    const closeButton = dialogRef.current?.querySelector("button");
-    closeButton?.focus();
+    dialogRef.current?.focus();
 
     return () => {
       previousActiveElement?.focus?.();
@@ -1892,7 +1951,25 @@ function ReviewFocusDialog({
   useEffect(() => {
     if (!document) return undefined;
 
-    function trapFocus(event) {
+    function handleDialogKeydown(event) {
+      if (event.key === "Escape" && !isBusy) {
+        event.preventDefault();
+        requestClose();
+        return;
+      }
+
+      if (event.altKey && event.key === "ArrowLeft" && !isBusy && hasPrevious) {
+        event.preventDefault();
+        requestPrevious();
+        return;
+      }
+
+      if (event.altKey && event.key === "ArrowRight" && !isBusy && hasNext) {
+        event.preventDefault();
+        requestNext();
+        return;
+      }
+
       if (event.key !== "Tab") return;
 
       const focusableSelector = [
@@ -1918,25 +1995,35 @@ function ReviewFocusDialog({
     }
 
     const dialog = dialogRef.current;
-    dialog?.addEventListener("keydown", trapFocus);
-    return () => dialog?.removeEventListener("keydown", trapFocus);
-  }, [document?.id]);
+    dialog?.addEventListener("keydown", handleDialogKeydown);
+    return () => dialog?.removeEventListener("keydown", handleDialogKeydown);
+  }, [document?.id, hasNext, hasPrevious, isBusy, requestNext, requestPrevious]);
 
   if (!document?.extraction) return null;
 
   return (
     <div className="modal-backdrop review-focus-backdrop" role="presentation">
-      <section className="review-focus-dialog" role="dialog" aria-modal="true" aria-labelledby="review-focus-title" ref={dialogRef}>
+      <section className="review-focus-dialog" role="dialog" aria-modal="true" aria-labelledby="review-focus-title" ref={dialogRef} tabIndex={-1}>
         <header className="review-focus-header">
           <div>
             <p className="eyebrow">Prüfung</p>
             <h2 id="review-focus-title">Beleg groß prüfen</h2>
             <span>{document.original_filename}</span>
           </div>
-          <button className="secondary-button" type="button" onClick={onClose} disabled={isBusy}>
-            Schließen
-          </button>
+          <div className="review-focus-actions">
+            <button className="secondary-button" type="button" onClick={requestPrevious} disabled={isBusy || !hasPrevious}>
+              Zurück
+            </button>
+            {positionLabel ? <span>{positionLabel}</span> : null}
+            <button className="secondary-button" type="button" onClick={requestNext} disabled={isBusy || !hasNext}>
+              Nächster
+            </button>
+            <button className="secondary-button review-focus-close" type="button" onClick={requestClose} disabled={isBusy}>
+              Schließen
+            </button>
+          </div>
         </header>
+        {navigationWarning ? <p className="inline-note review-focus-warning">{navigationWarning}</p> : null}
 
         <div className="review-focus-body">
           <DocumentPreview document={document} />
@@ -1945,6 +2032,10 @@ function ReviewFocusDialog({
               document={document}
               tenantProfile={tenantProfile}
               isSaving={isSavingExtraction}
+              onDirtyChange={(isDirty) => {
+                setHasUnsavedExtractionChanges(isDirty);
+                if (!isDirty) setNavigationWarning("");
+              }}
               onSave={onSaveExtraction}
             />
             {document.extraction?.warnings?.length ? (
