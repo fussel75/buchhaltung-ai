@@ -1552,7 +1552,6 @@ function DocumentPreview({ document }) {
             src={fileUrl}
             title={`Vorschau ${document.original_filename}`}
             loading="lazy"
-            sandbox=""
           />
         ) : (
           <div className="document-preview-empty">
