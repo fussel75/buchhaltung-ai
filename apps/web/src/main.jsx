@@ -1502,7 +1502,7 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onSave }) {
       </div>
       <div className="form-actions">
         <button type="submit" disabled={isSaving || isApproved}>
-          {isApproved ? "Freigegeben" : isSaving ? "Speichert..." : "Extraktionsdaten speichern"}
+          {isApproved ? "Freigegeben" : isSaving ? "Speichert..." : "Speichern"}
         </button>
       </div>
     </form>
@@ -1528,6 +1528,94 @@ function DocumentPreview({ document }) {
   const contentType = document.content_type || "";
   const isImage = contentType.startsWith("image/");
   const isPdf = contentType === "application/pdf";
+  const previewUrl = isPdf ? `${fileUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH` : fileUrl;
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(isPdf ? 1.28 : 1);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef(null);
+
+  useEffect(() => {
+    setPan({ x: 0, y: 0 });
+    setScale(isPdf ? 1.28 : 1);
+    setIsDragging(false);
+    dragRef.current = null;
+  }, [document.id, isPdf]);
+
+  function startDrag(event) {
+    if (!isImage && !isPdf) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    dragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+    setIsDragging(true);
+  }
+
+  function moveDrag(event) {
+    if (!dragRef.current) return;
+    event.preventDefault();
+    setPan({
+      x: dragRef.current.panX + event.clientX - dragRef.current.startX,
+      y: dragRef.current.panY + event.clientY - dragRef.current.startY,
+    });
+  }
+
+  function endDrag(event) {
+    if (!dragRef.current) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragRef.current = null;
+    setIsDragging(false);
+  }
+
+  function changeScale(delta) {
+    setScale((current) => Math.min(2.4, Math.max(0.85, Number((current + delta).toFixed(2)))));
+  }
+
+  function resetView() {
+    setPan({ x: 0, y: 0 });
+    setScale(isPdf ? 1.28 : 1);
+  }
+
+  function moveWithKeyboard(event) {
+    if (!isImage && !isPdf) return;
+
+    const step = event.shiftKey ? 48 : 18;
+    const keyMap = {
+      ArrowLeft: { x: -step, y: 0 },
+      ArrowRight: { x: step, y: 0 },
+      ArrowUp: { x: 0, y: -step },
+      ArrowDown: { x: 0, y: step },
+    };
+
+    if (keyMap[event.key]) {
+      event.preventDefault();
+      setPan((current) => ({
+        x: current.x + keyMap[event.key].x,
+        y: current.y + keyMap[event.key].y,
+      }));
+      return;
+    }
+
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      changeScale(0.15);
+      return;
+    }
+
+    if (event.key === "-") {
+      event.preventDefault();
+      changeScale(-0.15);
+      return;
+    }
+
+    if (event.key === "0" || event.key === "Home") {
+      event.preventDefault();
+      resetView();
+    }
+  }
 
   return (
     <aside className="document-preview" aria-label="Belegvorschau">
@@ -1544,15 +1632,43 @@ function DocumentPreview({ document }) {
           Öffnen
         </button>
       </div>
-      <div className="document-preview-frame">
+      {(isImage || isPdf) ? (
+        <div className="document-preview-tools" aria-label="Vorschau steuern">
+          <button className="secondary-button" type="button" onClick={() => changeScale(-0.15)} aria-label="Vorschau verkleinern">-</button>
+          <span>{Math.round(scale * 100)}%</span>
+          <button className="secondary-button" type="button" onClick={() => changeScale(0.15)} aria-label="Vorschau vergrößern">+</button>
+          <button className="secondary-button" type="button" onClick={resetView}>Reset</button>
+        </div>
+      ) : null}
+      <div
+        className={`document-preview-frame ${(isImage || isPdf) ? "is-draggable" : ""} ${isDragging ? "is-dragging" : ""}`}
+        role={isImage || isPdf ? "region" : undefined}
+        aria-label={isImage || isPdf ? "Belegvorschau verschieben. Pfeiltasten verschieben, Plus und Minus zoomen, 0 setzt zurück." : undefined}
+        tabIndex={isImage || isPdf ? 0 : undefined}
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onKeyDown={moveWithKeyboard}
+      >
         {isImage ? (
-          <img src={fileUrl} alt={`Vorschau ${document.original_filename}`} />
+          <div
+            className="document-preview-pan"
+            style={{ "--preview-x": `${pan.x}px`, "--preview-y": `${pan.y}px`, "--preview-scale": scale }}
+          >
+            <img src={previewUrl} alt={`Vorschau ${document.original_filename}`} draggable="false" />
+          </div>
         ) : isPdf ? (
-          <iframe
-            src={fileUrl}
-            title={`Vorschau ${document.original_filename}`}
-            loading="lazy"
-          />
+          <div
+            className="document-preview-pan"
+            style={{ "--preview-x": `${pan.x}px`, "--preview-y": `${pan.y}px`, "--preview-scale": scale }}
+          >
+            <iframe
+              src={previewUrl}
+              title={`Vorschau ${document.original_filename}`}
+              loading="lazy"
+            />
+          </div>
         ) : (
           <div className="document-preview-empty">
             <strong>Keine direkte Vorschau</strong>
