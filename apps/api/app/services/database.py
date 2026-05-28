@@ -1,5 +1,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
+from re import sub
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -905,6 +907,7 @@ def update_document_extraction(
             raw_result[field_name] = values[field_name]
     if "assignment_code" in values:
         raw_result.pop("project_code", None)
+        raw_result["assignment_type"] = _manual_assignment_type(raw_result, values["assignment_code"])
     for amount_field in ("net_amount", "tax_amount", "gross_amount"):
         if amount_field in values:
             raw_result[amount_field] = values[amount_field]
@@ -926,6 +929,13 @@ def update_document_extraction(
     current["raw_result"] = raw_result
     current["confidence"] = Decimal("1.00")
     current["warnings"] = []
+    normalized_filename = _manual_normalized_invoice_filename(document, current)
+    normalized_storage_path = None
+    if normalized_filename and document.get("storage_path"):
+        normalized_storage_path = rename_stored_document(
+            storage_path=document["storage_path"],
+            normalized_filename=normalized_filename,
+        )
     now = datetime.now(UTC)
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -970,10 +980,19 @@ def update_document_extraction(
             cursor.execute(
                 """
                 update documents
-                set status = 'extracted', updated_at = %s
+                set
+                    status = 'extracted',
+                    normalized_filename = %s,
+                    storage_path = coalesce(%s, storage_path),
+                    updated_at = %s
                 where id = %s
                 """,
-                (now, document_id),
+                (
+                    normalized_filename,
+                    normalized_storage_path.as_posix() if normalized_storage_path else None,
+                    now,
+                    document_id,
+                ),
             )
 
     insert_audit_event(
@@ -981,9 +1000,104 @@ def update_document_extraction(
         event_type="document.extraction_updated",
         document_id=document_id,
         actor=actor,
-        details={"fields": sorted(values.keys())},
+        details={
+            "fields": sorted(values.keys()),
+            "old_normalized_filename": document.get("normalized_filename"),
+            "new_normalized_filename": normalized_filename,
+            "old_storage_path": document.get("storage_path"),
+            "new_storage_path": normalized_storage_path.as_posix() if normalized_storage_path else document.get("storage_path"),
+        },
     )
     return get_document(document_id)
+
+
+def _manual_assignment_type(raw_result: dict[str, Any], assignment_code: str | None) -> str:
+    if assignment_code:
+        return "assigned"
+    if len(raw_result.get("allocation_lines") or []) > 1:
+        return "assignment_split"
+    if raw_result.get("delivery_address") or raw_result.get("assignment_type") == "assignment_unresolved":
+        return "assignment_unresolved"
+    return "general_cost"
+
+
+def _manual_normalized_invoice_filename(document: dict[str, Any], extraction: dict[str, Any]) -> str:
+    raw_result = extraction.get("raw_result") or {}
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    assignment_code = raw_result.get("assignment_code")
+    assignment = get_assignment_unit_by_code(document["tenant_id"], assignment_code)
+    assignment_type = raw_result.get("assignment_type")
+    if not assignment_type:
+        assignment_type = "assigned" if assignment else "general_cost"
+    supplier_name = extraction.get("supplier_name") or "Unbekannter Lieferant"
+    item_summary = raw_result.get("item_summary") or "Eingangsrechnung"
+    return _normalized_invoice_filename(
+        invoice_number=extraction.get("invoice_number"),
+        assignment=assignment,
+        assignment_code=assignment_code,
+        assignment_type=assignment_type,
+        tenant_profile=tenant_profile,
+        supplier_name=supplier_name,
+        product_name=item_summary,
+        invoice_date=_serialize_date(extraction.get("invoice_date")),
+        suffix=_document_suffix(document),
+    )
+
+
+def _normalized_invoice_filename(
+    invoice_number: str | None,
+    assignment: dict[str, Any] | None,
+    assignment_code: str | None,
+    assignment_type: str,
+    tenant_profile: dict[str, Any],
+    supplier_name: str,
+    product_name: str,
+    invoice_date: str | None,
+    suffix: str,
+) -> str:
+    parts = [
+        f"ERg {invoice_number or 'ohne Nummer'}",
+        _filename_assignment_label(assignment, assignment_code, assignment_type, tenant_profile),
+        supplier_name,
+        product_name,
+        invoice_date or "ohne Datum",
+    ]
+    return ", ".join(_filename_part(part) for part in parts) + suffix
+
+
+def _document_suffix(document: dict[str, Any]) -> str:
+    original_suffix = Path(str(document.get("original_filename") or "")).suffix
+    storage_suffix = Path(str(document.get("storage_path") or "")).suffix
+    return (original_suffix or storage_suffix or ".pdf").lower()
+
+
+def _filename_part(value: str) -> str:
+    cleaned = sub(r'[<>:"/\\|?*]+', " ", value)
+    cleaned = sub(r"\s+", " ", cleaned).strip().rstrip(".")
+    return cleaned or "-"
+
+
+def _filename_assignment_label(
+    assignment: dict[str, Any] | None,
+    assignment_code: str | None,
+    assignment_type: str,
+    tenant_profile: dict[str, Any],
+) -> str:
+    if assignment:
+        prefix = tenant_profile.get("assignment_code_prefix")
+        if prefix:
+            return f"{prefix} {assignment['code']}"
+        return f"{tenant_profile['assignment_label_singular']} {assignment['code']}"
+    if assignment_code:
+        prefix = tenant_profile.get("assignment_code_prefix")
+        if prefix:
+            return f"{prefix} {assignment_code}"
+        return f"{tenant_profile['assignment_label_singular']} {assignment_code}"
+    if assignment_type == "assignment_split":
+        return f"{tenant_profile['assignment_label_plural']} aufgeteilt"
+    if assignment_type == "assignment_unresolved":
+        return f"{tenant_profile['assignment_label_singular']} ungeklärt"
+    return "Allgemeine Kosten"
 
 
 def approve_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:

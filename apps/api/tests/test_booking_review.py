@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import call, patch
@@ -199,6 +200,48 @@ class BookingSuggestionTests(TestCase):
             "ERg RE1574023, BV aufgeteilt, Luechau Baustoffe GmbH, PE-Folie 200 my Baustoffe, 2026-05-07.pdf",
         )
         self.assertFalse(any(character in filename for character in '<>:"/\\|?*'))
+
+    def test_manual_normalized_filename_keeps_document_suffix(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "invoice.xml",
+            "storage_path": "demo-mandant/invoice.xml",
+        }
+        extraction = {
+            "supplier_name": "XML Lieferant GmbH",
+            "invoice_number": "X-1",
+            "invoice_date": "2026-05-21",
+            "raw_result": {"item_summary": "E-Rechnung", "assignment_type": "general_cost"},
+        }
+
+        with (
+            patch.object(
+                database_service,
+                "ensure_tenant_profile",
+                return_value={
+                    "assignment_label_singular": "Bauvorhaben",
+                    "assignment_label_plural": "Bauvorhaben",
+                    "assignment_code_prefix": "BV",
+                },
+            ),
+            patch.object(database_service, "get_assignment_unit_by_code", return_value=None),
+        ):
+            filename = database_service._manual_normalized_invoice_filename(document, extraction)
+
+        self.assertEqual(filename, "ERg X-1, Allgemeine Kosten, XML Lieferant GmbH, E-Rechnung, 2026-05-21.xml")
+
+    def test_manual_assignment_type_keeps_split_and_unresolved(self):
+        self.assertEqual(
+            database_service._manual_assignment_type(
+                {"allocation_lines": [{"assignment_code": "Wewe20"}, {"assignment_code": "Hk92"}]},
+                None,
+            ),
+            "assignment_split",
+        )
+        self.assertEqual(
+            database_service._manual_assignment_type({"assignment_type": "assignment_unresolved"}, None),
+            "assignment_unresolved",
+        )
 
     def test_reopen_approved_review_unlocks_existing_suggestions(self):
         document_id = uuid4()
@@ -830,6 +873,7 @@ class BookingSuggestionTests(TestCase):
         document = {
             "id": str(document_id),
             "tenant_id": tenant_id,
+            "storage_path": "demo-mandant/old.pdf",
             "status": "review_ready",
             "extraction": {
                 "id": str(uuid4()),
@@ -876,6 +920,17 @@ class BookingSuggestionTests(TestCase):
             patch.object(database_service, "get_document", side_effect=[document, updated_document]),
             patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
             patch.object(database_service, "Jsonb", side_effect=lambda value: value),
+            patch.object(
+                database_service,
+                "ensure_tenant_profile",
+                return_value={
+                    "assignment_label_singular": "Bauvorhaben",
+                    "assignment_label_plural": "Bauvorhaben",
+                    "assignment_code_prefix": "BV",
+                },
+            ),
+            patch.object(database_service, "get_assignment_unit_by_code", return_value=None),
+            patch.object(database_service, "rename_stored_document", return_value=Path("demo-mandant/new.pdf")) as rename_file,
             patch.object(database_service, "insert_audit_event") as audit_event,
         ):
             result = database_service.update_document_extraction(
@@ -902,6 +957,13 @@ class BookingSuggestionTests(TestCase):
         self.assertNotIn("payment_terms", raw_result)
         self.assertNotIn("project_code", raw_result)
         self.assertIsNone(raw_result["assignment_code"])
+        document_update_params = next(params for statement, params in cursor.statements if "update documents" in statement)
+        self.assertEqual(
+            document_update_params[0],
+            "ERg A-1, Allgemeine Kosten, Theo Foerch GmbH & Co. KG, Eingangsrechnung, 2026-05-21.pdf",
+        )
+        self.assertEqual(document_update_params[1], "demo-mandant/new.pdf")
+        rename_file.assert_called_once()
         self.assertTrue(any(statement == "delete from document_booking_suggestions where document_id = %s" for statement, _ in cursor.statements))
         self.assertTrue(any(statement == "delete from document_payment_decisions where document_id = %s" for statement, _ in cursor.statements))
         audit_event.assert_called_once()
