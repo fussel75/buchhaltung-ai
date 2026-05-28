@@ -8,6 +8,7 @@ class PreviewError(ValueError):
 
 
 MAX_PREVIEW_EDGE_PIXELS = 2600
+MAX_PREVIEW_TEXT_CHARS = 20000
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,14 @@ class PdfPreviewPage:
     page_count: int
     page_number: int
     png_bytes: bytes
+
+
+@dataclass(frozen=True)
+class PdfPreviewText:
+    page_count: int
+    page_number: int
+    text: str
+    truncated: bool
 
 
 def pdf_page_count(storage_path: str) -> int:
@@ -55,6 +64,34 @@ def render_pdf_preview_page(storage_path: str, page_number: int, zoom: float = 3
             page_count=page_count,
             page_number=page_number,
             png_bytes=pixmap.tobytes("png"),
+        )
+
+
+def extract_pdf_preview_text(storage_path: str, page_number: int) -> PdfPreviewText:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise PreviewError("PDF-Textvorschau ist serverseitig nicht verfügbar.") from exc
+
+    path = resolve_stored_document_path(storage_path)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+
+    with fitz.open(path) as pdf:
+        page_count = pdf.page_count
+        if page_count < 1:
+            raise PreviewError("PDF enthält keine Seiten.")
+        if page_number < 1 or page_number > page_count:
+            raise PreviewError("PDF-Seite existiert nicht.")
+
+        page = pdf.load_page(page_number - 1)
+        text = page.get_text("text").strip()
+        truncated = len(text) > MAX_PREVIEW_TEXT_CHARS
+        return PdfPreviewText(
+            page_count=page_count,
+            page_number=page_number,
+            text=text[:MAX_PREVIEW_TEXT_CHARS],
+            truncated=truncated,
         )
 
 

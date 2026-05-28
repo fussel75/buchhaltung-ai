@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.database import (
@@ -33,7 +33,7 @@ from app.services.database import (
 )
 from app.services.bulk_jobs import run_document_bulk_job
 from app.services.extraction import run_mock_extraction
-from app.services.preview import PreviewError, pdf_page_count, render_pdf_preview_page
+from app.services.preview import PreviewError, extract_pdf_preview_text, pdf_page_count, render_pdf_preview_page
 from app.services.storage import (
     delete_stored_document,
     delete_stored_document_path,
@@ -469,6 +469,33 @@ def get_document_preview_page(document_id: UUID, page_number: int, request: Requ
         "X-Preview-Page-Count": str(preview.page_count),
     }
     return StreamingResponse(BytesIO(preview.png_bytes), media_type="image/png", headers=headers)
+
+
+@router.get("/{document_id}/preview/pages/{page_number}/text")
+def get_document_preview_page_text(document_id: UUID, page_number: int, request: Request) -> JSONResponse:
+    document = require_document_access(request, document_id)
+    if document.get("content_type") != "application/pdf":
+        raise HTTPException(status_code=415, detail="Vorschau-Text ist nur für PDFs verfügbar.")
+
+    try:
+        preview = extract_pdf_preview_text(document["storage_path"], page_number)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="stored file missing") from None
+    except PreviewError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return JSONResponse(
+        {
+            "page_count": preview.page_count,
+            "page_number": preview.page_number,
+            "text": preview.text,
+            "truncated": preview.truncated,
+        },
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/{document_id}/extract")

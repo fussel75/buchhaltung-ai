@@ -1531,6 +1531,11 @@ function DocumentPreview({ document }) {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(isPdf ? null : 1);
   const [previewError, setPreviewError] = useState("");
+  const [previewMode, setPreviewMode] = useState("pan");
+  const [pageText, setPageText] = useState(null);
+  const [pageTextTruncated, setPageTextTruncated] = useState(false);
+  const [textError, setTextError] = useState("");
+  const [copyNotice, setCopyNotice] = useState("");
   const previewUrl = isPdf ? apiUrl(`/documents/${document.id}/preview/pages/${pageNumber}`) : fileUrl;
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
@@ -1541,6 +1546,11 @@ function DocumentPreview({ document }) {
     setPageNumber(1);
     setPan({ x: 0, y: 0 });
     setScale(1);
+    setPreviewMode("pan");
+    setPageText(null);
+    setPageTextTruncated(false);
+    setTextError("");
+    setCopyNotice("");
     setIsDragging(false);
     dragRef.current = null;
   }, [document.id, isPdf]);
@@ -1576,8 +1586,37 @@ function DocumentPreview({ document }) {
     return () => controller.abort();
   }, [document.id, isPdf]);
 
+  useEffect(() => {
+    if (!isPdf || previewMode !== "text") return undefined;
+
+    const controller = new AbortController();
+    setPageText(null);
+    setPageTextTruncated(false);
+    setTextError("");
+    setCopyNotice("");
+    fetch(apiUrl(`/documents/${document.id}/preview/pages/${pageNumber}/text`), {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(formatApiError(result.detail, `PDF-Text konnte nicht geladen werden: ${response.status}`));
+        }
+        setPageText(result.text ?? "");
+        setPageTextTruncated(Boolean(result.truncated));
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          setTextError(error.message || "PDF-Text konnte nicht geladen werden.");
+        }
+      });
+
+    return () => controller.abort();
+  }, [document.id, isPdf, pageNumber, previewMode]);
+
   function startDrag(event) {
-    if (!isImage && !isPdf) return;
+    if ((!isImage && !isPdf) || previewMode !== "pan") return;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
@@ -1624,7 +1663,7 @@ function DocumentPreview({ document }) {
   }
 
   function moveWithKeyboard(event) {
-    if (!isImage && !isPdf) return;
+    if ((!isImage && !isPdf) || previewMode !== "pan") return;
 
     const step = event.shiftKey ? 48 : 18;
     const keyMap = {
@@ -1661,6 +1700,16 @@ function DocumentPreview({ document }) {
     }
   }
 
+  async function copyPageText() {
+    if (!pageText) return;
+    try {
+      await navigator.clipboard.writeText(pageText);
+      setCopyNotice("Text kopiert.");
+    } catch {
+      setCopyNotice("Text kann markiert und mit Strg+C kopiert werden.");
+    }
+  }
+
   return (
     <aside className="document-preview" aria-label="Belegvorschau">
       <div className="document-preview-header">
@@ -1678,6 +1727,12 @@ function DocumentPreview({ document }) {
       </div>
       {(isImage || isPdf) ? (
         <div className="document-preview-tools" aria-label="Vorschau steuern">
+          {isPdf ? (
+            <div className="document-preview-mode" aria-label="Vorschaumodus">
+              <button className={previewMode === "pan" ? "" : "secondary-button"} type="button" onClick={() => setPreviewMode("pan")}>Hand</button>
+              <button className={previewMode === "text" ? "" : "secondary-button"} type="button" onClick={() => setPreviewMode("text")}>Text</button>
+            </div>
+          ) : null}
           <button className="secondary-button" type="button" onClick={() => changeScale(-0.15)} aria-label="Vorschau verkleinern">-</button>
           <span>{Math.round(scale * 100)}%</span>
           <button className="secondary-button" type="button" onClick={() => changeScale(0.15)} aria-label="Vorschau vergrößern">+</button>
@@ -1686,15 +1741,16 @@ function DocumentPreview({ document }) {
             <>
               <button className="secondary-button" type="button" onClick={() => changePage(-1)} disabled={pageNumber <= 1} aria-label="Vorherige Seite">‹</button>
               <span>{pageNumber} / {pageCount || "..."}</span>
+              <button className="secondary-button" type="button" onClick={copyPageText} disabled={previewMode !== "text" || !pageText}>Text kopieren</button>
               <button className="secondary-button" type="button" onClick={() => changePage(1)} disabled={pageCount ? pageNumber >= pageCount : true} aria-label="Nächste Seite">›</button>
             </>
           ) : null}
         </div>
       ) : null}
       <div
-        className={`document-preview-frame ${(isImage || isPdf) ? "is-draggable" : ""} ${isDragging ? "is-dragging" : ""}`}
+        className={`document-preview-frame ${(isImage || isPdf) && previewMode === "pan" ? "is-draggable" : ""} ${previewMode === "text" ? "is-text-mode" : ""} ${isDragging ? "is-dragging" : ""}`}
         role={isImage || isPdf ? "region" : undefined}
-        aria-label={isImage || isPdf ? "Belegvorschau verschieben. Pfeiltasten verschieben, Plus und Minus zoomen, 0 setzt zurück." : undefined}
+        aria-label={isImage || isPdf ? "Belegvorschau. Im Hand-Modus verschieben Pfeiltasten die Ansicht, Plus und Minus zoomen, 0 setzt zurück. Im Text-Modus kann Text markiert und kopiert werden." : undefined}
         tabIndex={isImage || isPdf ? 0 : undefined}
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
@@ -1714,6 +1770,31 @@ function DocumentPreview({ document }) {
             <div className="document-preview-empty">
               <strong>Vorschau nicht verfügbar</strong>
               <span>{previewError}</span>
+            </div>
+          ) : previewMode === "text" ? (
+            <div className="document-preview-text">
+              {textError ? (
+                <div className="document-preview-empty">
+                  <strong>Text nicht verfügbar</strong>
+                  <span>{textError}</span>
+                </div>
+              ) : pageText ? (
+                <>
+                  <pre>{pageText}</pre>
+                  {pageTextTruncated ? <span className="document-preview-copy-note">Text gekürzt. Komplette PDF über „Öffnen“ ansehen.</span> : null}
+                  {copyNotice ? <span className="document-preview-copy-note">{copyNotice}</span> : null}
+                </>
+              ) : pageText === "" ? (
+                <div className="document-preview-empty">
+                  <strong>Kein Text gefunden</strong>
+                  <span>Diese Seite ist vermutlich gescannt oder enthält nur Bildinhalt.</span>
+                </div>
+              ) : (
+                <div className="document-preview-empty">
+                  <strong>Text wird geladen</strong>
+                  <span>Die PDF-Seite wird als markierbarer Text vorbereitet.</span>
+                </div>
+              )}
             </div>
           ) : (
             <div

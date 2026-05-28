@@ -917,8 +917,24 @@ button:disabled {
 .document-preview-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
+}
+
+.document-preview-mode {
+  display: inline-flex;
+  gap: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 3px;
+  background: var(--surface);
+}
+
+.document-preview-mode button {
+  min-height: 24px;
+  border-radius: 6px;
+  padding: 0 8px;
 }
 
 .document-preview-tools button {
@@ -960,6 +976,12 @@ button:disabled {
   cursor: grabbing;
 }
 
+.document-preview-frame.is-text-mode {
+  cursor: text;
+  touch-action: auto;
+  user-select: text;
+}
+
 .document-preview-pan {
   position: absolute;
   inset: 0;
@@ -986,6 +1008,38 @@ button:disabled {
 .document-preview-frame img,
 .document-preview-pan img {
   object-fit: contain;
+}
+
+.document-preview-text {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+  color: var(--text);
+  background: #ffffff;
+  user-select: text;
+}
+
+.document-preview-text pre {
+  margin: 0;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.document-preview-copy-note {
+  position: sticky;
+  bottom: 0;
+  display: inline-flex;
+  margin-top: 10px;
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #14532d;
+  background: #dcfce7;
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .document-preview-empty {
