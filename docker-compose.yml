@@ -36,13 +36,11 @@ services:
   web:
     build:
       context: ./apps/web
+      args:
+        VITE_API_BASE_URL: ${WEB_API_BASE_URL:-/api}
     restart: unless-stopped
-    environment:
-      VITE_API_BASE_URL: ${WEB_API_BASE_URL:-/api}
-      VITE_ALLOWED_HOSTS: ${WEB_ALLOWED_HOSTS:-}
-      VITE_API_PROXY_TARGET: ${WEB_API_PROXY_TARGET:-http://api:8000}
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:5173:80"
     depends_on:
       - api
 
