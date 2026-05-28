@@ -850,6 +850,104 @@ button:disabled {
   gap: 14px;
 }
 
+.review-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.review-data {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.review-fullwidth {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.document-preview {
+  position: sticky;
+  top: 14px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--surface);
+}
+
+.document-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.document-preview-header > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.document-preview-header span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.document-preview-header strong {
+  min-width: 0;
+  font-size: 0.86rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.document-preview-header button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.document-preview-frame {
+  overflow: hidden;
+  border: 1px solid #e2e6eb;
+  border-radius: 7px;
+  background: #f8fafc;
+  aspect-ratio: 1 / 1.32;
+}
+
+.document-preview-frame iframe,
+.document-preview-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.document-preview-frame img {
+  object-fit: contain;
+}
+
+.document-preview-empty {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  height: 100%;
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.document-preview-empty strong {
+  color: var(--text);
+}
+
 .review-check-header,
 .detail-section-header {
   display: flex;
@@ -1564,8 +1662,13 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .review-workspace {
+    grid-template-columns: 1fr;
+  }
+
   .review-sidebar,
-  .dropzone {
+  .dropzone,
+  .document-preview {
     position: static;
   }
 
@@ -1605,6 +1708,7 @@ code {
 
   .metric-strip,
   .meta-grid,
+  .review-workspace,
   .review-facts,
   .approval-facts,
   .extraction-grid,

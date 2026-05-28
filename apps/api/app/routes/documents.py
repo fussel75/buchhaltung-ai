@@ -382,6 +382,7 @@ def get_document_file(
         media_type=document.get("content_type") or "application/pdf",
         filename=_download_filename(document),
         content_disposition_type=disposition,
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 

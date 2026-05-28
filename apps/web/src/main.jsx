@@ -1225,64 +1225,71 @@ function UploadApp() {
                         <div className="review-check-header">
                           <div>
                             <p className="eyebrow">Prüfung</p>
-                            <h3>Extraktion prüfen</h3>
+                            <h3>Beleg prüfen</h3>
                           </div>
                         </div>
 
-                        <div className="review-facts">
-                          <Field label="Lieferant" value={document.extraction.supplier_name} />
-                          <Field label="Rechnung" value={document.extraction.invoice_number} />
-                          <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
-                          <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result, tenantProfile)} />
-                          <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
-                          <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
-                          <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
-                          <Field label="Confidence" value={formatConfidence(document.extraction.confidence)} />
-                        </div>
-
-                        {document.extraction?.warnings?.length ? (
-                          <ul className="warnings">
-                            {document.extraction.warnings.map((warning, index) => (
-                              <li key={`${warning}-${index}`}>{warning}</li>
-                            ))}
-                          </ul>
-                        ) : null}
-
-                        <section className="detail-section">
-                          <div className="detail-section-header">
-                            <div>
-                              <h3>Weitere Belegdaten</h3>
-                              <span>für Kontrolle und Buchung</span>
+                        <div className="review-workspace">
+                          <DocumentPreview document={document} />
+                          <div className="review-data">
+                            <div className="review-facts">
+                              <Field label="Lieferant" value={document.extraction.supplier_name} />
+                              <Field label="Rechnung" value={document.extraction.invoice_number} />
+                              <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
+                              <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result, tenantProfile)} />
+                              <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
+                              <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
+                              <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
+                              <Field label="Confidence" value={formatConfidence(document.extraction.confidence)} />
                             </div>
-                          </div>
-                          <div className="extraction-grid">
-                            <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
-                            <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
-                            <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                            <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />} />
-                            <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind, tenantProfile)} />
-                            <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
-                            <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
-                            <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
-                            <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
-                            <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
-                          </div>
-                        </section>
 
-                        <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
-                        <PaymentTerms
-                          document={document}
-                          rawResult={document.extraction.raw_result}
-                          onSelect={selectPaymentDecision}
-                          isSaving={savingPaymentIds.includes(document.id)}
-                        />
-                        <BookingSuggestions
-                          document={document}
-                          suggestions={document.booking_suggestions}
-                          tenantProfile={tenantProfile}
-                          onSave={saveBookingSuggestion}
-                          savingIds={savingSuggestionIds}
-                        />
+                            {document.extraction?.warnings?.length ? (
+                              <ul className="warnings">
+                                {document.extraction.warnings.map((warning, index) => (
+                                  <li key={`${warning}-${index}`}>{warning}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+
+                            <section className="detail-section">
+                              <div className="detail-section-header">
+                                <div>
+                                  <h3>Weitere Belegdaten</h3>
+                                  <span>für Kontrolle und Buchung</span>
+                                </div>
+                              </div>
+                              <div className="extraction-grid">
+                                <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
+                                <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
+                                <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
+                                <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />} />
+                                <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind, tenantProfile)} />
+                                <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
+                                <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
+                                <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
+                                <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
+                                <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
+                              </div>
+                            </section>
+                          </div>
+                        </div>
+
+                        <div className="review-fullwidth">
+                          <AllocationLines lines={document.extraction.raw_result?.allocation_lines} tenantProfile={tenantProfile} />
+                          <PaymentTerms
+                            document={document}
+                            rawResult={document.extraction.raw_result}
+                            onSelect={selectPaymentDecision}
+                            isSaving={savingPaymentIds.includes(document.id)}
+                          />
+                          <BookingSuggestions
+                            document={document}
+                            suggestions={document.booking_suggestions}
+                            tenantProfile={tenantProfile}
+                            onSave={saveBookingSuggestion}
+                            savingIds={savingSuggestionIds}
+                          />
+                        </div>
                       </div>
                     ) : (
                       <div className="pending-extraction">
@@ -1389,6 +1396,48 @@ function BulkJobHistory({ jobs }) {
         </div>
       )}
     </section>
+  );
+}
+
+function DocumentPreview({ document }) {
+  const fileUrl = apiUrl(`/documents/${document.id}/file?disposition=inline`);
+  const contentType = document.content_type || "";
+  const isImage = contentType.startsWith("image/");
+  const isPdf = contentType === "application/pdf";
+
+  return (
+    <aside className="document-preview" aria-label="Belegvorschau">
+      <div className="document-preview-header">
+        <div>
+          <span>Belegvorschau</span>
+          <strong>{document.original_filename}</strong>
+        </div>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => window.open(fileUrl, "_blank", "noopener")}
+        >
+          Öffnen
+        </button>
+      </div>
+      <div className="document-preview-frame">
+        {isImage ? (
+          <img src={fileUrl} alt={`Vorschau ${document.original_filename}`} />
+        ) : isPdf ? (
+          <iframe
+            src={fileUrl}
+            title={`Vorschau ${document.original_filename}`}
+            loading="lazy"
+            sandbox=""
+          />
+        ) : (
+          <div className="document-preview-empty">
+            <strong>Keine direkte Vorschau</strong>
+            <span>Dieses Dateiformat wird nicht eingebettet angezeigt.</span>
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
