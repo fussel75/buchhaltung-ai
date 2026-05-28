@@ -1528,17 +1528,52 @@ function DocumentPreview({ document }) {
   const contentType = document.content_type || "";
   const isImage = contentType.startsWith("image/");
   const isPdf = contentType === "application/pdf";
-  const previewUrl = isPdf ? `${fileUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH` : fileUrl;
+  const [pageNumber, setPageNumber] = useState(1);
+  const [pageCount, setPageCount] = useState(isPdf ? null : 1);
+  const [previewError, setPreviewError] = useState("");
+  const previewUrl = isPdf ? apiUrl(`/documents/${document.id}/preview/pages/${pageNumber}`) : fileUrl;
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [scale, setScale] = useState(isPdf ? 1.28 : 1);
+  const [scale, setScale] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef(null);
 
   useEffect(() => {
+    setPageNumber(1);
     setPan({ x: 0, y: 0 });
-    setScale(isPdf ? 1.28 : 1);
+    setScale(1);
     setIsDragging(false);
     dragRef.current = null;
+  }, [document.id, isPdf]);
+
+  useEffect(() => {
+    if (!isPdf) {
+      setPageCount(1);
+      setPreviewError("");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setPageCount(null);
+    setPreviewError("");
+    fetch(apiUrl(`/documents/${document.id}/preview`), {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(formatApiError(result.detail, `Vorschau konnte nicht geladen werden: ${response.status}`));
+        }
+        setPageCount(Math.max(Number(result.page_count) || 1, 1));
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          setPreviewError(error.message || "Vorschau konnte nicht geladen werden.");
+          setPageCount(1);
+        }
+      });
+
+    return () => controller.abort();
   }, [document.id, isPdf]);
 
   function startDrag(event) {
@@ -1576,7 +1611,16 @@ function DocumentPreview({ document }) {
 
   function resetView() {
     setPan({ x: 0, y: 0 });
-    setScale(isPdf ? 1.28 : 1);
+    setScale(1);
+  }
+
+  function changePage(delta) {
+    setPageNumber((current) => {
+      const maxPage = pageCount || current;
+      const nextPage = Math.min(maxPage, Math.max(1, current + delta));
+      return nextPage;
+    });
+    resetView();
   }
 
   function moveWithKeyboard(event) {
@@ -1638,6 +1682,13 @@ function DocumentPreview({ document }) {
           <span>{Math.round(scale * 100)}%</span>
           <button className="secondary-button" type="button" onClick={() => changeScale(0.15)} aria-label="Vorschau vergrößern">+</button>
           <button className="secondary-button" type="button" onClick={resetView}>Reset</button>
+          {isPdf ? (
+            <>
+              <button className="secondary-button" type="button" onClick={() => changePage(-1)} disabled={pageNumber <= 1} aria-label="Vorherige Seite">‹</button>
+              <span>{pageNumber} / {pageCount || "..."}</span>
+              <button className="secondary-button" type="button" onClick={() => changePage(1)} disabled={pageCount ? pageNumber >= pageCount : true} aria-label="Nächste Seite">›</button>
+            </>
+          ) : null}
         </div>
       ) : null}
       <div
@@ -1659,16 +1710,19 @@ function DocumentPreview({ document }) {
             <img src={previewUrl} alt={`Vorschau ${document.original_filename}`} draggable="false" />
           </div>
         ) : isPdf ? (
-          <div
-            className="document-preview-pan"
-            style={{ "--preview-x": `${pan.x}px`, "--preview-y": `${pan.y}px`, "--preview-scale": scale }}
-          >
-            <iframe
-              src={previewUrl}
-              title={`Vorschau ${document.original_filename}`}
-              loading="lazy"
-            />
-          </div>
+          previewError ? (
+            <div className="document-preview-empty">
+              <strong>Vorschau nicht verfügbar</strong>
+              <span>{previewError}</span>
+            </div>
+          ) : (
+            <div
+              className="document-preview-pan"
+              style={{ "--preview-x": `${pan.x}px`, "--preview-y": `${pan.y}px`, "--preview-scale": scale }}
+            >
+              <img src={previewUrl} alt={`PDF-Seite ${pageNumber} von ${pageCount || "?"}`} draggable="false" />
+            </div>
+          )
         ) : (
           <div className="document-preview-empty">
             <strong>Keine direkte Vorschau</strong>

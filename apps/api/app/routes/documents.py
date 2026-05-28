@@ -33,6 +33,7 @@ from app.services.database import (
 )
 from app.services.bulk_jobs import run_document_bulk_job
 from app.services.extraction import run_mock_extraction
+from app.services.preview import PreviewError, pdf_page_count, render_pdf_preview_page
 from app.services.storage import (
     delete_stored_document,
     delete_stored_document_path,
@@ -430,6 +431,44 @@ def get_document_file(
         content_disposition_type=disposition,
         headers={"X-Content-Type-Options": "nosniff"},
     )
+
+
+@router.get("/{document_id}/preview")
+def get_document_preview_meta(document_id: UUID, request: Request) -> dict[str, Any]:
+    document = require_document_access(request, document_id)
+    if document.get("content_type") != "application/pdf":
+        raise HTTPException(status_code=415, detail="Vorschau-Metadaten sind nur für PDFs verfügbar.")
+
+    try:
+        page_count = pdf_page_count(document["storage_path"])
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="stored file missing") from None
+    except PreviewError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {"page_count": page_count}
+
+
+@router.get("/{document_id}/preview/pages/{page_number}")
+def get_document_preview_page(document_id: UUID, page_number: int, request: Request) -> StreamingResponse:
+    document = require_document_access(request, document_id)
+    if document.get("content_type") != "application/pdf":
+        raise HTTPException(status_code=415, detail="Vorschau-Seiten sind nur für PDFs verfügbar.")
+
+    try:
+        preview = render_pdf_preview_page(document["storage_path"], page_number)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="stored file missing") from None
+    except PreviewError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    headers = {
+        "Cache-Control": "private, max-age=300",
+        "X-Content-Type-Options": "nosniff",
+        "X-Preview-Page": str(preview.page_number),
+        "X-Preview-Page-Count": str(preview.page_count),
+    }
+    return StreamingResponse(BytesIO(preview.png_bytes), media_type="image/png", headers=headers)
 
 
 @router.post("/{document_id}/extract")

@@ -4,5 +4,6 @@ pydantic-settings==2.6.1
 python-multipart==0.0.17
 psycopg[binary]==3.2.3
 pypdf==5.1.0
+PyMuPDF==1.24.14
 argon2-cffi==23.1.0
 alembic==1.13.3
