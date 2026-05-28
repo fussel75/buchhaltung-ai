@@ -860,6 +860,132 @@ def save_document_extraction(
     return serialized
 
 
+def update_document_extraction(
+    document_id: UUID,
+    values: dict[str, Any],
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None or not document.get("extraction"):
+        return None
+    if document.get("status") == "review_approved":
+        raise ValueError("approved document cannot be edited")
+
+    current = dict(document["extraction"])
+    raw_result = dict(current.get("raw_result") or {})
+    top_level_fields = {
+        "supplier_name",
+        "invoice_number",
+        "invoice_date",
+        "service_period",
+        "net_amount",
+        "tax_amount",
+        "gross_amount",
+        "currency",
+    }
+    raw_fields = {
+        "customer_number",
+        "document_type",
+        "cost_category",
+        "assignment_code",
+        "assignment_kind",
+        "due_date",
+        "discount_due_date",
+        "discount_base",
+        "discount_amount",
+        "discounted_payable_amount",
+        "item_summary",
+    }
+
+    for field_name in top_level_fields:
+        if field_name in values:
+            current[field_name] = values[field_name]
+    for field_name in raw_fields:
+        if field_name in values:
+            raw_result[field_name] = values[field_name]
+    if "assignment_code" in values:
+        raw_result.pop("project_code", None)
+    for amount_field in ("net_amount", "tax_amount", "gross_amount"):
+        if amount_field in values:
+            raw_result[amount_field] = values[amount_field]
+    if any(
+        field_name in values
+        for field_name in (
+            "document_type",
+            "gross_amount",
+            "currency",
+            "due_date",
+            "discount_due_date",
+            "discount_base",
+            "discount_amount",
+            "discounted_payable_amount",
+        )
+    ):
+        raw_result.pop("payment_terms", None)
+
+    current["raw_result"] = raw_result
+    current["confidence"] = Decimal("1.00")
+    current["warnings"] = []
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update document_extractions
+                set
+                    supplier_name = %s,
+                    invoice_number = %s,
+                    invoice_date = %s,
+                    service_period = %s,
+                    net_amount = %s,
+                    tax_amount = %s,
+                    gross_amount = %s,
+                    currency = %s,
+                    confidence = %s,
+                    warnings = %s,
+                    raw_result = %s,
+                    updated_at = %s
+                where document_id = %s
+                returning *
+                """,
+                (
+                    current.get("supplier_name"),
+                    current.get("invoice_number"),
+                    current.get("invoice_date"),
+                    current.get("service_period"),
+                    current.get("net_amount"),
+                    current.get("tax_amount"),
+                    current.get("gross_amount"),
+                    current.get("currency") or "EUR",
+                    current["confidence"],
+                    Jsonb(current["warnings"]),
+                    Jsonb(_json_safe_value(raw_result)),
+                    now,
+                    document_id,
+                ),
+            )
+            cursor.fetchone()
+            cursor.execute("delete from document_booking_suggestions where document_id = %s", (document_id,))
+            cursor.execute("delete from document_payment_decisions where document_id = %s", (document_id,))
+            cursor.execute(
+                """
+                update documents
+                set status = 'extracted', updated_at = %s
+                where id = %s
+                """,
+                (now, document_id),
+            )
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.extraction_updated",
+        document_id=document_id,
+        actor=actor,
+        details={"fields": sorted(values.keys())},
+    )
+    return get_document(document_id)
+
+
 def approve_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
     document = get_document(document_id)
     if document is None or not document.get("extraction"):
@@ -2525,6 +2651,8 @@ def _json_safe_extraction(extraction: dict[str, Any]) -> dict[str, Any]:
 def _json_safe_value(value: Any) -> Any:
     if isinstance(value, Decimal):
         return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
     if isinstance(value, list):
         return [_json_safe_value(item) for item in value]
     if isinstance(value, dict):

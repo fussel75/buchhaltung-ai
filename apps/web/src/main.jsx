@@ -213,6 +213,7 @@ function UploadApp() {
   const [approvingIds, setApprovingIds] = useState([]);
   const [savingSuggestionIds, setSavingSuggestionIds] = useState([]);
   const [savingPaymentIds, setSavingPaymentIds] = useState([]);
+  const [savingExtractionIds, setSavingExtractionIds] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [exporting, setExporting] = useState("");
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -764,6 +765,35 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const saveExtraction = useCallback(
+    async (document, values) => {
+      setError("");
+      setNotice("");
+      setSavingExtractionIds((current) => [...current, document.id]);
+      try {
+        const response = await apiFetch(`/documents/${document.id}/extraction`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(normalizeExtractionUpdate(values)),
+        });
+
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({}));
+          throw new Error(formatApiError(result.detail, `Extraktionsdaten konnten nicht gespeichert werden: ${response.status}`));
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        setNotice(`Extraktionsdaten gespeichert: ${result.document.original_filename}. Bitte Buchungsvorschlag neu erstellen.`);
+      } catch (saveError) {
+        setError(saveError.message);
+      } finally {
+        setSavingExtractionIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   const selectPaymentDecision = useCallback(
     async (document, term) => {
       setError("");
@@ -1232,16 +1262,12 @@ function UploadApp() {
                         <div className="review-workspace">
                           <DocumentPreview document={document} />
                           <div className="review-data">
-                            <div className="review-facts">
-                              <Field label="Lieferant" value={document.extraction.supplier_name} />
-                              <Field label="Rechnung" value={document.extraction.invoice_number} />
-                              <Field label="Datum" value={formatDate(document.extraction.invoice_date)} />
-                              <Field label="Zuordnung" value={formatAssignment(document.extraction.raw_result, tenantProfile)} />
-                              <Field label="Brutto" value={formatMoney(document.extraction.gross_amount)} />
-                              <Field label="Skonto bis" value={formatDate(document.extraction.raw_result?.discount_due_date)} />
-                              <Field label="Zahlbetrag Skonto" value={formatMoney(discountedAmount(document.extraction.raw_result))} />
-                              <Field label="Confidence" value={formatConfidence(document.extraction.confidence)} />
-                            </div>
+                            <ExtractionEditForm
+                              document={document}
+                              tenantProfile={tenantProfile}
+                              isSaving={savingExtractionIds.includes(document.id)}
+                              onSave={saveExtraction}
+                            />
 
                             {document.extraction?.warnings?.length ? (
                               <ul className="warnings">
@@ -1250,27 +1276,6 @@ function UploadApp() {
                                 ))}
                               </ul>
                             ) : null}
-
-                            <section className="detail-section">
-                              <div className="detail-section-header">
-                                <div>
-                                  <h3>Weitere Belegdaten</h3>
-                                  <span>für Kontrolle und Buchung</span>
-                                </div>
-                              </div>
-                              <div className="extraction-grid">
-                                <Field label="Belegart" value={formatDocumentType(document.extraction.raw_result?.document_type)} />
-                                <Field label="Kunden-Nr." value={document.extraction.raw_result?.customer_number} />
-                                <Field label="Kostenart" value={formatCostCategory(document.extraction.raw_result?.cost_category)} />
-                                <Field label={tenantProfile.assignment_code_label} value={<ProjectSummary rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />} />
-                                <Field label="Zuordnungsart" value={formatAssignmentKind(document.extraction.raw_result?.assignment_kind, tenantProfile)} />
-                                <Field label="Netto" value={formatMoney(document.extraction.net_amount)} />
-                                <Field label="USt" value={formatMoney(document.extraction.tax_amount)} />
-                                <Field label="Zahlbar bis" value={formatDate(document.extraction.raw_result?.due_date)} />
-                                <Field label="Skonto-Basis" value={formatMoney(document.extraction.raw_result?.discount_base)} />
-                                <Field label="Skonto" value={formatMoney(document.extraction.raw_result?.discount_amount)} />
-                              </div>
-                            </section>
                           </div>
                         </div>
 
@@ -1396,6 +1401,125 @@ function BulkJobHistory({ jobs }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ExtractionEditForm({ document, tenantProfile, isSaving, onSave }) {
+  const [form, setForm] = useState(() => extractionFormFromDocument(document));
+  const isApproved = document.status === "review_approved";
+
+  useEffect(() => {
+    setForm(extractionFormFromDocument(document));
+  }, [document.id, document.extraction?.updated_at]);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    onSave(document, form);
+  }
+
+  return (
+    <form className="extraction-edit-form" onSubmit={submit}>
+      <div className="detail-section-header">
+        <div>
+          <h3>Extraktionsdaten</h3>
+          <span>bearbeitbar vor Buchungsvorschlag und Freigabe</span>
+        </div>
+        <StatusPill value={formatConfidence(document.extraction.confidence) || "geprüft"} tone="blue" />
+      </div>
+      {document.status === "review_ready" ? (
+        <p className="inline-note">Speichern verwirft bestehende Vorschläge. Danach bitte „Vorschlag neu“ erstellen.</p>
+      ) : null}
+      <div className="form-grid extraction-edit-grid">
+        <FormField label="Lieferant">
+          <input value={form.supplier_name} onChange={(event) => updateField("supplier_name", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Rechnung">
+          <input value={form.invoice_number} onChange={(event) => updateField("invoice_number", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Datum">
+          <input type="date" value={form.invoice_date} onChange={(event) => updateField("invoice_date", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Kunden-Nr.">
+          <input value={form.customer_number} onChange={(event) => updateField("customer_number", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Belegart">
+          <select value={form.document_type} onChange={(event) => updateField("document_type", event.target.value)} disabled={isApproved}>
+            <option value="incoming_invoice">Eingangsrechnung</option>
+            <option value="credit_note">Gutschrift</option>
+          </select>
+        </FormField>
+        <FormField label="Kostenart">
+          <select value={form.cost_category} onChange={(event) => updateField("cost_category", event.target.value)} disabled={isApproved}>
+            <option value="">-</option>
+            {COST_CATEGORY_OPTIONS.map(([category, label]) => (
+              <option key={category} value={category}>{label}</option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label={tenantProfile.assignment_code_label}>
+          <input placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Zuordnungsart">
+          <select value={form.assignment_kind} onChange={(event) => updateField("assignment_kind", event.target.value)} disabled={isApproved}>
+            <option value="">-</option>
+            <AssignmentKindOptions />
+          </select>
+        </FormField>
+        <FormField label="Netto">
+          <input inputMode="decimal" value={form.net_amount} onChange={(event) => updateField("net_amount", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="USt">
+          <input inputMode="decimal" value={form.tax_amount} onChange={(event) => updateField("tax_amount", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Brutto">
+          <input inputMode="decimal" value={form.gross_amount} onChange={(event) => updateField("gross_amount", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Währung">
+          <input value={form.currency} onChange={(event) => updateField("currency", event.target.value.toUpperCase())} maxLength={3} disabled={isApproved} />
+        </FormField>
+        <FormField label="Zahlbar bis">
+          <input type="date" value={form.due_date} onChange={(event) => updateField("due_date", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Skonto bis">
+          <input type="date" value={form.discount_due_date} onChange={(event) => updateField("discount_due_date", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Skonto-Basis">
+          <input inputMode="decimal" value={form.discount_base} onChange={(event) => updateField("discount_base", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Skonto">
+          <input inputMode="decimal" value={form.discount_amount} onChange={(event) => updateField("discount_amount", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Zahlbetrag Skonto">
+          <input inputMode="decimal" value={form.discounted_payable_amount} onChange={(event) => updateField("discounted_payable_amount", event.target.value)} disabled={isApproved} />
+        </FormField>
+        <FormField label="Artikel / Leistung">
+          <input value={form.item_summary} onChange={(event) => updateField("item_summary", event.target.value)} disabled={isApproved} />
+        </FormField>
+      </div>
+      <div className="form-actions">
+        <button type="submit" disabled={isSaving || isApproved}>
+          {isApproved ? "Freigegeben" : isSaving ? "Speichert..." : "Extraktionsdaten speichern"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AssignmentKindOptions() {
+  return (
+    <>
+      <option value="construction_project">Bauvorhaben</option>
+      <option value="location">Standort</option>
+      <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+      <option value="cost_object">Kostenobjekt</option>
+      <option value="vehicle">Fahrzeug</option>
+      <option value="subscription">Abo/Vertrag</option>
+      <option value="department">Bereich</option>
+    </>
   );
 }
 
@@ -2813,6 +2937,56 @@ function bookingSuggestionDraft(suggestion) {
   };
 }
 
+function extractionFormFromDocument(document) {
+  const extraction = document.extraction || {};
+  const raw = extraction.raw_result || {};
+  return {
+    supplier_name: extraction.supplier_name || "",
+    invoice_number: extraction.invoice_number || "",
+    invoice_date: inputDateValue(extraction.invoice_date),
+    service_period: extraction.service_period || "",
+    customer_number: raw.customer_number || "",
+    document_type: raw.document_type || "incoming_invoice",
+    cost_category: raw.cost_category || "",
+    assignment_code: raw.assignment_code || raw.project_code || "",
+    assignment_kind: raw.assignment_kind || "",
+    net_amount: moneyDraftValue(extraction.net_amount),
+    tax_amount: moneyDraftValue(extraction.tax_amount),
+    gross_amount: moneyDraftValue(extraction.gross_amount),
+    currency: extraction.currency || "EUR",
+    due_date: inputDateValue(raw.due_date),
+    discount_due_date: inputDateValue(raw.discount_due_date),
+    discount_base: moneyDraftValue(raw.discount_base),
+    discount_amount: moneyDraftValue(raw.discount_amount),
+    discounted_payable_amount: moneyDraftValue(raw.discounted_payable_amount),
+    item_summary: raw.item_summary || "",
+  };
+}
+
+function normalizeExtractionUpdate(values) {
+  return {
+    supplier_name: values.supplier_name?.trim() || null,
+    invoice_number: values.invoice_number?.trim() || null,
+    invoice_date: values.invoice_date || null,
+    service_period: values.service_period?.trim() || null,
+    customer_number: values.customer_number?.trim() || null,
+    document_type: values.document_type || null,
+    cost_category: values.cost_category || null,
+    assignment_code: values.assignment_code?.trim() || null,
+    assignment_kind: values.assignment_kind || null,
+    net_amount: decimalOrNull(values.net_amount),
+    tax_amount: decimalOrNull(values.tax_amount),
+    gross_amount: decimalOrNull(values.gross_amount),
+    currency: values.currency?.trim().toUpperCase() || "EUR",
+    due_date: values.due_date || null,
+    discount_due_date: values.discount_due_date || null,
+    discount_base: decimalOrNull(values.discount_base),
+    discount_amount: decimalOrNull(values.discount_amount),
+    discounted_payable_amount: decimalOrNull(values.discounted_payable_amount),
+    item_summary: values.item_summary?.trim() || null,
+  };
+}
+
 function normalizeBookingSuggestion(values) {
   return {
     booking_type: values.booking_type || "incoming_invoice",
@@ -2830,6 +3004,11 @@ function normalizeBookingSuggestion(values) {
 function moneyDraftValue(value) {
   if (value === null || value === undefined || value === "") return "";
   return String(value).replace(".", ",");
+}
+
+function inputDateValue(value) {
+  if (!value) return "";
+  return String(value).slice(0, 10);
 }
 
 function decimalOrNull(value) {

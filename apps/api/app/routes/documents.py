@@ -1,5 +1,6 @@
 from decimal import Decimal
 from csv import DictWriter
+from datetime import date
 from io import BytesIO, StringIO
 from re import sub
 from typing import Any, Literal
@@ -27,6 +28,7 @@ from app.services.database import (
     ReviewApprovalError,
     select_payment_decision,
     update_booking_suggestion,
+    update_document_extraction,
     validate_document_review,
 )
 from app.services.bulk_jobs import run_document_bulk_job
@@ -101,6 +103,50 @@ class BookingSuggestionUpdate(BaseModel):
 
 class PaymentDecisionUpdate(BaseModel):
     payment_type: Literal["full_amount", "cash_discount", "credit_note_settlement"]
+
+
+class ExtractionUpdate(BaseModel):
+    supplier_name: str | None = Field(default=None, max_length=300)
+    invoice_number: str | None = Field(default=None, max_length=120)
+    invoice_date: date | None = None
+    service_period: str | None = Field(default=None, max_length=120)
+    customer_number: str | None = Field(default=None, max_length=120)
+    document_type: Literal["incoming_invoice", "credit_note"] | None = None
+    cost_category: Literal[
+        "material",
+        "subcontractor",
+        "fuel_vehicle",
+        "software_subscription",
+        "security_subscription",
+        "general_overhead",
+    ] | None = None
+    assignment_code: str | None = Field(default=None, max_length=80)
+    assignment_kind: Literal[
+        "construction_project",
+        "construction_or_dropoff_site",
+        "location",
+        "cost_object",
+        "vehicle",
+        "subscription",
+        "department",
+    ] | None = None
+    net_amount: Decimal | None = None
+    tax_amount: Decimal | None = None
+    gross_amount: Decimal | None = None
+    currency: str | None = Field(default=None, pattern="^[A-Z]{3}$", max_length=3)
+    due_date: date | None = None
+    discount_due_date: date | None = None
+    discount_base: Decimal | None = None
+    discount_amount: Decimal | None = None
+    discounted_payable_amount: Decimal | None = None
+    item_summary: str | None = Field(default=None, max_length=500)
+
+    def normalized(self) -> dict[str, Any]:
+        values = self.model_dump(exclude_unset=True)
+        for key, value in list(values.items()):
+            if isinstance(value, str):
+                values[key] = value.strip() or None
+        return values
 
 
 def _normalize_tenant_id(tenant_id: str) -> str:
@@ -408,6 +454,28 @@ def prepare_review(document_id: UUID, request: Request) -> dict[str, Any]:
     _ensure_not_processing(document)
     actor = _actor(request)
     document = prepare_document_review(document_id, actor=actor)
+    if document is None:
+        raise HTTPException(status_code=404, detail="document with extraction not found")
+    return {"document": document}
+
+
+@router.patch("/{document_id}/extraction")
+def patch_document_extraction(
+    document_id: UUID,
+    payload: ExtractionUpdate,
+    request: Request,
+) -> dict[str, Any]:
+    document = require_document_access(request, document_id)
+    _ensure_not_processing(document)
+    actor = _actor(request)
+    try:
+        document = update_document_extraction(
+            document_id=document_id,
+            values=payload.normalized(),
+            actor=actor,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
     return {"document": document}

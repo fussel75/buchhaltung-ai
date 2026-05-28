@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import TestCase
@@ -822,6 +822,90 @@ class BookingSuggestionTests(TestCase):
         self.assertTrue(
             any(statement == "delete from document_payment_decisions where document_id = %s" for statement, _ in cursor.statements)
         )
+
+    def test_update_extraction_resets_review_artifacts(self):
+        document_id = uuid4()
+        tenant_id = "demo-mandant"
+        now = datetime.now(UTC)
+        document = {
+            "id": str(document_id),
+            "tenant_id": tenant_id,
+            "status": "review_ready",
+            "extraction": {
+                "id": str(uuid4()),
+                "supplier_name": "Alt GmbH",
+                "invoice_number": "A-1",
+                "invoice_date": "2026-05-21",
+                "service_period": None,
+                "net_amount": "7.37",
+                "tax_amount": "1.40",
+                "gross_amount": "8.77",
+                "currency": "EUR",
+                "confidence": 0.88,
+                "warnings": ["Nicht sicher erkannt: Zahlungsdaten."],
+                "raw_result": {
+                    "customer_number": "111",
+                    "document_type": "incoming_invoice",
+                    "payment_terms": [{"type": "cash_discount", "amount": "8.51"}],
+                    "project_code": "AltBV",
+                },
+            },
+        }
+        updated_document = {**document, "status": "extracted"}
+        extraction_row = {
+            "id": uuid4(),
+            "document_id": document_id,
+            "tenant_id": tenant_id,
+            "supplier_name": "Theo Foerch GmbH & Co. KG",
+            "invoice_number": "3161691971",
+            "invoice_date": "2026-05-21",
+            "service_period": None,
+            "net_amount": Decimal("7.37"),
+            "tax_amount": Decimal("1.40"),
+            "gross_amount": Decimal("8.77"),
+            "currency": "EUR",
+            "confidence": Decimal("0.88"),
+            "warnings": [],
+            "raw_result": {"customer_number": "425590", "document_type": "incoming_invoice"},
+            "created_at": now,
+            "updated_at": now,
+        }
+        cursor = RecordingCursor(fetchone_result=extraction_row)
+
+        with (
+            patch.object(database_service, "get_document", side_effect=[document, updated_document]),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "Jsonb", side_effect=lambda value: value),
+            patch.object(database_service, "insert_audit_event") as audit_event,
+        ):
+            result = database_service.update_document_extraction(
+                document_id=document_id,
+                values={
+                    "supplier_name": "Theo Foerch GmbH & Co. KG",
+                    "customer_number": "425590",
+                    "assignment_code": None,
+                    "due_date": date(2026, 6, 20),
+                    "discount_due_date": date(2026, 5, 31),
+                    "discount_amount": Decimal("0.26"),
+                },
+                actor="admin@example.com",
+            )
+
+        self.assertEqual(result["status"], "extracted")
+        update_params = next(params for statement, params in cursor.statements if "update document_extractions" in statement)
+        raw_result = update_params[10]
+        self.assertEqual(update_params[8], Decimal("1.00"))
+        self.assertEqual(update_params[9], [])
+        self.assertEqual(raw_result["due_date"], "2026-06-20")
+        self.assertEqual(raw_result["discount_due_date"], "2026-05-31")
+        self.assertEqual(raw_result["discount_amount"], "0.26")
+        self.assertNotIn("payment_terms", raw_result)
+        self.assertNotIn("project_code", raw_result)
+        self.assertIsNone(raw_result["assignment_code"])
+        self.assertTrue(any(statement == "delete from document_booking_suggestions where document_id = %s" for statement, _ in cursor.statements))
+        self.assertTrue(any(statement == "delete from document_payment_decisions where document_id = %s" for statement, _ in cursor.statements))
+        audit_event.assert_called_once()
+        self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.extraction_updated")
 
     def test_bulk_extraction_validation_blocks_non_pending_documents(self):
         document_id = uuid4()

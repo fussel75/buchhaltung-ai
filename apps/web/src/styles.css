@@ -1390,6 +1390,47 @@ code {
   background: var(--warning-soft);
 }
 
+.extraction-edit-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.inline-note {
+  margin: 0;
+  border: 1px solid #f3d0b6;
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: #7a3a22;
+  background: #fff2ea;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.extraction-edit-grid {
+  border-top: 0;
+  padding-top: 0;
+  gap: 10px;
+}
+
+.extraction-edit-grid > .form-field {
+  grid-column: span 3;
+}
+
+.extraction-edit-grid > .form-field:nth-child(1),
+.extraction-edit-grid > .form-field:nth-child(18) {
+  grid-column: span 6;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.form-actions button {
+  min-height: 34px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
