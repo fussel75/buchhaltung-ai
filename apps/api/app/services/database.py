@@ -1148,6 +1148,27 @@ class ReviewApprovalError(ValueError):
         self.errors = errors
 
 
+_COST_CATEGORY_LABELS = {
+    "material": "Material",
+    "subcontractor": "Fremdleistung",
+    "fuel_vehicle": "Fahrzeug/Tanken",
+    "software_subscription": "Software/Abo",
+    "security_subscription": "Überwachung/Abo",
+    "general_overhead": "Sonstige Gemeinkosten",
+    "payment_discount": "Skonto/Zahlungsdifferenz",
+}
+
+
+def _cost_category_label(value: str | None) -> str:
+    if not value:
+        return "-"
+    return _COST_CATEGORY_LABELS.get(value, value)
+
+
+def _accounting_rule_context(supplier_name: str | None, cost_category: str | None) -> str:
+    return f"Kostenart {_cost_category_label(cost_category)} / Lieferant {supplier_name or '-'}"
+
+
 def validate_document_review(document: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     extraction = document.get("extraction") or {}
@@ -1204,9 +1225,17 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
             cost_category=suggestion.get("cost_category"),
         )
         if not accounting_rule:
-            errors.append(f"Zeile {line_no}: Kontierungsregel fehlt.")
+            context = _accounting_rule_context(supplier_name, suggestion.get("cost_category"))
+            errors.append(
+                f"Zeile {line_no}: Kontierungsregel fehlt für {context}. "
+                "Bitte unter Stammdaten -> Kontierungsregeln anlegen."
+            )
         elif not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account"):
-            errors.append(f"Zeile {line_no}: Kontierungsregel ist unvollständig.")
+            context = _accounting_rule_context(supplier_name, suggestion.get("cost_category"))
+            errors.append(
+                f"Zeile {line_no}: Kontierungsregel ist unvollständig für {context}. "
+                "Aufwandskonto oder Gegenkonto fehlt."
+            )
 
     if suggestions and (len(suggestions) > 1 or raw_result.get("allocation_lines")):
         errors.extend(_validate_split_totals(suggestions, extraction))
@@ -1225,7 +1254,11 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
             cost_category=first_suggestion.get("cost_category"),
         )
         if not accounting_rule:
-            errors.append("Zahlungsdifferenz/Skonto: Kontierungsregel fehlt.")
+            context = _accounting_rule_context(supplier_name, first_suggestion.get("cost_category"))
+            errors.append(
+                f"Zahlungsdifferenz/Skonto: Kontierungsregel fehlt für {context}. "
+                "Bitte unter Stammdaten -> Kontierungsregeln anlegen."
+            )
         elif not accounting_rule.get("discount_account"):
             errors.append("Zahlungsdifferenz/Skonto: Skontokonto fehlt in der Kontierungsregel.")
 

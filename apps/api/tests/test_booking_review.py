@@ -1162,7 +1162,7 @@ class BookingSuggestionTests(TestCase):
             "tenant_id": "demo-mandant",
             "original_filename": "RE1574023.pdf",
             "extraction": {
-                "supplier_name": "Luechau Baustoffe GmbH",
+                "supplier_name": "Lüchau Baustoffe GmbH",
                 "invoice_number": "RE1574023",
                 "invoice_date": "2026-05-07",
                 "net_amount": "278.92",
@@ -1196,7 +1196,11 @@ class BookingSuggestionTests(TestCase):
         with patch.object(database_service, "list_accounting_rules", return_value=[]):
             errors = validate_document_review(document)
 
-        self.assertIn("Zeile 1: Kontierungsregel fehlt.", errors)
+        self.assertIn(
+            "Zeile 1: Kontierungsregel fehlt für Kostenart Material / Lieferant Lüchau Baustoffe GmbH. "
+            "Bitte unter Stammdaten -> Kontierungsregeln anlegen.",
+            errors,
+        )
         self.assertIn("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewählt werden.", errors)
 
     def test_review_validation_accepts_complete_review(self):
