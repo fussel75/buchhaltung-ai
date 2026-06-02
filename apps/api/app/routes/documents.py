@@ -355,16 +355,23 @@ def export_booking_rows(
                     "errors": errors,
                 }
             )
+    rows = build_booking_export_rows(documents)
+    if format == "json":
+        if not rows:
+            raise HTTPException(status_code=404, detail="no approved booking rows found for export")
+        return {
+            "rows": rows,
+            "invalid_documents": invalid_documents,
+            "is_blocked": bool(invalid_documents),
+        }
+
     if invalid_documents:
         raise HTTPException(
             status_code=409,
             detail={"message": "Buchungsentwurf blockiert", "documents": invalid_documents},
         )
-    rows = build_booking_export_rows(documents)
     if not rows:
         raise HTTPException(status_code=404, detail="no approved booking rows found for export")
-    if format == "json":
-        return {"rows": rows}
 
     buffer = StringIO()
     writer = DictWriter(buffer, fieldnames=list(rows[0].keys()), delimiter=";", lineterminator="\n")
@@ -376,18 +383,29 @@ def export_booking_rows(
 
 
 def _csv_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{key: _csv_safe_value(value) for key, value in row.items()} for row in rows]
+    return [{key: _csv_safe_value(key, value) for key, value in row.items()} for row in rows]
 
 
-def _csv_safe_value(value: Any) -> Any:
+def _csv_safe_value(fieldname: str, value: Any) -> Any:
     if not isinstance(value, str) or value == "":
         return value
     stripped = value.lstrip()
-    if stripped and stripped[0] in ("=", "+", "@"):
+    dangerous_start = ("=", "+", "@")
+    if _is_csv_text_field(fieldname):
+        dangerous_start = ("=", "+", "-", "@")
+    if stripped and stripped[0] in dangerous_start:
         return f"'{value}"
     if value[0] in ("\t", "\r", "\n") or ord(value[0]) < 32:
         return f"'{value}"
     return value
+
+
+def _is_csv_text_field(fieldname: str) -> bool:
+    numeric_suffixes = ("_amount", "_percent", "_rate", "_delta")
+    date_fields = {"invoice_date", "payment_due_date"}
+    if fieldname in date_fields:
+        return False
+    return not fieldname.endswith(numeric_suffixes)
 
 
 @router.post("/bulk/extract", status_code=status.HTTP_202_ACCEPTED)

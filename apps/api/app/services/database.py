@@ -1603,23 +1603,23 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                 supplier_name=supplier_name,
                 cost_category=suggestion.get("cost_category"),
             )
-            rows.append(
-                {
-                    **common,
-                    "row_type": "cost",
-                    "line_no": suggestion.get("line_no"),
-                    "booking_type": suggestion.get("booking_type"),
-                    "cost_category": suggestion.get("cost_category"),
-                    "assignment_kind": suggestion.get("assignment_kind"),
-                    "assignment_code": suggestion.get("assignment_code"),
-                    "description": suggestion.get("description"),
-                    "net_amount": _money_string(suggestion.get("net_amount")),
-                    "tax_amount": _money_string(suggestion.get("tax_amount")),
-                    "gross_amount": _money_string(suggestion.get("gross_amount")),
-                    "payable_delta": None,
-                    **_accounting_export_fields(accounting_rule),
-                }
-            )
+            row = {
+                **common,
+                "row_type": "cost",
+                "line_no": suggestion.get("line_no"),
+                "booking_type": suggestion.get("booking_type"),
+                "cost_category": suggestion.get("cost_category"),
+                "assignment_kind": suggestion.get("assignment_kind"),
+                "assignment_code": suggestion.get("assignment_code"),
+                "description": suggestion.get("description"),
+                "net_amount": _money_string(suggestion.get("net_amount")),
+                "tax_amount": _money_string(suggestion.get("tax_amount")),
+                "gross_amount": _money_string(suggestion.get("gross_amount")),
+                "payable_delta": None,
+                **_accounting_export_fields(accounting_rule),
+            }
+            row["export_warnings"] = _booking_export_warnings(row)
+            rows.append(row)
 
         rows.extend(_payment_adjustment_export_rows(document, common, extraction, payment_decision, supplier_name))
     return rows
@@ -1652,24 +1652,45 @@ def _payment_adjustment_export_rows(
             supplier_name=supplier_name,
             cost_category=cost_category,
         )
-        rows.append(
-            {
-                **common,
-                "row_type": "payment_adjustment",
-                "line_no": suggestion.get("line_no") if suggestion else None,
-                "booking_type": suggestion.get("booking_type") if suggestion else raw_result.get("document_type") or "incoming_invoice",
-                "cost_category": cost_category or "payment_discount",
-                "assignment_kind": suggestion.get("assignment_kind") if suggestion else None,
-                "assignment_code": suggestion.get("assignment_code") if suggestion else None,
-                "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
-                "net_amount": None,
-                "tax_amount": None,
-                "gross_amount": _money_string(allocated_delta),
-                "payable_delta": _money_string(allocated_delta),
-                **_accounting_export_fields(accounting_rule, payment_adjustment=True),
-            }
-        )
+        row = {
+            **common,
+            "row_type": "payment_adjustment",
+            "line_no": suggestion.get("line_no") if suggestion else None,
+            "booking_type": suggestion.get("booking_type") if suggestion else raw_result.get("document_type") or "incoming_invoice",
+            "cost_category": cost_category or "payment_discount",
+            "assignment_kind": suggestion.get("assignment_kind") if suggestion else None,
+            "assignment_code": suggestion.get("assignment_code") if suggestion else None,
+            "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
+            "net_amount": None,
+            "tax_amount": None,
+            "gross_amount": _money_string(allocated_delta),
+            "payable_delta": _money_string(allocated_delta),
+            **_accounting_export_fields(accounting_rule, payment_adjustment=True),
+        }
+        row["export_warnings"] = _booking_export_warnings(row)
+        rows.append(row)
     return rows
+
+
+def _booking_export_warnings(row: dict[str, Any]) -> str:
+    warnings = []
+    if row.get("payment_decision_source") == "Standard":
+        warnings.append("Zahlung nicht manuell gewählt")
+    if not row.get("assignment_code"):
+        warnings.append("Zuordnung fehlt")
+    if not row.get("accounting_rule"):
+        warnings.append("Kontierungsregel fehlt")
+    if row.get("row_type") == "payment_adjustment":
+        if not row.get("discount_account"):
+            warnings.append("Skontokonto fehlt")
+    else:
+        if not row.get("debit_account"):
+            warnings.append("Aufwandskonto fehlt")
+        if not row.get("credit_account"):
+            warnings.append("Gegenkonto fehlt")
+        if not row.get("tax_key") and not row.get("tax_rate"):
+            warnings.append("Steuerangabe prüfen")
+    return "; ".join(warnings)
 
 
 def _allocate_payment_delta(

@@ -1094,8 +1094,17 @@ function UploadApp() {
             : formatApiError(result.detail, `Buchungsvorschau fehlgeschlagen: ${response.status}`),
         );
       }
-      setBookingPreview({ month: exportMonth, rows: result.rows || [] });
-      setNotice(`Buchungsvorschau geladen: ${result.rows?.length || 0} Zeilen`);
+      setBookingPreview({
+        month: exportMonth,
+        rows: result.rows || [],
+        invalidDocuments: result.invalid_documents || [],
+        isBlocked: Boolean(result.is_blocked),
+      });
+      setNotice(
+        result.is_blocked
+          ? `Buchungsvorschau geladen: ${result.rows?.length || 0} Zeilen, CSV noch blockiert`
+          : `Buchungsvorschau geladen: ${result.rows?.length || 0} Zeilen`,
+      );
     } catch (previewError) {
       setBookingPreview(null);
       setError(previewError.message);
@@ -1301,6 +1310,8 @@ function UploadApp() {
           <BookingExportPreview
             month={bookingPreview.month}
             rows={bookingPreview.rows}
+            invalidDocuments={bookingPreview.invalidDocuments}
+            isBlocked={bookingPreview.isBlocked}
             onClose={() => setBookingPreview(null)}
           />
         ) : null}
@@ -3728,7 +3739,8 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
   );
 }
 
-function BookingExportPreview({ month, rows, onClose }) {
+function BookingExportPreview({ month, rows, invalidDocuments = [], isBlocked = false, onClose }) {
+  const documents = useMemo(() => groupBookingPreviewRows(rows), [rows]);
   const totals = useMemo(
     () => rows.reduce(
       (sum, row) => ({
@@ -3741,6 +3753,7 @@ function BookingExportPreview({ month, rows, onClose }) {
     ),
     [rows],
   );
+  const warningCount = rows.reduce((sum, row) => sum + exportWarningList(row).length, 0);
 
   return (
     <section className="booking-preview">
@@ -3748,7 +3761,7 @@ function BookingExportPreview({ month, rows, onClose }) {
         <div>
           <p className="eyebrow">Exportvorschau</p>
           <h3>Buchungsentwurf {month}</h3>
-          <span>{rows.length} Zeilen vor CSV-Erstellung</span>
+          <span>{documents.length} Belege, {rows.length} Zeilen vor CSV-Erstellung</span>
         </div>
         <button className="secondary-button" type="button" onClick={onClose}>Schließen</button>
       </div>
@@ -3758,84 +3771,133 @@ function BookingExportPreview({ month, rows, onClose }) {
         <PreviewTotal label="USt" value={totals.tax} />
         <PreviewTotal label="Brutto" value={totals.gross} />
         <PreviewTotal label="Zahlungsdifferenz" value={totals.delta} />
+        <PreviewTotal label="Hinweise" value={warningCount} unit="" />
       </div>
 
-      <div className="booking-preview-table-wrap">
-        <table className="booking-preview-table">
-          <thead>
-            <tr>
-              <th>Typ</th>
-              <th>Zeile</th>
-              <th>Beleg</th>
-              <th>Datei</th>
-              <th>Datum</th>
-              <th>Lieferant</th>
-              <th>Zuordnung</th>
-              <th>Kostenart</th>
-              <th>Aufwand</th>
-              <th>Gegenkonto</th>
-              <th>Skontokonto</th>
-              <th>Regel</th>
-              <th>Steuer</th>
-              <th>Zahlung</th>
-              <th>Zahlbetrag</th>
-              <th>Skonto-Basis</th>
-              <th>Skonto %</th>
-              <th>Skonto</th>
-              <th>Differenz</th>
-              <th>Netto</th>
-              <th>USt</th>
-              <th>Brutto</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.document_id}-${row.line_no || "delta"}-${index}`}>
-                <td><span className={`status ${row.row_type === "payment_adjustment" ? "blue" : "gray"}`}>{formatExportRowType(row.row_type)}</span></td>
-                <td>{row.line_no || "-"}</td>
-                <td>
-                  <strong>{row.invoice_number || "-"}</strong>
-                  <span>{row.description || row.payment_label || "-"}</span>
-                </td>
-                <td>
-                  <strong>{safeVisibleFilename(row.normalized_filename || row.original_filename)}</strong>
-                  <span>{row.original_filename || "-"}</span>
-                </td>
-                <td>{formatDate(row.invoice_date)}</td>
-                <td>{row.supplier_name || "-"}</td>
-                <td>{[formatAssignmentKind(row.assignment_kind), row.assignment_code].filter(Boolean).join(" ") || "-"}</td>
-                <td>{formatCostCategory(row.cost_category)}</td>
-                <td>{row.debit_account || "-"}</td>
-                <td>{row.credit_account || "-"}</td>
-                <td>{row.discount_account || "-"}</td>
-                <td>{row.accounting_rule || "-"}</td>
-                <td>{[row.tax_key, row.tax_rate ? `${row.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"}</td>
-                <td>
-                  <strong>{paymentTypeLabel(row.payment_type)}</strong>
-                  <span>{row.payment_decision_source || "-"}</span>
-                </td>
-                <td className="numeric">{formatMoney(row.payment_amount)}</td>
-                <td className="numeric">{formatMoney(row.discount_base)}</td>
-                <td className="numeric">{row.discount_percent || "-"}</td>
-                <td className="numeric">{formatMoney(row.discount_amount)}</td>
-                <td className="numeric">{formatMoney(row.payable_delta)}</td>
-                <td className="numeric">{formatMoney(row.net_amount)}</td>
-                <td className="numeric">{formatMoney(row.tax_amount)}</td>
-                <td className="numeric">{formatMoney(row.gross_amount)}</td>
-              </tr>
+      {warningCount ? (
+        <div className="booking-preview-warning">
+          {warningCount} Hinweise vor dem CSV-Export. Bitte Konten, Zuordnung und Zahlungsentscheidung prüfen.
+        </div>
+      ) : null}
+
+      {isBlocked && invalidDocuments.length ? (
+        <div className="booking-preview-blockers">
+          <strong>CSV-Download ist noch blockiert</strong>
+          <ul>
+            {invalidDocuments.map((document) => (
+              <li key={document.document_id || document.filename}>
+                <span>{document.filename || document.document_id}</span>
+                <small>{(document.errors || []).join(" ")}</small>
+              </li>
             ))}
-          </tbody>
-        </table>
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="booking-preview-list">
+        {documents.map((document) => (
+          <BookingPreviewDocument key={document.key} document={document} />
+        ))}
       </div>
     </section>
   );
 }
 
-function PreviewTotal({ label, value }) {
+function BookingPreviewDocument({ document }) {
+  const totals = document.rows.reduce(
+    (sum, row) => ({
+      gross: sum.gross + numberOrZero(row.gross_amount),
+      delta: sum.delta + numberOrZero(row.payable_delta),
+    }),
+    { gross: 0, delta: 0 },
+  );
+  const warnings = uniqueList(document.rows.flatMap(exportWarningList));
+
+  return (
+    <article className="booking-preview-document">
+      <div className="booking-preview-document-head">
+        <div>
+          <h4>{document.invoiceNumber || "Beleg ohne Nummer"}</h4>
+          <p>{document.supplierName || "-"}</p>
+          <span>{safeVisibleFilename(document.normalizedFilename || document.originalFilename)}</span>
+        </div>
+        <div className="booking-preview-document-meta">
+          <strong>{formatMoney(totals.gross)}</strong>
+          <span>{formatDate(document.invoiceDate)}</span>
+          {totals.delta ? <small>Differenz {formatMoney(totals.delta)}</small> : null}
+        </div>
+      </div>
+
+      {warnings.length ? (
+        <div className="booking-preview-document-warnings">
+          {warnings.map((warning) => <span key={warning}>{warning}</span>)}
+        </div>
+      ) : null}
+
+      <div className="booking-preview-lines">
+        {document.rows.map((row, index) => (
+          <BookingPreviewLine key={`${row.row_type}-${row.line_no || "delta"}-${index}`} row={row} />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function BookingPreviewLine({ row }) {
+  const warnings = exportWarningList(row);
+
+  return (
+    <div className={warnings.length ? "booking-preview-line has-warning" : "booking-preview-line"}>
+      <div className="booking-preview-line-main">
+        <span className={`status ${row.row_type === "payment_adjustment" ? "blue" : "gray"}`}>{formatExportRowType(row.row_type)}</span>
+        <div>
+          <strong>{row.description || row.payment_label || "-"}</strong>
+          <span>{row.line_no ? `Zeile ${row.line_no}` : "Zahlungszeile"}</span>
+        </div>
+      </div>
+      <div className="booking-preview-line-fields">
+        <PreviewField label="Zuordnung" value={[formatAssignmentKind(row.assignment_kind), row.assignment_code].filter(Boolean).join(" ") || "-"} />
+        <PreviewField label="Kostenart" value={formatCostCategory(row.cost_category)} />
+        <PreviewField label="Konten" value={formatAccountPair(row)} />
+        <PreviewField label="Steuer" value={[row.tax_key, row.tax_rate ? `${row.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"} />
+        <PreviewField label="Zahlung" value={`${paymentTypeLabel(row.payment_type)} (${row.payment_decision_source || "-"})`} />
+        <PreviewField label="Netto" value={formatMoney(row.net_amount)} numeric />
+        <PreviewField label="USt" value={formatMoney(row.tax_amount)} numeric />
+        <PreviewField label="Brutto" value={formatMoney(row.gross_amount)} numeric />
+      </div>
+      <details className="booking-preview-details">
+        <summary>CSV-Details</summary>
+        <div className="booking-preview-detail-grid">
+          <PreviewField label="Kontierungsregel" value={row.accounting_rule || "-"} />
+          <PreviewField label="Aufwandskonto" value={row.debit_account || "-"} />
+          <PreviewField label="Gegenkonto" value={row.credit_account || "-"} />
+          <PreviewField label="Skontokonto" value={row.discount_account || "-"} />
+          <PreviewField label="Zahlbetrag" value={formatMoney(row.payment_amount)} numeric />
+          <PreviewField label="Skonto-Basis" value={formatMoney(row.discount_base)} numeric />
+          <PreviewField label="Skonto %" value={row.discount_percent || "-"} numeric />
+          <PreviewField label="Skonto" value={formatMoney(row.discount_amount)} numeric />
+          <PreviewField label="Differenz" value={formatMoney(row.payable_delta)} numeric />
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function PreviewField({ label, value, numeric = false }) {
+  return (
+    <div className={numeric ? "preview-field numeric" : "preview-field"}>
+      <span>{label}</span>
+      <strong>{value || "-"}</strong>
+    </div>
+  );
+}
+
+function PreviewTotal({ label, value, unit = "EUR" }) {
+  const displayValue = unit === "EUR" ? formatMoney(value.toFixed(2)) : value;
   return (
     <div>
       <span>{label}</span>
-      <strong>{formatMoney(value.toFixed(2))}</strong>
+      <strong>{displayValue}</strong>
     </div>
   );
 }
@@ -4086,6 +4148,43 @@ function formatExportRowType(value) {
     payment_adjustment: "Skonto",
   };
   return labels[value] ?? value;
+}
+
+function groupBookingPreviewRows(rows) {
+  const grouped = new Map();
+  rows.forEach((row, index) => {
+    const key = row.document_id || `row-${index}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        invoiceNumber: row.invoice_number,
+        invoiceDate: row.invoice_date,
+        supplierName: row.supplier_name,
+        originalFilename: row.original_filename,
+        normalizedFilename: row.normalized_filename,
+        rows: [],
+      });
+    }
+    grouped.get(key).rows.push(row);
+  });
+  return Array.from(grouped.values());
+}
+
+function exportWarningList(row) {
+  if (!row?.export_warnings) return [];
+  return String(row.export_warnings)
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function uniqueList(values) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function formatAccountPair(row) {
+  if (row.row_type === "payment_adjustment") return row.discount_account || "-";
+  return [row.debit_account, row.credit_account].filter(Boolean).join(" / ") || "-";
 }
 
 function formatAssignment(rawResult, tenantProfile = assignmentProfileFromRaw(rawResult)) {

@@ -286,6 +286,7 @@ class BookingSuggestionTests(TestCase):
                     "description": "\tSUMME(A1:A2)",
                     "gross_amount": "-10.00",
                     "invoice_number": "RE-1",
+                    "assignment_code": "-Neula51",
                 }
             ]
         )
@@ -294,6 +295,53 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[0]["description"], "'\tSUMME(A1:A2)")
         self.assertEqual(rows[0]["gross_amount"], "-10.00")
         self.assertEqual(rows[0]["invoice_number"], "RE-1")
+        self.assertEqual(rows[0]["assignment_code"], "'-Neula51")
+
+    def test_booking_export_json_preview_returns_blockers_without_csv_download(self):
+        request = SimpleNamespace(state=SimpleNamespace())
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "normalized_filename": "ERg rechnung.pdf",
+            "status": "review_approved",
+            "extraction": {
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "R-1",
+                "invoice_date": "2026-05-05",
+                "gross_amount": "119.00",
+                "currency": "EUR",
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Material",
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "119.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "119.00"},
+        }
+
+        with (
+            patch.object(documents_route, "require_tenant_access"),
+            patch.object(documents_route, "list_documents_for_month", return_value=[document]),
+            patch.object(documents_route, "validate_document_review", return_value=["Zeile 1: Kontierungsregel fehlt."]),
+            patch.object(database_service, "list_accounting_rules", return_value=[]),
+        ):
+            preview = documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="json")
+            with self.assertRaises(HTTPException) as csv_error:
+                documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="csv")
+
+        self.assertTrue(preview["is_blocked"])
+        self.assertEqual(preview["invalid_documents"][0]["errors"], ["Zeile 1: Kontierungsregel fehlt."])
+        self.assertEqual(preview["rows"][0]["export_warnings"], "Zuordnung fehlt; Kontierungsregel fehlt; Aufwandskonto fehlt; Gegenkonto fehlt; Steuerangabe prüfen")
+        self.assertEqual(csv_error.exception.status_code, 409)
 
     def test_manual_normalized_filename_keeps_document_suffix(self):
         document = {

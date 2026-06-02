@@ -651,52 +651,189 @@ button:disabled {
   background: var(--surface-subtle);
 }
 
-.booking-preview-table-wrap {
-  max-width: 100%;
-  overflow-x: auto;
+.booking-preview-warning {
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.booking-preview-blockers {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--danger);
+  background: #fff1f2;
+}
+
+.booking-preview-blockers ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.booking-preview-blockers li {
+  display: grid;
+  gap: 2px;
+}
+
+.booking-preview-blockers small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.booking-preview-list {
+  display: grid;
+  gap: 12px;
+}
+
+.booking-preview-document {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--surface-subtle);
+  min-width: 0;
+}
+
+.booking-preview-document-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.booking-preview-document-head h4,
+.booking-preview-document-head p {
+  margin: 0;
+}
+
+.booking-preview-document-head span,
+.booking-preview-document-meta span,
+.booking-preview-document-meta small {
+  color: var(--muted);
+}
+
+.booking-preview-document-head > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.booking-preview-document-head > div:first-child span {
+  overflow-wrap: anywhere;
+}
+
+.booking-preview-document-meta {
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+  white-space: nowrap;
+}
+
+.booking-preview-document-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.booking-preview-document-warnings span {
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--warning);
+  background: var(--warning-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.booking-preview-lines {
+  display: grid;
+  gap: 8px;
+}
+
+.booking-preview-line {
+  display: grid;
+  gap: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+  min-width: 0;
 }
 
-.booking-preview-table {
-  width: 100%;
-  min-width: 1760px;
-  border-collapse: collapse;
-  font-size: 0.84rem;
+.booking-preview-line.has-warning {
+  border-color: #fed7aa;
 }
 
-.booking-preview-table th,
-.booking-preview-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 9px 10px;
-  text-align: left;
-  vertical-align: top;
+.booking-preview-line-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
 }
 
-.booking-preview-table th {
-  background: var(--surface-muted);
+.booking-preview-line-main div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.booking-preview-line-main strong {
+  overflow-wrap: anywhere;
+}
+
+.booking-preview-line-main span:not(.status) {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.booking-preview-line-fields,
+.booking-preview-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.preview-field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.preview-field span {
   color: var(--muted);
   font-size: 0.72rem;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
-.booking-preview-table tbody tr:last-child td {
-  border-bottom: 0;
+.preview-field strong {
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
 }
 
-.booking-preview-table td strong,
-.booking-preview-table td span {
-  display: block;
-}
-
-.booking-preview-table td span {
-  color: var(--muted);
-  margin-top: 3px;
-}
-
-.booking-preview-table .numeric {
-  text-align: right;
+.preview-field.numeric strong {
   white-space: nowrap;
+}
+
+.booking-preview-details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.booking-preview-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 0.82rem;
 }
 
 .job-history {
