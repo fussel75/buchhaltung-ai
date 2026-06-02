@@ -2565,6 +2565,16 @@ function MasterdataAdmin({
   });
   const [message, setMessage] = useState("");
   const accountingSectionRef = useRef(null);
+  const savedAccountingFramework = accountingFramework(tenantProfile.accounting_framework);
+  const profileAccountingFramework = accountingFramework(profileForm.accounting_framework);
+  const hasUnsavedAccountingFramework = profileAccountingFramework !== savedAccountingFramework;
+  const activeAccountingFramework = savedAccountingFramework;
+  const debitSuggestions = accountSuggestions(activeAccountingFramework, "debit", accountingForm.cost_category);
+  const creditSuggestions = accountSuggestions(activeAccountingFramework, "credit", accountingForm.cost_category);
+  const discountSuggestions = accountSuggestions(activeAccountingFramework, "discount", accountingForm.cost_category);
+  const editDebitSuggestions = accountSuggestions(activeAccountingFramework, "debit", accountingEditForm?.cost_category);
+  const editCreditSuggestions = accountSuggestions(activeAccountingFramework, "credit", accountingEditForm?.cost_category);
+  const editDiscountSuggestions = accountSuggestions(activeAccountingFramework, "discount", accountingEditForm?.cost_category);
 
   useEffect(() => {
     setProfileForm(tenantProfile);
@@ -2931,13 +2941,27 @@ function MasterdataAdmin({
                 value={profileForm.industry || "general"}
                 onChange={(event) => {
                   const nextTemplate = defaultTenantProfile(event.target.value);
-                  setProfileForm({ ...profileForm, ...nextTemplate, display_name: profileForm.display_name || tenantId });
+                  setProfileForm({
+                    ...profileForm,
+                    ...nextTemplate,
+                    display_name: profileForm.display_name || tenantId,
+                    accounting_framework: profileForm.accounting_framework || nextTemplate.accounting_framework,
+                  });
                 }}
               >
                 <option value="construction">Baubranche</option>
                 <option value="fitness_studio">Sportstudio</option>
                 <option value="container_transport">Container/Transport</option>
                 <option value="general">Allgemein</option>
+              </select>
+            </FormField>
+            <FormField label="Kontenrahmen">
+              <select
+                value={profileAccountingFramework}
+                onChange={(event) => setProfileForm({ ...profileForm, accounting_framework: event.target.value })}
+              >
+                <option value="SKR03">SKR03</option>
+                <option value="SKR04">SKR04</option>
               </select>
             </FormField>
             <FormField label="Begriff einzeln">
@@ -3248,10 +3272,10 @@ function MasterdataAdmin({
               </select>
             </FormField>
             <FormField label="Aufwandskonto">
-              <input placeholder="z.B. 3400" value={accountingForm.debit_account} onChange={(event) => setAccountingForm({ ...accountingForm, debit_account: event.target.value })} required />
+              <input list="accounting-debit-options" placeholder="z.B. 3400" value={accountingForm.debit_account} onChange={(event) => setAccountingForm({ ...accountingForm, debit_account: event.target.value })} required />
             </FormField>
             <FormField label="Gegenkonto">
-              <input placeholder="z.B. Kreditor/Sammelkonto" value={accountingForm.credit_account} onChange={(event) => setAccountingForm({ ...accountingForm, credit_account: event.target.value })} required />
+              <input list="accounting-credit-options" placeholder="z.B. Kreditor/Sammelkonto" value={accountingForm.credit_account} onChange={(event) => setAccountingForm({ ...accountingForm, credit_account: event.target.value })} required />
             </FormField>
             <FormField label="Steuerschlüssel">
               <input placeholder="optional" value={accountingForm.tax_key} onChange={(event) => setAccountingForm({ ...accountingForm, tax_key: event.target.value })} />
@@ -3260,10 +3284,20 @@ function MasterdataAdmin({
               <input placeholder="19.00" value={accountingForm.tax_rate} onChange={(event) => setAccountingForm({ ...accountingForm, tax_rate: event.target.value })} />
             </FormField>
             <FormField label="Skontokonto">
-              <input placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
+              <input list="accounting-discount-options" placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
             </FormField>
+            <button className="secondary-button" type="button" onClick={() => setAccountingForm((current) => applyAccountingSuggestions(current, activeAccountingFramework))}>
+              Leere Konten vorschlagen
+            </button>
             <button type="submit">Kontierungsregel anlegen</button>
           </form>
+          <AccountSuggestionDatalist id="accounting-debit-options" suggestions={debitSuggestions} />
+          <AccountSuggestionDatalist id="accounting-credit-options" suggestions={creditSuggestions} />
+          <AccountSuggestionDatalist id="accounting-discount-options" suggestions={discountSuggestions} />
+          <p className="form-hint">
+            Kontenvorschläge aus {activeAccountingFramework}. Bitte fachlich prüfen; gespeicherte Regeln bleiben frei bearbeitbar.
+            {hasUnsavedAccountingFramework ? " Geänderten Kontenrahmen bitte erst im Mandantenprofil speichern." : ""}
+          </p>
           <div className="data-table accounting-table">
             <div className="data-row data-head">
               <span>Name</span>
@@ -3301,12 +3335,14 @@ function MasterdataAdmin({
                       />
                       <input
                         aria-label="Aufwandskonto"
+                        list="accounting-edit-debit-options"
                         value={accountingEditForm.debit_account}
                         onChange={(event) => setAccountingEditForm({ ...accountingEditForm, debit_account: event.target.value })}
                         required
                       />
                       <input
                         aria-label="Gegenkonto"
+                        list="accounting-edit-credit-options"
                         value={accountingEditForm.credit_account}
                         onChange={(event) => setAccountingEditForm({ ...accountingEditForm, credit_account: event.target.value })}
                         required
@@ -3327,6 +3363,7 @@ function MasterdataAdmin({
                       </div>
                       <input
                         aria-label="Skontokonto"
+                        list="accounting-edit-discount-options"
                         placeholder="optional"
                         value={accountingEditForm.discount_account}
                         onChange={(event) => setAccountingEditForm({ ...accountingEditForm, discount_account: event.target.value })}
@@ -3340,6 +3377,9 @@ function MasterdataAdmin({
                         <span>{accountingEditForm.is_active ? "aktiv" : "inaktiv"}</span>
                       </label>
                       <div className="row-actions">
+                        <button className="secondary-button" type="button" onClick={() => setAccountingEditForm((current) => applyAccountingSuggestions(current, activeAccountingFramework))}>
+                          Vorschlagen
+                        </button>
                         <button type="button" onClick={() => saveAccountingEdit(rule)}>Speichern</button>
                         <button className="secondary-button" type="button" onClick={cancelAccountingEdit}>Abbrechen</button>
                       </div>
@@ -3370,6 +3410,9 @@ function MasterdataAdmin({
               );
             })}
           </div>
+          <AccountSuggestionDatalist id="accounting-edit-debit-options" suggestions={editDebitSuggestions} />
+          <AccountSuggestionDatalist id="accounting-edit-credit-options" suggestions={editCreditSuggestions} />
+          <AccountSuggestionDatalist id="accounting-edit-discount-options" suggestions={editDiscountSuggestions} />
         </section>
       </div>
     </section>
@@ -4191,6 +4234,71 @@ function defaultAccountingRuleName(supplierName, costCategory) {
   return [formatCostCategory(costCategory), supplierName].filter(Boolean).join(" ").trim() || "Neue Kontierungsregel";
 }
 
+const ACCOUNTING_ACCOUNT_PRESETS = {
+  SKR03: {
+    debit: {
+      material: [{ account: "3400", label: "Wareneingang 19 %" }],
+      subcontractor: [{ account: "3100", label: "Fremdleistungen 19 %" }],
+      fuel_vehicle: [{ account: "4530", label: "Kfz-Betriebskosten" }],
+      software_subscription: [{ account: "4806", label: "Wartung/Software" }],
+      security_subscription: [{ account: "4900", label: "Sonstige betriebliche Aufwendungen" }],
+      general_overhead: [{ account: "4900", label: "Sonstige betriebliche Aufwendungen" }],
+    },
+    credit: [{ account: "70000", label: "Kreditoren-Sammelkonto" }],
+    discount: [{ account: "3736", label: "Erhaltene Skonti 19 %" }],
+  },
+  SKR04: {
+    debit: {
+      material: [{ account: "5400", label: "Wareneingang 19 %" }],
+      subcontractor: [{ account: "5900", label: "Fremdleistungen/Aufwand" }],
+      fuel_vehicle: [{ account: "6530", label: "Fahrzeugkosten" }],
+      software_subscription: [{ account: "6835", label: "Wartung/Software" }],
+      security_subscription: [{ account: "6850", label: "Sonstige betriebliche Aufwendungen" }],
+      general_overhead: [{ account: "6850", label: "Sonstige betriebliche Aufwendungen" }],
+    },
+    credit: [{ account: "70000", label: "Kreditoren-Sammelkonto" }],
+    discount: [{ account: "5736", label: "Erhaltene Skonti 19 %" }],
+  },
+};
+
+function accountingFramework(value) {
+  return ["SKR03", "SKR04"].includes(value) ? value : "SKR03";
+}
+
+function accountSuggestions(framework, role, costCategory) {
+  const presets = ACCOUNTING_ACCOUNT_PRESETS[accountingFramework(framework)] ?? ACCOUNTING_ACCOUNT_PRESETS.SKR03;
+  if (role === "debit") {
+    return presets.debit[costCategory] ?? [];
+  }
+  return presets[role] ?? [];
+}
+
+function firstAccountSuggestion(framework, role, costCategory) {
+  return accountSuggestions(framework, role, costCategory)[0]?.account ?? "";
+}
+
+function applyAccountingSuggestions(form, framework) {
+  return {
+    ...form,
+    debit_account: form.debit_account || firstAccountSuggestion(framework, "debit", form.cost_category),
+    credit_account: form.credit_account || firstAccountSuggestion(framework, "credit", form.cost_category),
+    discount_account: form.discount_account || firstAccountSuggestion(framework, "discount", form.cost_category),
+    tax_rate: form.tax_rate || "19.00",
+  };
+}
+
+function AccountSuggestionDatalist({ id, suggestions }) {
+  return (
+    <datalist id={id}>
+      {suggestions.map((suggestion) => (
+        <option key={`${id}-${suggestion.account}`} value={suggestion.account}>
+          {suggestion.label}
+        </option>
+      ))}
+    </datalist>
+  );
+}
+
 function normalizeSearchText(value) {
   return String(value ?? "").trim().toLocaleLowerCase("de-DE");
 }
@@ -4226,6 +4334,7 @@ function defaultTenantProfile(industry) {
       assignment_code_prefix: "BV",
       default_assignment_kind: "construction_project",
       allow_multiple_assignments: true,
+      accounting_framework: "SKR03",
     },
     fitness_studio: {
       industry: "fitness_studio",
@@ -4236,6 +4345,7 @@ function defaultTenantProfile(industry) {
       assignment_code_prefix: "",
       default_assignment_kind: "location",
       allow_multiple_assignments: false,
+      accounting_framework: "SKR03",
     },
     container_transport: {
       industry: "container_transport",
@@ -4246,6 +4356,7 @@ function defaultTenantProfile(industry) {
       assignment_code_prefix: "",
       default_assignment_kind: "construction_or_dropoff_site",
       allow_multiple_assignments: true,
+      accounting_framework: "SKR03",
     },
     general: {
       industry: "general",
@@ -4256,6 +4367,7 @@ function defaultTenantProfile(industry) {
       assignment_code_prefix: "",
       default_assignment_kind: "cost_object",
       allow_multiple_assignments: true,
+      accounting_framework: "SKR03",
     },
   };
   return templates[industry] ?? templates.general;

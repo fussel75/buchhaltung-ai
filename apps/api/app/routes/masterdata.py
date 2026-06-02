@@ -74,6 +74,7 @@ class TenantProfileRequest(BaseModel):
     assignment_code_prefix: str | None = None
     default_assignment_kind: str | None = None
     allow_multiple_assignments: bool | None = None
+    accounting_framework: str | None = None
 
 
 def _normalize_tenant_id(tenant_id: str) -> str:
@@ -118,6 +119,7 @@ def put_profile(
             if payload.allow_multiple_assignments is not None
             else template["allow_multiple_assignments"]
         ),
+        accounting_framework=payload.accounting_framework or template["accounting_framework"],
     )
     return {"tenant_profile": profile}
 

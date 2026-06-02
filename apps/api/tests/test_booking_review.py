@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from fastapi import HTTPException
 
 from app.routes import documents as documents_route
+from app.routes import masterdata as masterdata_route
 from app.services import bulk_jobs as bulk_job_service
 from app.services import database as database_service
 from app.services import extraction as extraction_service
@@ -70,6 +71,81 @@ class SequenceCursor(RecordingCursor):
         if not self.fetchone_results:
             return None
         return self.fetchone_results.pop(0)
+
+
+class TenantProfileTests(TestCase):
+    def test_tenant_profile_route_passes_accounting_framework(self):
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin"}))
+        payload = masterdata_route.TenantProfileRequest(
+            display_name="Demo",
+            industry="construction",
+            assignment_label_singular="Bauvorhaben",
+            assignment_label_plural="Bauvorhaben",
+            assignment_code_label="Bauvorhaben",
+            assignment_code_prefix="BV",
+            default_assignment_kind="construction_project",
+            allow_multiple_assignments=True,
+            accounting_framework="SKR04",
+        )
+        saved_profile = {
+            "tenant_id": "demo-mandant",
+            "display_name": "Demo",
+            "industry": "construction",
+            "assignment_label_singular": "Bauvorhaben",
+            "assignment_label_plural": "Bauvorhaben",
+            "assignment_code_label": "Bauvorhaben",
+            "assignment_code_prefix": "BV",
+            "default_assignment_kind": "construction_project",
+            "allow_multiple_assignments": True,
+            "accounting_framework": "SKR04",
+        }
+
+        with (
+            patch.object(masterdata_route, "require_admin") as require_admin,
+            patch.object(masterdata_route, "upsert_tenant_profile", return_value=saved_profile) as upsert_profile,
+        ):
+            result = masterdata_route.put_profile(payload, request, tenant_id=" demo-mandant ")
+
+        require_admin.assert_called_once_with(request)
+        upsert_profile.assert_called_once()
+        self.assertEqual(upsert_profile.call_args.kwargs["tenant_id"], "demo-mandant")
+        self.assertEqual(upsert_profile.call_args.kwargs["accounting_framework"], "SKR04")
+        self.assertEqual(result["tenant_profile"]["accounting_framework"], "SKR04")
+
+    def test_upsert_tenant_profile_normalizes_accounting_framework(self):
+        now = datetime.now(UTC)
+        row = {
+            "tenant_id": "demo-mandant",
+            "display_name": "Demo",
+            "industry": "construction",
+            "assignment_label_singular": "Bauvorhaben",
+            "assignment_label_plural": "Bauvorhaben",
+            "assignment_code_label": "Bauvorhaben",
+            "assignment_code_prefix": "BV",
+            "default_assignment_kind": "construction_project",
+            "allow_multiple_assignments": True,
+            "accounting_framework": "SKR04",
+            "created_at": now,
+            "updated_at": now,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            profile = database_service.upsert_tenant_profile(
+                tenant_id="demo-mandant",
+                display_name="Demo",
+                industry="construction",
+                assignment_label_singular="Bauvorhaben",
+                assignment_label_plural="Bauvorhaben",
+                assignment_code_label="Bauvorhaben",
+                assignment_code_prefix="BV",
+                default_assignment_kind="construction_project",
+                allow_multiple_assignments=True,
+                accounting_framework="skr04",
+            )
+
+        self.assertEqual(profile["accounting_framework"], "SKR04")
+        self.assertEqual(cursor.statements[0][1][9], "SKR04")
 
 
 class BookingSuggestionTests(TestCase):

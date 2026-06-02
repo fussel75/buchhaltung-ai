@@ -20,6 +20,7 @@ VALID_COST_CATEGORIES = {
     "security_subscription",
     "general_overhead",
 }
+VALID_ACCOUNTING_FRAMEWORKS = {"SKR03", "SKR04"}
 BULK_JOB_ACTIONS = {"extract", "prepare_review"}
 BULK_JOB_ACTIVE_STATUSES = {"queued", "running"}
 
@@ -215,11 +216,13 @@ def init_database() -> None:
                     assignment_code_prefix text,
                     default_assignment_kind text not null,
                     allow_multiple_assignments boolean not null default true,
+                    accounting_framework text not null default 'SKR03',
                     created_at timestamptz not null,
                     updated_at timestamptz not null
                 )
                 """
             )
+            cursor.execute("alter table tenant_profiles add column if not exists accounting_framework text not null default 'SKR03'")
             cursor.execute(
                 """
                 create table if not exists tenant_assignment_units (
@@ -2077,6 +2080,7 @@ TENANT_PROFILE_TEMPLATES = {
         "assignment_code_prefix": "BV",
         "default_assignment_kind": "construction_project",
         "allow_multiple_assignments": True,
+        "accounting_framework": "SKR03",
     },
     "fitness_studio": {
         "assignment_label_singular": "Standort",
@@ -2085,6 +2089,7 @@ TENANT_PROFILE_TEMPLATES = {
         "assignment_code_prefix": None,
         "default_assignment_kind": "location",
         "allow_multiple_assignments": False,
+        "accounting_framework": "SKR03",
     },
     "container_transport": {
         "assignment_label_singular": "Bauvorhaben / Stellplatz",
@@ -2093,6 +2098,7 @@ TENANT_PROFILE_TEMPLATES = {
         "assignment_code_prefix": None,
         "default_assignment_kind": "construction_or_dropoff_site",
         "allow_multiple_assignments": True,
+        "accounting_framework": "SKR03",
     },
     "general": {
         "assignment_label_singular": "Kostenstelle",
@@ -2101,6 +2107,7 @@ TENANT_PROFILE_TEMPLATES = {
         "assignment_code_prefix": None,
         "default_assignment_kind": "cost_object",
         "allow_multiple_assignments": True,
+        "accounting_framework": "SKR03",
     },
 }
 
@@ -2124,6 +2131,7 @@ def ensure_tenant_profile(tenant_id: str) -> dict[str, Any]:
         assignment_code_prefix=template["assignment_code_prefix"],
         default_assignment_kind=template["default_assignment_kind"],
         allow_multiple_assignments=template["allow_multiple_assignments"],
+        accounting_framework=template["accounting_framework"],
     )
 
 
@@ -2153,6 +2161,7 @@ def upsert_tenant_profile(
     assignment_code_prefix: str | None,
     default_assignment_kind: str,
     allow_multiple_assignments: bool,
+    accounting_framework: str = "SKR03",
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     with _connect() as connection:
@@ -2162,9 +2171,9 @@ def upsert_tenant_profile(
                 insert into tenant_profiles (
                     tenant_id, display_name, industry, assignment_label_singular,
                     assignment_label_plural, assignment_code_label, assignment_code_prefix,
-                    default_assignment_kind, allow_multiple_assignments, created_at, updated_at
+                    default_assignment_kind, allow_multiple_assignments, accounting_framework, created_at, updated_at
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (tenant_id) do update set
                     display_name = excluded.display_name,
                     industry = excluded.industry,
@@ -2174,6 +2183,7 @@ def upsert_tenant_profile(
                     assignment_code_prefix = excluded.assignment_code_prefix,
                     default_assignment_kind = excluded.default_assignment_kind,
                     allow_multiple_assignments = excluded.allow_multiple_assignments,
+                    accounting_framework = excluded.accounting_framework,
                     updated_at = excluded.updated_at
                 returning *
                 """,
@@ -2187,6 +2197,7 @@ def upsert_tenant_profile(
                     assignment_code_prefix.strip() if assignment_code_prefix else None,
                     default_assignment_kind,
                     allow_multiple_assignments,
+                    _normalize_accounting_framework(accounting_framework),
                     now,
                     now,
                 ),
@@ -2667,6 +2678,11 @@ def _normalize_cost_categories(value: str | list[str] | None) -> str | None:
     return ",".join(categories) if categories else None
 
 
+def _normalize_accounting_framework(value: str | None) -> str:
+    normalized = (value or "SKR03").strip().upper()
+    return normalized if normalized in VALID_ACCOUNTING_FRAMEWORKS else "SKR03"
+
+
 def _serialize_tenant_profile(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "tenant_id": row["tenant_id"],
@@ -2678,6 +2694,7 @@ def _serialize_tenant_profile(row: dict[str, Any]) -> dict[str, Any]:
         "assignment_code_prefix": row["assignment_code_prefix"],
         "default_assignment_kind": row["default_assignment_kind"],
         "allow_multiple_assignments": row["allow_multiple_assignments"],
+        "accounting_framework": _normalize_accounting_framework(row.get("accounting_framework")),
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
     }
