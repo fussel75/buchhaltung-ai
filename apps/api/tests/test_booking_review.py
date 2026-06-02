@@ -1723,6 +1723,64 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_review_validation_blocks_export_issue_before_final_approval(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "normalized_filename": "ERg rechnung.pdf",
+            "status": "review_ready",
+            "extraction": {
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "R-1",
+                "invoice_date": "2026-05-05",
+                "net_amount": "100.00",
+                "tax_amount": "19.00",
+                "gross_amount": "119.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Material",
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "119.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "119.00"},
+        }
+        rules = [
+            {
+                "name": "Material ohne Steuer",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "",
+                "tax_rate": "",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            errors = validate_document_review(document)
+            details = validate_document_review_details(document)
+
+        export_detail = next(detail for detail in details if detail["code"] == "export_validation")
+        self.assertIn("Exportprüfung blockiert", export_detail["message"])
+        self.assertEqual(export_detail["line_no"], 1)
+        self.assertEqual(export_detail["row_type"], "cost")
+        self.assertEqual(export_detail["export_errors"], ["Steuerangabe fehlt"])
+        self.assertEqual(errors, [export_detail["message"]])
+
     def test_review_validation_details_link_existing_accounting_rule_errors(self):
         rule_id = str(uuid4())
         document = {

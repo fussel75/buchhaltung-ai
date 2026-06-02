@@ -2309,8 +2309,10 @@ function ApprovalDialog({
   const accountingRuleIssues = (issues || []).filter((issue) =>
     ["missing_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
   );
+  const exportValidationIssues = (issues || []).filter((issue) => issue.code === "export_validation");
   const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
   const editableAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code !== "missing_accounting_rule");
+  const showGenericApprovalError = Boolean(error) && !accountingRuleIssues.length && !exportValidationIssues.length;
   const totalNet = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.net_amount), 0);
   const totalTax = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.tax_amount), 0);
   const totalGross = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.gross_amount), 0);
@@ -2338,7 +2340,7 @@ function ApprovalDialog({
           </p>
         ) : null}
         {isValidating ? <p className="approval-note">Freigabeprüfung läuft. Bitte kurz warten.</p> : null}
-        {error ? <p className="approval-blocker">{error}</p> : null}
+        {showGenericApprovalError ? <p className="approval-blocker">{error}</p> : null}
 
         {accountingRuleIssues.length ? (
           <div className="approval-fix-panel">
@@ -2377,6 +2379,27 @@ function ApprovalDialog({
                 ))}
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {exportValidationIssues.length ? (
+          <div className="approval-export-panel">
+            <div>
+              <strong>Exportprüfung blockiert die Freigabe</strong>
+              <span>Diese Fehler würden sonst im Buchungsentwurf landen. Bitte erst korrigieren, dann erneut freigeben.</span>
+            </div>
+            <ul>
+              {exportValidationIssues.map((issue, index) => (
+                <li key={`${issue.row_index || index}-${issue.row_type || "export"}`}>
+                  <span>
+                    {[issue.line_no ? `Zeile ${issue.line_no}` : null, issue.row_type_label || formatExportRowType(issue.row_type)]
+                      .filter(Boolean)
+                      .join(" · ") || "Exportzeile"}
+                  </span>
+                  <small>{(issue.export_errors || []).join(", ") || issue.message}</small>
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
 

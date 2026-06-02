@@ -1186,6 +1186,39 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
     return [detail["message"] for detail in validate_document_review_details(document)]
 
 
+def validate_document_review_export_details(document: dict[str, Any]) -> list[dict[str, Any]]:
+    export_document = {**document, "status": "review_approved"}
+    rows = build_booking_export_rows([export_document])
+    details: list[dict[str, Any]] = []
+    for issue in validate_booking_export_rows(rows):
+        errors = issue.get("errors") or []
+        line_no = issue.get("line_no")
+        line_label = f"Zeile {line_no}" if line_no else f"Exportzeile {issue.get('row_index')}"
+        row_type = issue.get("row_type")
+        row_type_label = _booking_export_row_type_label(row_type)
+        details.append(
+            {
+                "code": "export_validation",
+                "message": f"{line_label} ({row_type_label}): Exportprüfung blockiert: {', '.join(errors)}.",
+                "line_no": line_no,
+                "row_index": issue.get("row_index"),
+                "row_type": row_type,
+                "row_type_label": row_type_label,
+                "invoice_number": issue.get("invoice_number"),
+                "filename": issue.get("filename"),
+                "export_errors": errors,
+            }
+        )
+    return details
+
+
+def _booking_export_row_type_label(row_type: str | None) -> str:
+    return {
+        "cost": "Kostenzeile",
+        "payment_adjustment": "Skonto/Zahlungsdifferenz",
+    }.get(row_type or "", row_type or "Exportzeile")
+
+
 def validate_booking_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     for index, row in enumerate(rows, start=1):
@@ -1411,6 +1444,9 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                     accounting_rule_name=accounting_rule.get("name"),
                     suggested_name=accounting_rule.get("name"),
                 )
+
+    if not errors:
+        errors.extend(validate_document_review_export_details(document))
 
     return errors
 

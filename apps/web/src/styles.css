@@ -1642,6 +1642,53 @@ code {
   padding: 0 12px;
 }
 
+.approval-export-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #f0bbb6;
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.approval-export-panel > div {
+  display: grid;
+  gap: 3px;
+}
+
+.approval-export-panel span,
+.approval-export-panel small {
+  line-height: 1.35;
+}
+
+.approval-export-panel > div span,
+.approval-export-panel small {
+  color: #7f1d1d;
+}
+
+.approval-export-panel ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approval-export-panel li {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) 1fr;
+  gap: 8px 12px;
+  align-items: start;
+  border-top: 1px solid rgb(185 28 28 / 18%);
+  padding-top: 7px;
+}
+
+.approval-export-panel li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .approval-facts {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2269,6 +2316,7 @@ code {
   .review-facts,
   .approval-facts,
   .approval-fix-panel,
+  .approval-export-panel li,
   .extraction-grid,
   .form-grid,
   .form-grid > .form-field,
