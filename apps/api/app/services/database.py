@@ -1266,6 +1266,8 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 supplier_name=supplier_name,
                 cost_category=cost_category,
                 cost_category_label=_cost_category_label(cost_category),
+                accounting_rule_id=str(accounting_rule.get("id")) if accounting_rule.get("id") else None,
+                accounting_rule_name=accounting_rule.get("name"),
                 suggested_name=accounting_rule.get("name") or f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
             )
 
@@ -1309,6 +1311,8 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 supplier_name=supplier_name,
                 cost_category=cost_category,
                 cost_category_label=_cost_category_label(cost_category),
+                accounting_rule_id=str(accounting_rule.get("id")) if accounting_rule.get("id") else None,
+                accounting_rule_name=accounting_rule.get("name"),
                 suggested_name=accounting_rule.get("name"),
             )
 

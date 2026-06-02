@@ -1260,6 +1260,66 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_review_validation_details_link_existing_accounting_rule_errors(self):
+        rule_id = str(uuid4())
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "84.03",
+                "tax_amount": "15.97",
+                "gross_amount": "100.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "net_amount": "84.03",
+                    "tax_amount": "15.97",
+                    "gross_amount": "100.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "cash_discount", "amount": "97.00"},
+        }
+
+        incomplete_rule = {
+            "id": rule_id,
+            "name": "Material Foerch",
+            "supplier_match_text": "Foerch",
+            "cost_category": "material",
+            "debit_account": "",
+            "credit_account": "70000",
+            "tax_key": "9",
+            "tax_rate": "19.00",
+            "discount_account": "",
+            "is_active": True,
+        }
+        with patch.object(database_service, "list_accounting_rules", return_value=[incomplete_rule]):
+            details = validate_document_review_details(document)
+
+        incomplete = next(detail for detail in details if detail["code"] == "incomplete_accounting_rule")
+        self.assertEqual(incomplete["accounting_rule_id"], rule_id)
+        self.assertEqual(incomplete["accounting_rule_name"], "Material Foerch")
+
+        no_discount_rule = {**incomplete_rule, "debit_account": "3400", "discount_account": ""}
+        with patch.object(database_service, "list_accounting_rules", return_value=[no_discount_rule]):
+            details = validate_document_review_details(document)
+
+        discount = next(detail for detail in details if detail["code"] == "missing_discount_account")
+        self.assertEqual(discount["accounting_rule_id"], rule_id)
+        self.assertEqual(discount["accounting_rule_name"], "Material Foerch")
+
     def test_review_validation_blocks_warnings_and_split_mismatch(self):
         document = {
             "id": str(uuid4()),

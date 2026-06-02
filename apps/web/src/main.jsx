@@ -228,6 +228,7 @@ function UploadApp() {
   const [approvalError, setApprovalError] = useState("");
   const [approvalIssues, setApprovalIssues] = useState([]);
   const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
+  const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -280,6 +281,7 @@ function UploadApp() {
     ? `${focusedReviewIndex + 1} / ${focusableReviewDocuments.length}`
     : "";
   const clearAccountingRuleDraft = useCallback(() => setAccountingRuleDraft(null), []);
+  const clearAccountingRuleEditTarget = useCallback(() => setAccountingRuleEditTarget(null), []);
 
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
@@ -742,12 +744,24 @@ function UploadApp() {
   );
 
   function prepareAccountingRuleFromApproval(issue) {
-    if (issue?.code !== "missing_accounting_rule") {
-      setNotice("Bitte die bestehende Kontierungsregel unter Stammdaten bearbeiten.");
+    if (user?.role !== "admin") {
+      setNotice("Kontierungsregel braucht Pflege. Bitte einen Admin bitten, die Regel unter Stammdaten zu prüfen.");
       return;
     }
-    if (user?.role !== "admin") {
-      setNotice("Kontierungsregel fehlt. Bitte einen Admin bitten, die Regel unter Stammdaten anzulegen.");
+    if (issue?.code !== "missing_accounting_rule") {
+      setAccountingRuleEditTarget({
+        id: `${Date.now()}-${issue?.accounting_rule_id || issue?.accounting_rule_name || issue?.cost_category || ""}`,
+        rule_id: issue?.accounting_rule_id || "",
+        accounting_rule_name: issue?.accounting_rule_name || issue?.suggested_name || "",
+        supplier_name: issue?.supplier_name || "",
+        cost_category: issue?.cost_category || "",
+        focus_field: issue?.code === "missing_discount_account" ? "discount_account" : "debit_account",
+      });
+      setApprovalDocumentId(null);
+      setApprovalError("");
+      setApprovalIssues([]);
+      setActiveView("masterdata");
+      setNotice("Kontierungsregel wird geöffnet. Bitte fehlende Konten ergänzen und speichern.");
       return;
     }
     const supplierName = issue?.supplier_name || approvalDocument?.extraction?.supplier_name || "";
@@ -1452,7 +1466,9 @@ function UploadApp() {
           tenantId={activeTenantId}
           tenantProfile={tenantProfile}
           accountingRuleDraft={accountingRuleDraft}
+          accountingRuleEditTarget={accountingRuleEditTarget}
           onAccountingRuleDraftConsumed={clearAccountingRuleDraft}
+          onAccountingRuleEditTargetConsumed={clearAccountingRuleEditTarget}
           onProfileSaved={setTenantProfile}
         />
       ) : null}
@@ -2187,6 +2203,7 @@ function ApprovalDialog({
     ["missing_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
   );
   const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
+  const editableAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code !== "missing_accounting_rule");
   const totalNet = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.net_amount), 0);
   const totalTax = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.tax_amount), 0);
   const totalGross = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.gross_amount), 0);
@@ -2227,7 +2244,7 @@ function ApprovalDialog({
                   : "Bitte einen Admin bitten, die passende Regel unter Stammdaten anzulegen."}
               </span>
             </div>
-            {canPrepareAccountingRule && missingAccountingRuleIssues.length ? (
+            {canPrepareAccountingRule ? (
               <div className="approval-fix-actions">
                 {dedupeAccountingRuleIssues(missingAccountingRuleIssues).map((issue) => (
                   <button
@@ -2238,6 +2255,16 @@ function ApprovalDialog({
                     disabled={issue.field === "cost_category" && !issue.cost_category}
                   >
                     {issue.cost_category_label || formatCostCategory(issue.cost_category)} / {issue.supplier_name || "ohne Lieferant"}
+                  </button>
+                ))}
+                {dedupeAccountingRuleIssues(editableAccountingRuleIssues).map((issue) => (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    key={`${issue.accounting_rule_id || issue.accounting_rule_name || "-"}-${issue.code}`}
+                    onClick={() => onPrepareAccountingRule(issue)}
+                  >
+                    {issue.accounting_rule_name || issue.suggested_name || "Regel bearbeiten"}
                   </button>
                 ))}
               </div>
@@ -2441,7 +2468,16 @@ function UserAdmin({ apiFetch, currentUser, activeTenantId }) {
   );
 }
 
-function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, accountingRuleDraft, onAccountingRuleDraftConsumed, onProfileSaved }) {
+function MasterdataAdmin({
+  apiFetch,
+  tenantId,
+  tenantProfile,
+  accountingRuleDraft,
+  accountingRuleEditTarget,
+  onAccountingRuleDraftConsumed,
+  onAccountingRuleEditTargetConsumed,
+  onProfileSaved,
+}) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
@@ -2522,6 +2558,28 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, accountingRuleDraf
     }, 0);
     onAccountingRuleDraftConsumed?.();
   }, [accountingRuleDraft, onAccountingRuleDraftConsumed]);
+
+  useEffect(() => {
+    if (!accountingRuleEditTarget || !accountingRules.length) return;
+    const rule = findAccountingRuleForTarget(accountingRules, accountingRuleEditTarget);
+    if (!rule) {
+      setMessage("Kontierungsregel konnte nicht automatisch gefunden werden. Bitte manuell in den Stammdaten prüfen.");
+      onAccountingRuleEditTargetConsumed?.();
+      return;
+    }
+
+    startAccountingEdit(rule);
+    setMessage("Kontierungsregel geöffnet. Bitte fehlende Konten ergänzen und speichern.");
+    window.setTimeout(() => {
+      accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusSelector = accountingRuleEditTarget.focus_field === "discount_account"
+        ? 'input[aria-label="Skontokonto"]'
+        : 'input[aria-label="Aufwandskonto"]';
+      const row = accountingSectionRef.current?.querySelector(`[data-accounting-rule-id="${rule.id}"]`);
+      row?.querySelector(focusSelector)?.focus();
+    }, 0);
+    onAccountingRuleEditTargetConsumed?.();
+  }, [accountingRuleEditTarget, accountingRules, onAccountingRuleEditTargetConsumed]);
 
   async function createAssignment(event) {
     event.preventDefault();
@@ -3171,7 +3229,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, accountingRuleDraf
             {accountingRules.map((rule) => {
               const isEditing = accountingEditId === rule.id && accountingEditForm;
               return (
-                <div className={isEditing ? "data-row editing-row" : "data-row"} key={rule.id}>
+                <div className={isEditing ? "data-row editing-row" : "data-row"} data-accounting-rule-id={rule.id} key={rule.id}>
                   {isEditing ? (
                     <>
                       <input
@@ -4064,8 +4122,27 @@ function accountingRuleFixTitle(issues) {
   return "Kontierungsregel fehlt";
 }
 
+function findAccountingRuleForTarget(rules, target) {
+  if (!target) return null;
+  if (target.rule_id) {
+    const exactRule = rules.find((rule) => rule.id === target.rule_id);
+    if (exactRule) return exactRule;
+  }
+  const supplierText = normalizeSearchText(target.supplier_name);
+  return rules.find((rule) => {
+    if (target.accounting_rule_name && rule.name !== target.accounting_rule_name) return false;
+    if (target.cost_category && rule.cost_category !== target.cost_category) return false;
+    if (supplierText && rule.supplier_match_text && !supplierText.includes(normalizeSearchText(rule.supplier_match_text))) return false;
+    return true;
+  }) ?? null;
+}
+
 function defaultAccountingRuleName(supplierName, costCategory) {
   return [formatCostCategory(costCategory), supplierName].filter(Boolean).join(" ").trim() || "Neue Kontierungsregel";
+}
+
+function normalizeSearchText(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("de-DE");
 }
 
 function splitAliases(value) {
