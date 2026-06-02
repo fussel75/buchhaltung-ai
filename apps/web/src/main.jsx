@@ -211,6 +211,7 @@ function UploadApp() {
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
   const [approvingIds, setApprovingIds] = useState([]);
+  const [validatingIds, setValidatingIds] = useState([]);
   const [savingSuggestionIds, setSavingSuggestionIds] = useState([]);
   const [savingPaymentIds, setSavingPaymentIds] = useState([]);
   const [savingExtractionIds, setSavingExtractionIds] = useState([]);
@@ -230,6 +231,7 @@ function UploadApp() {
   const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
   const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
+  const approvalValidationRequestRef = useRef(0);
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -359,6 +361,7 @@ function UploadApp() {
 
     function handleEscape(event) {
       if (event.key === "Escape" && !approvingIds.includes(approvalDocumentId)) {
+        approvalValidationRequestRef.current += 1;
         setApprovalDocumentId(null);
       }
     }
@@ -743,6 +746,47 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const openApprovalDialog = useCallback(
+    async (document) => {
+      if (document.status !== "review_ready") {
+        const message = "Finale Freigabe ist nur im Status Vorschlag möglich.";
+        setApprovalError(message);
+        setApprovalIssues([]);
+        setError(message);
+        return;
+      }
+
+      setApprovalDocumentId(document.id);
+      setApprovalError("");
+      setApprovalIssues([]);
+      setError("");
+      setNotice("");
+      const requestId = approvalValidationRequestRef.current + 1;
+      approvalValidationRequestRef.current = requestId;
+      setValidatingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/review-validation`);
+        if (!response.ok) {
+          throw new Error(`Freigabeprüfung fehlgeschlagen: ${response.status}`);
+        }
+        const result = await response.json();
+        const details = Array.isArray(result.details) ? result.details : [];
+        const errors = Array.isArray(result.errors) ? result.errors : [];
+        if (approvalValidationRequestRef.current !== requestId) return;
+        setApprovalIssues(details);
+        setApprovalError(errors.length ? formatApprovalError({ message: "Freigabe blockiert", errors }, 409) : "");
+      } catch (validationError) {
+        if (approvalValidationRequestRef.current !== requestId) return;
+        setApprovalError(validationError.message);
+        setError(validationError.message);
+      } finally {
+        setValidatingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch],
+  );
+
   function prepareAccountingRuleFromApproval(issue) {
     if (user?.role !== "admin") {
       setNotice("Kontierungsregel braucht Pflege. Bitte einen Admin bitten, die Regel unter Stammdaten zu prüfen.");
@@ -757,6 +801,7 @@ function UploadApp() {
         cost_category: issue?.cost_category || "",
         focus_field: issue?.code === "missing_discount_account" ? "discount_account" : "debit_account",
       });
+      approvalValidationRequestRef.current += 1;
       setApprovalDocumentId(null);
       setApprovalError("");
       setApprovalIssues([]);
@@ -781,6 +826,7 @@ function UploadApp() {
         discount_account: "",
       },
     });
+    approvalValidationRequestRef.current += 1;
     setApprovalDocumentId(null);
     setApprovalError("");
     setApprovalIssues([]);
@@ -1264,14 +1310,10 @@ function UploadApp() {
                     {document.booking_suggestions?.length && document.status === "review_ready" ? (
                       <button
                         type="button"
-                        onClick={() => {
-                          setApprovalError("");
-                          setApprovalIssues([]);
-                          setApprovalDocumentId(document.id);
-                        }}
-                        disabled={approvingIds.includes(document.id)}
+                        onClick={() => openApprovalDialog(document)}
+                        disabled={approvingIds.includes(document.id) || validatingIds.includes(document.id)}
                       >
-                        {approvingIds.includes(document.id) ? "Gibt frei..." : "Final freigeben"}
+                        {validatingIds.includes(document.id) ? "Prüft..." : approvingIds.includes(document.id) ? "Gibt frei..." : "Final freigeben"}
                       </button>
                     ) : null}
                     {document.booking_suggestions?.length && document.status === "review_approved" ? (
@@ -1427,10 +1469,12 @@ function UploadApp() {
         document={approvalDocument}
         tenantProfile={tenantProfile}
         isApproving={approvalDocument ? approvingIds.includes(approvalDocument.id) : false}
+        isValidating={approvalDocument ? validatingIds.includes(approvalDocument.id) : false}
         error={approvalError}
         issues={approvalIssues}
         canPrepareAccountingRule={user?.role === "admin"}
         onCancel={() => {
+          approvalValidationRequestRef.current += 1;
           setApprovalDocumentId(null);
           setApprovalError("");
           setApprovalIssues([]);
@@ -2144,6 +2188,7 @@ function ApprovalDialog({
   document,
   tenantProfile,
   isApproving,
+  isValidating,
   error,
   issues,
   canPrepareAccountingRule,
@@ -2230,6 +2275,7 @@ function ApprovalDialog({
             Zahlungsentscheidung fehlt: Bitte zuerst Skonto, ohne Abzug oder Gutschrift-Verrechnung wählen.
           </p>
         ) : null}
+        {isValidating ? <p className="approval-note">Freigabeprüfung läuft. Bitte kurz warten.</p> : null}
         {error ? <p className="approval-blocker">{error}</p> : null}
 
         {accountingRuleIssues.length ? (
@@ -2337,8 +2383,12 @@ function ApprovalDialog({
           <button className="secondary-button" type="button" onClick={onCancel} disabled={isApproving}>
             Abbrechen
           </button>
-          <button type="button" onClick={onConfirm} disabled={isApproving || document.status !== "review_ready" || requiresPaymentDecision}>
-            {isApproving ? "Gibt frei..." : "Final freigeben"}
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isApproving || isValidating || document.status !== "review_ready" || requiresPaymentDecision || Boolean(error) || (issues || []).length > 0}
+          >
+            {isApproving ? "Gibt frei..." : isValidating ? "Prüft..." : "Final freigeben"}
           </button>
         </div>
       </section>

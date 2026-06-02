@@ -30,6 +30,7 @@ from app.services.database import (
     update_booking_suggestion,
     update_document_extraction,
     validate_document_review,
+    validate_document_review_details,
 )
 from app.services.bulk_jobs import run_document_bulk_job
 from app.services.extraction import run_mock_extraction
@@ -562,6 +563,26 @@ def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
     return {"document": document}
+
+
+@router.get("/{document_id}/review-validation")
+def get_review_validation(document_id: UUID, request: Request) -> dict[str, Any]:
+    document = require_document_access(request, document_id)
+    details = []
+    if document.get("status") != "review_ready":
+        details.append(
+            {
+                "code": "invalid_review_status",
+                "message": "Finale Freigabe ist nur im Status Vorschlag möglich.",
+                "field": "status",
+            }
+        )
+    details.extend(validate_document_review_details(document))
+    return {
+        "errors": [detail["message"] for detail in details],
+        "details": details,
+        "is_ready": len(details) == 0,
+    }
 
 
 @router.post("/{document_id}/reopen-review")

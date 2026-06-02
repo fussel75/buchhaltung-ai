@@ -316,6 +316,43 @@ class BookingSuggestionTests(TestCase):
         audit_event.assert_called_once()
         self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.review_approved")
 
+    def test_review_validation_route_returns_details_without_approval(self):
+        document_id = uuid4()
+        document = {"id": str(document_id), "tenant_id": "demo-mandant", "status": "review_ready"}
+        details = [
+            {
+                "code": "missing_accounting_rule",
+                "message": "Zeile 1: Kontierungsregel fehlt.",
+                "line_no": 1,
+            }
+        ]
+
+        with (
+            patch.object(documents_route, "require_document_access", return_value=document) as require_access,
+            patch.object(documents_route, "validate_document_review_details", return_value=details) as validate_details,
+        ):
+            result = documents_route.get_review_validation(document_id, SimpleNamespace(state=SimpleNamespace()))
+
+        require_access.assert_called_once()
+        validate_details.assert_called_once_with(document)
+        self.assertFalse(result["is_ready"])
+        self.assertEqual(result["errors"], ["Zeile 1: Kontierungsregel fehlt."])
+        self.assertEqual(result["details"], details)
+
+    def test_review_validation_route_blocks_non_ready_status(self):
+        document_id = uuid4()
+        document = {"id": str(document_id), "tenant_id": "demo-mandant", "status": "extracted"}
+
+        with (
+            patch.object(documents_route, "require_document_access", return_value=document),
+            patch.object(documents_route, "validate_document_review_details", return_value=[]),
+        ):
+            result = documents_route.get_review_validation(document_id, SimpleNamespace(state=SimpleNamespace()))
+
+        self.assertFalse(result["is_ready"])
+        self.assertEqual(result["details"][0]["code"], "invalid_review_status")
+        self.assertIn("Status Vorschlag", result["errors"][0])
+
     def test_payment_terms_for_incoming_invoice_discount(self):
         terms = _payment_terms(
             gross_amount=Decimal("1441.03"),
