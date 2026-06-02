@@ -29,6 +29,7 @@ from app.services.database import (
     select_payment_decision,
     update_booking_suggestion,
     update_document_extraction,
+    validate_booking_export_rows,
     validate_document_review,
     validate_document_review_details,
 )
@@ -356,19 +357,29 @@ def export_booking_rows(
                 }
             )
     rows = build_booking_export_rows(documents)
+    export_issues = validate_booking_export_rows(rows)
     if format == "json":
         if not rows:
             raise HTTPException(status_code=404, detail="no approved booking rows found for export")
         return {
             "rows": rows,
             "invalid_documents": invalid_documents,
-            "is_blocked": bool(invalid_documents),
+            "export_issues": export_issues,
+            "is_blocked": bool(invalid_documents or export_issues),
         }
 
-    if invalid_documents:
+    if invalid_documents or export_issues:
+        documents_detail = invalid_documents + [
+            {
+                "document_id": issue.get("document_id"),
+                "filename": issue.get("filename"),
+                "errors": issue.get("errors") or [],
+            }
+            for issue in export_issues
+        ]
         raise HTTPException(
             status_code=409,
-            detail={"message": "Buchungsentwurf blockiert", "documents": invalid_documents},
+            detail={"message": "Buchungsentwurf blockiert", "documents": documents_detail},
         )
     if not rows:
         raise HTTPException(status_code=404, detail="no approved booking rows found for export")

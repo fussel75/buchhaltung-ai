@@ -239,6 +239,7 @@ function UploadApp() {
   const isUploading = uploadBatch?.state === "running";
   const isBulkExtracting = extractionBatch?.state === "running";
   const isBulkPreparingReview = reviewBatch?.state === "running";
+  const isBookingExportBlockedByPreview = bookingPreview?.month === exportMonth && bookingPreview.isBlocked;
   const queueStats = useMemo(
     () => ({
       pending: documents.filter((document) => document.status === "review_pending").length,
@@ -1098,6 +1099,7 @@ function UploadApp() {
         month: exportMonth,
         rows: result.rows || [],
         invalidDocuments: result.invalid_documents || [],
+        exportIssues: result.export_issues || [],
         isBlocked: Boolean(result.is_blocked),
       });
       setNotice(
@@ -1284,9 +1286,9 @@ function UploadApp() {
                   className="secondary-button"
                   type="button"
                   onClick={exportBookingRows}
-                  disabled={exporting === "bookings"}
+                  disabled={exporting === "bookings" || isBookingExportBlockedByPreview}
                 >
-                  {exporting === "bookings" ? "Erstellt..." : "Buchungsentwurf CSV"}
+                  {exporting === "bookings" ? "Erstellt..." : isBookingExportBlockedByPreview ? "CSV blockiert" : "Buchungsentwurf CSV"}
                 </button>
               </div>
             </details>
@@ -1311,6 +1313,7 @@ function UploadApp() {
             month={bookingPreview.month}
             rows={bookingPreview.rows}
             invalidDocuments={bookingPreview.invalidDocuments}
+            exportIssues={bookingPreview.exportIssues}
             isBlocked={bookingPreview.isBlocked}
             onClose={() => setBookingPreview(null)}
           />
@@ -3739,7 +3742,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
   );
 }
 
-function BookingExportPreview({ month, rows, invalidDocuments = [], isBlocked = false, onClose }) {
+function BookingExportPreview({ month, rows, invalidDocuments = [], exportIssues = [], isBlocked = false, onClose }) {
   const documents = useMemo(() => groupBookingPreviewRows(rows), [rows]);
   const totals = useMemo(
     () => rows.reduce(
@@ -3788,6 +3791,24 @@ function BookingExportPreview({ month, rows, invalidDocuments = [], isBlocked = 
               <li key={document.document_id || document.filename}>
                 <span>{document.filename || document.document_id}</span>
                 <small>{(document.errors || []).join(" ")}</small>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {exportIssues.length ? (
+        <div className="booking-preview-blockers">
+          <strong>Exportprüfung</strong>
+          <ul>
+            {exportIssues.map((issue, index) => (
+              <li key={`${issue.document_id || issue.filename || "issue"}-${issue.row_index || index}`}>
+                <span>
+                  {[issue.invoice_number, issue.line_no ? `Zeile ${issue.line_no}` : null, formatExportRowType(issue.row_type)]
+                    .filter(Boolean)
+                    .join(" · ") || issue.filename || "Exportzeile"}
+                </span>
+                <small>{(issue.errors || []).join(", ")}</small>
               </li>
             ))}
           </ul>

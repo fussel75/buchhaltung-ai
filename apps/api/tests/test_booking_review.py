@@ -21,6 +21,7 @@ from app.services.database import (
     _booking_suggestions_from_extraction,
     build_booking_export_rows,
     find_accounting_rule,
+    validate_booking_export_rows,
     validate_document_review,
     validate_document_review_details,
 )
@@ -343,6 +344,53 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(preview["rows"][0]["export_warnings"], "Zuordnung fehlt; Kontierungsregel fehlt; Aufwandskonto fehlt; Gegenkonto fehlt; Steuerangabe prüfen")
         self.assertEqual(csv_error.exception.status_code, 409)
 
+    def test_booking_export_route_blocks_export_issues_even_when_review_passes(self):
+        request = SimpleNamespace(state=SimpleNamespace())
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "normalized_filename": "ERg rechnung.pdf",
+            "status": "review_approved",
+            "extraction": {
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "R-1",
+                "invoice_date": "2026-05-05",
+                "gross_amount": "119.00",
+                "currency": "EUR",
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Material",
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "119.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "119.00"},
+        }
+
+        with (
+            patch.object(documents_route, "require_tenant_access"),
+            patch.object(documents_route, "list_documents_for_month", return_value=[document]),
+            patch.object(documents_route, "validate_document_review", return_value=[]),
+            patch.object(database_service, "list_accounting_rules", return_value=[]),
+        ):
+            preview = documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="json")
+            with self.assertRaises(HTTPException) as csv_error:
+                documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="csv")
+
+        self.assertTrue(preview["is_blocked"])
+        self.assertEqual(preview["invalid_documents"], [])
+        self.assertIn("Kontierungsregel fehlt", preview["export_issues"][0]["errors"])
+        self.assertEqual(csv_error.exception.status_code, 409)
+        self.assertEqual(csv_error.exception.detail["documents"][0]["errors"], preview["export_issues"][0]["errors"])
+
     def test_manual_normalized_filename_keeps_document_suffix(self):
         document = {
             "tenant_id": "demo-mandant",
@@ -650,7 +698,11 @@ class BookingSuggestionTests(TestCase):
                             "invoice_date": "2026-05-07",
                             "gross_amount": "331.91",
                             "currency": "EUR",
-                            "raw_result": {"document_type": "incoming_invoice"},
+                            "raw_result": {
+                                "document_type": "incoming_invoice",
+                                "discount_net_amount": "6.12",
+                                "discount_tax_amount": "1.16",
+                            },
                         },
                         "booking_suggestions": [
                             {
@@ -685,11 +737,73 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[0]["credit_account"], "70000")
         self.assertEqual(rows[0]["tax_key"], "9")
         self.assertEqual(rows[1]["row_type"], "payment_adjustment")
+        self.assertEqual(rows[1]["net_amount"], "-6.12")
+        self.assertEqual(rows[1]["tax_amount"], "-1.16")
         self.assertEqual(rows[1]["gross_amount"], "-7.28")
         self.assertEqual(rows[1]["payable_delta"], "-7.28")
         self.assertEqual(rows[1]["debit_account"], "3736")
         self.assertEqual(rows[1]["payment_type"], "cash_discount")
         self.assertEqual(rows[1]["payment_decision_source"], "gewählt")
+        self.assertEqual(validate_booking_export_rows(rows), [])
+
+    def test_booking_export_validation_blocks_invalid_numbers_and_missing_tax_fields(self):
+        rows = [
+            {
+                "document_id": str(uuid4()),
+                "original_filename": "rechnung.pdf",
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "R-1",
+                "invoice_date": "2026-05-05",
+                "document_type": "incoming_invoice",
+                "currency": "EUR",
+                "row_type": "cost",
+                "line_no": 1,
+                "booking_type": "incoming_invoice",
+                "description": "Material",
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "accounting_rule": "Material Standard",
+                "net_amount": "kaputt",
+                "tax_amount": "19.00",
+                "gross_amount": "119.00",
+            }
+        ]
+
+        issues = validate_booking_export_rows(rows)
+
+        self.assertEqual(issues[0]["errors"], ["Netto ist keine gültige Zahl", "Steuerangabe fehlt"])
+
+    def test_booking_export_validation_blocks_payment_adjustment_without_tax_split(self):
+        rows = [
+            {
+                "document_id": str(uuid4()),
+                "original_filename": "rechnung.pdf",
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "R-1",
+                "invoice_date": "2026-05-05",
+                "document_type": "incoming_invoice",
+                "currency": "EUR",
+                "row_type": "payment_adjustment",
+                "line_no": 1,
+                "booking_type": "incoming_invoice",
+                "description": "Skontozahlung",
+                "cost_category": "material",
+                "debit_account": "3736",
+                "credit_account": "70000",
+                "discount_account": "3736",
+                "accounting_rule": "Material Standard",
+                "net_amount": None,
+                "tax_amount": None,
+                "gross_amount": "-7.28",
+                "payable_delta": "-7.28",
+            }
+        ]
+
+        issues = validate_booking_export_rows(rows)
+
+        self.assertIn("Netto-Differenz fehlt", issues[0]["errors"])
+        self.assertIn("USt-Differenz fehlt", issues[0]["errors"])
 
     def test_booking_export_rows_allocate_payment_adjustment_to_split_lines(self):
         rules = [

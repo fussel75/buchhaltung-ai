@@ -1,5 +1,5 @@
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from re import sub
 from typing import Any
@@ -1186,6 +1186,109 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
     return [detail["message"] for detail in validate_document_review_details(document)]
 
 
+def validate_booking_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        row_issues = _booking_export_row_issues(row)
+        if row_issues:
+            issues.append(
+                {
+                    "row_index": index,
+                    "document_id": row.get("document_id"),
+                    "filename": row.get("original_filename"),
+                    "invoice_number": row.get("invoice_number"),
+                    "line_no": row.get("line_no"),
+                    "row_type": row.get("row_type"),
+                    "errors": row_issues,
+                }
+            )
+    return issues
+
+
+def _booking_export_row_issues(row: dict[str, Any]) -> list[str]:
+    issues = []
+    required_fields = {
+        "document_id": "Dokument-ID",
+        "invoice_number": "Belegnummer",
+        "invoice_date": "Belegdatum",
+        "supplier_name": "Lieferant",
+        "document_type": "Belegart",
+        "currency": "Währung",
+        "row_type": "Zeilentyp",
+        "booking_type": "Buchungsart",
+        "description": "Beschreibung",
+        "cost_category": "Kostenart",
+        "debit_account": "Aufwandskonto",
+        "credit_account": "Gegenkonto",
+        "accounting_rule": "Kontierungsregel",
+    }
+    for field_name, label in required_fields.items():
+        if row.get(field_name) in (None, ""):
+            issues.append(f"{label} fehlt")
+
+    if row.get("row_type") == "payment_adjustment":
+        for field_name, label in (
+            ("payable_delta", "Zahlungsdifferenz"),
+            ("gross_amount", "Brutto-Differenz"),
+            ("net_amount", "Netto-Differenz"),
+            ("tax_amount", "USt-Differenz"),
+            ("discount_account", "Skontokonto"),
+        ):
+            if row.get(field_name) in (None, ""):
+                issues.append(f"{label} fehlt")
+    else:
+        for field_name, label in (
+            ("net_amount", "Netto"),
+            ("tax_amount", "USt"),
+            ("gross_amount", "Brutto"),
+        ):
+            if row.get(field_name) in (None, ""):
+                issues.append(f"{label} fehlt")
+
+    for field_name, label in (
+        ("net_amount", "Netto"),
+        ("tax_amount", "USt"),
+        ("gross_amount", "Brutto"),
+        ("payable_delta", "Zahlungsdifferenz"),
+        ("payment_amount", "Zahlbetrag"),
+        ("discount_base", "Skonto-Basis"),
+        ("discount_percent", "Skonto-Prozent"),
+        ("discount_amount", "Skonto"),
+        ("tax_rate", "Steuersatz"),
+    ):
+        value = row.get(field_name)
+        if value not in (None, "") and _decimal_or_none(value) is None:
+            issues.append(f"{label} ist keine gültige Zahl")
+
+    tax_amount = _decimal_or_none(row.get("tax_amount"))
+    if tax_amount and tax_amount != Decimal("0.00") and not row.get("tax_key") and not row.get("tax_rate"):
+        issues.append("Steuerangabe fehlt")
+
+    if row.get("row_type") == "payment_adjustment":
+        payable_delta = _decimal_or_none(row.get("payable_delta"))
+        gross_amount = _decimal_or_none(row.get("gross_amount"))
+        net_amount = _decimal_or_none(row.get("net_amount"))
+        tax_amount = _decimal_or_none(row.get("tax_amount"))
+        if payable_delta is not None and gross_amount is not None and payable_delta != gross_amount:
+            issues.append("Zahlungsdifferenz passt nicht zur Brutto-Differenz")
+        if net_amount is not None and tax_amount is not None and gross_amount is not None:
+            if abs(_round_money(net_amount + tax_amount) - _round_money(gross_amount)) > Decimal("0.01"):
+                issues.append("Netto- und USt-Differenz passen nicht zur Brutto-Differenz")
+
+    return unique_preserving_order(issues)
+
+
+def unique_preserving_order(values: list[str]) -> list[str]:
+    seen = set()
+    unique_values = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique_values.append(value)
+    return unique_values
+
+
 def validate_document_review_details(document: dict[str, Any]) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
     extraction = document.get("extraction") or {}
@@ -1646,6 +1749,7 @@ def _payment_adjustment_export_rows(
     for suggestion, allocated_delta in allocations:
         if allocated_delta == Decimal("0.00"):
             continue
+        adjustment_net, adjustment_tax = _payment_adjustment_net_tax(allocated_delta, suggestion, extraction, payment_delta)
         cost_category = suggestion.get("cost_category") if suggestion else None
         accounting_rule = find_accounting_rule(
             tenant_id=document.get("tenant_id"),
@@ -1661,8 +1765,8 @@ def _payment_adjustment_export_rows(
             "assignment_kind": suggestion.get("assignment_kind") if suggestion else None,
             "assignment_code": suggestion.get("assignment_code") if suggestion else None,
             "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
-            "net_amount": None,
-            "tax_amount": None,
+            "net_amount": _money_string(adjustment_net),
+            "tax_amount": _money_string(adjustment_tax),
             "gross_amount": _money_string(allocated_delta),
             "payable_delta": _money_string(allocated_delta),
             **_accounting_export_fields(accounting_rule, payment_adjustment=True),
@@ -1670,6 +1774,34 @@ def _payment_adjustment_export_rows(
         row["export_warnings"] = _booking_export_warnings(row)
         rows.append(row)
     return rows
+
+
+def _payment_adjustment_net_tax(
+    allocated_delta: Decimal,
+    suggestion: dict[str, Any] | None,
+    extraction: dict[str, Any],
+    total_delta: Decimal,
+) -> tuple[Decimal | None, Decimal | None]:
+    explicit_net = _decimal_or_none((extraction.get("raw_result") or {}).get("discount_net_amount"))
+    explicit_tax = _decimal_or_none((extraction.get("raw_result") or {}).get("discount_tax_amount"))
+    if explicit_net is not None and explicit_tax is not None and total_delta != Decimal("0.00"):
+        sign = Decimal("-1") if total_delta < 0 else Decimal("1")
+        ratio = allocated_delta / total_delta
+        net_amount = _round_money(sign * abs(explicit_net) * ratio)
+        tax_amount = _round_money(allocated_delta - net_amount)
+        expected_tax = _round_money(sign * abs(explicit_tax) * ratio)
+        if abs(tax_amount - expected_tax) <= Decimal("0.01"):
+            return net_amount, tax_amount
+
+    basis = suggestion or extraction
+    gross_basis = _decimal_or_none(basis.get("gross_amount"))
+    net_basis = _decimal_or_none(basis.get("net_amount"))
+    tax_basis = _decimal_or_none(basis.get("tax_amount"))
+    if gross_basis and net_basis is not None and tax_basis is not None:
+        net_amount = _round_money(allocated_delta * net_basis / gross_basis)
+        tax_amount = _round_money(allocated_delta - net_amount)
+        return net_amount, tax_amount
+    return None, None
 
 
 def _booking_export_warnings(row: dict[str, Any]) -> str:
@@ -1681,6 +1813,8 @@ def _booking_export_warnings(row: dict[str, Any]) -> str:
     if not row.get("accounting_rule"):
         warnings.append("Kontierungsregel fehlt")
     if row.get("row_type") == "payment_adjustment":
+        if row.get("net_amount") in (None, "") or row.get("tax_amount") in (None, ""):
+            warnings.append("Skonto-/Vorsteueraufteilung fehlt")
         if not row.get("discount_account"):
             warnings.append("Skontokonto fehlt")
     else:
@@ -2946,7 +3080,10 @@ def _json_safe_value(value: Any) -> Any:
 def _decimal_or_none(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
-    return Decimal(str(value))
+    try:
+        return Decimal(str(value).replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _round_money(value: Decimal) -> Decimal:
