@@ -369,10 +369,25 @@ def export_booking_rows(
     buffer = StringIO()
     writer = DictWriter(buffer, fieldnames=list(rows[0].keys()), delimiter=";", lineterminator="\n")
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(_csv_safe_rows(rows))
     content = ("\ufeff" + buffer.getvalue()).encode("utf-8")
     headers = {"Content-Disposition": f'attachment; filename="buchungsentwurf-{tenant_id}-{year}-{month:02d}.csv"'}
     return StreamingResponse(BytesIO(content), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+def _csv_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{key: _csv_safe_value(value) for key, value in row.items()} for row in rows]
+
+
+def _csv_safe_value(value: Any) -> Any:
+    if not isinstance(value, str) or value == "":
+        return value
+    stripped = value.lstrip()
+    if stripped and stripped[0] in ("=", "+", "@"):
+        return f"'{value}"
+    if value[0] in ("\t", "\r", "\n") or ord(value[0]) < 32:
+        return f"'{value}"
+    return value
 
 
 @router.post("/bulk/extract", status_code=status.HTTP_202_ACCEPTED)

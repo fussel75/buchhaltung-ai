@@ -217,6 +217,7 @@ function UploadApp() {
   const [savingExtractionIds, setSavingExtractionIds] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [exporting, setExporting] = useState("");
+  const [bookingPreview, setBookingPreview] = useState(null);
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [uploadBatch, setUploadBatch] = useState(null);
   const [extractionBatch, setExtractionBatch] = useState(null);
@@ -1056,16 +1057,48 @@ function UploadApp() {
         `/documents/export/bookings?tenant_id=${encodeURIComponent(activeTenantId)}&year=${year}&month=${month}`,
       );
       if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
         throw new Error(
           response.status === 404
             ? "Keine freigegebenen Buchungszeilen für diesen Monat gefunden."
-            : `Buchungsexport fehlgeschlagen: ${response.status}`,
+            : formatApiError(result.detail, `Buchungsexport fehlgeschlagen: ${response.status}`),
         );
       }
       await downloadResponse(response, `buchungsentwurf-${activeTenantId}-${exportMonth}.csv`);
       setNotice(`Buchungsentwurf erstellt: ${exportMonth}`);
     } catch (exportError) {
       setError(exportError.message);
+    } finally {
+      setExporting("");
+    }
+  }, [activeTenantId, apiFetch, exportMonth]);
+
+  const loadBookingPreview = useCallback(async () => {
+    const [year, month] = exportMonth.split("-").map((value) => Number(value));
+    if (!year || !month) {
+      setError("Bitte einen Monat auswählen.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setExporting("booking-preview");
+    try {
+      const response = await apiFetch(
+        `/documents/export/bookings?tenant_id=${encodeURIComponent(activeTenantId)}&year=${year}&month=${month}&format=json`,
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "Keine freigegebenen Buchungszeilen für diesen Monat gefunden."
+            : formatApiError(result.detail, `Buchungsvorschau fehlgeschlagen: ${response.status}`),
+        );
+      }
+      setBookingPreview({ month: exportMonth, rows: result.rows || [] });
+      setNotice(`Buchungsvorschau geladen: ${result.rows?.length || 0} Zeilen`);
+    } catch (previewError) {
+      setBookingPreview(null);
+      setError(previewError.message);
     } finally {
       setExporting("");
     }
@@ -1233,6 +1266,14 @@ function UploadApp() {
                 <button
                   className="secondary-button"
                   type="button"
+                  onClick={loadBookingPreview}
+                  disabled={exporting === "booking-preview"}
+                >
+                  {exporting === "booking-preview" ? "Lädt..." : "Buchungsvorschau"}
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
                   onClick={exportBookingRows}
                   disabled={exporting === "bookings"}
                 >
@@ -1255,6 +1296,13 @@ function UploadApp() {
             {reviewBatch.current ? <span>{reviewBatch.current}</span> : null}
             <small>{reviewBatch.failed} fehlgeschlagen</small>
           </div>
+        ) : null}
+        {bookingPreview ? (
+          <BookingExportPreview
+            month={bookingPreview.month}
+            rows={bookingPreview.rows}
+            onClose={() => setBookingPreview(null)}
+          />
         ) : null}
         {documents.length === 0 ? (
           <p className="empty">Noch keine Belege für diesen Mandanten.</p>
@@ -3680,6 +3728,118 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
   );
 }
 
+function BookingExportPreview({ month, rows, onClose }) {
+  const totals = useMemo(
+    () => rows.reduce(
+      (sum, row) => ({
+        net: sum.net + numberOrZero(row.net_amount),
+        tax: sum.tax + numberOrZero(row.tax_amount),
+        gross: sum.gross + numberOrZero(row.gross_amount),
+        delta: sum.delta + numberOrZero(row.payable_delta),
+      }),
+      { net: 0, tax: 0, gross: 0, delta: 0 },
+    ),
+    [rows],
+  );
+
+  return (
+    <section className="booking-preview">
+      <div className="booking-preview-head">
+        <div>
+          <p className="eyebrow">Exportvorschau</p>
+          <h3>Buchungsentwurf {month}</h3>
+          <span>{rows.length} Zeilen vor CSV-Erstellung</span>
+        </div>
+        <button className="secondary-button" type="button" onClick={onClose}>Schließen</button>
+      </div>
+
+      <div className="booking-preview-totals" aria-label="Summen der Exportvorschau">
+        <PreviewTotal label="Netto" value={totals.net} />
+        <PreviewTotal label="USt" value={totals.tax} />
+        <PreviewTotal label="Brutto" value={totals.gross} />
+        <PreviewTotal label="Zahlungsdifferenz" value={totals.delta} />
+      </div>
+
+      <div className="booking-preview-table-wrap">
+        <table className="booking-preview-table">
+          <thead>
+            <tr>
+              <th>Typ</th>
+              <th>Zeile</th>
+              <th>Beleg</th>
+              <th>Datei</th>
+              <th>Datum</th>
+              <th>Lieferant</th>
+              <th>Zuordnung</th>
+              <th>Kostenart</th>
+              <th>Aufwand</th>
+              <th>Gegenkonto</th>
+              <th>Skontokonto</th>
+              <th>Regel</th>
+              <th>Steuer</th>
+              <th>Zahlung</th>
+              <th>Zahlbetrag</th>
+              <th>Skonto-Basis</th>
+              <th>Skonto %</th>
+              <th>Skonto</th>
+              <th>Differenz</th>
+              <th>Netto</th>
+              <th>USt</th>
+              <th>Brutto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`${row.document_id}-${row.line_no || "delta"}-${index}`}>
+                <td><span className={`status ${row.row_type === "payment_adjustment" ? "blue" : "gray"}`}>{formatExportRowType(row.row_type)}</span></td>
+                <td>{row.line_no || "-"}</td>
+                <td>
+                  <strong>{row.invoice_number || "-"}</strong>
+                  <span>{row.description || row.payment_label || "-"}</span>
+                </td>
+                <td>
+                  <strong>{safeVisibleFilename(row.normalized_filename || row.original_filename)}</strong>
+                  <span>{row.original_filename || "-"}</span>
+                </td>
+                <td>{formatDate(row.invoice_date)}</td>
+                <td>{row.supplier_name || "-"}</td>
+                <td>{[formatAssignmentKind(row.assignment_kind), row.assignment_code].filter(Boolean).join(" ") || "-"}</td>
+                <td>{formatCostCategory(row.cost_category)}</td>
+                <td>{row.debit_account || "-"}</td>
+                <td>{row.credit_account || "-"}</td>
+                <td>{row.discount_account || "-"}</td>
+                <td>{row.accounting_rule || "-"}</td>
+                <td>{[row.tax_key, row.tax_rate ? `${row.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"}</td>
+                <td>
+                  <strong>{paymentTypeLabel(row.payment_type)}</strong>
+                  <span>{row.payment_decision_source || "-"}</span>
+                </td>
+                <td className="numeric">{formatMoney(row.payment_amount)}</td>
+                <td className="numeric">{formatMoney(row.discount_base)}</td>
+                <td className="numeric">{row.discount_percent || "-"}</td>
+                <td className="numeric">{formatMoney(row.discount_amount)}</td>
+                <td className="numeric">{formatMoney(row.payable_delta)}</td>
+                <td className="numeric">{formatMoney(row.net_amount)}</td>
+                <td className="numeric">{formatMoney(row.tax_amount)}</td>
+                <td className="numeric">{formatMoney(row.gross_amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function PreviewTotal({ label, value }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{formatMoney(value.toFixed(2))}</strong>
+    </div>
+  );
+}
+
 function MoneyInput({ value, onChange, disabled, label }) {
   return (
     <input
@@ -3845,7 +4005,10 @@ function formatApiError(detail, fallback) {
   if (detail?.documents?.length) {
     const details = detail.documents
       .slice(0, 3)
-      .map((entry) => `${entry.document_id}: ${entry.reason}`)
+      .map((entry) => {
+        const message = entry.reason || entry.errors?.join(", ") || entry.filename || "unbekannter Fehler";
+        return `${entry.filename || entry.document_id}: ${message}`;
+      })
       .join("; ");
     return `${detail.message || fallback}: ${details}${detail.documents.length > 3 ? " ..." : ""}`;
   }
@@ -3913,6 +4076,14 @@ function formatDocumentType(value) {
   const labels = {
     credit_note: "Gutschrift",
     incoming_invoice: "Eingangsrechnung",
+  };
+  return labels[value] ?? value;
+}
+
+function formatExportRowType(value) {
+  const labels = {
+    cost: "Kosten",
+    payment_adjustment: "Skonto",
   };
   return labels[value] ?? value;
 }
@@ -4177,7 +4348,7 @@ function paymentTypeLabel(type) {
 }
 
 function numberOrZero(value) {
-  const number = Number(value);
+  const number = Number(String(value ?? "").replace(",", "."));
   return Number.isNaN(number) ? 0 : number;
 }
 

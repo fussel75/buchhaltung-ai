@@ -607,6 +607,98 @@ button:disabled {
   color: var(--muted);
 }
 
+.booking-preview {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 16px;
+  padding: 14px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgb(15 23 42 / 5%);
+}
+
+.booking-preview-head,
+.booking-preview-totals {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.booking-preview-head h3 {
+  margin: 0;
+}
+
+.booking-preview-head span,
+.booking-preview-totals span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.booking-preview-totals {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.booking-preview-totals div {
+  display: grid;
+  gap: 3px;
+  min-width: 120px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--surface-subtle);
+}
+
+.booking-preview-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.booking-preview-table {
+  width: 100%;
+  min-width: 1760px;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.booking-preview-table th,
+.booking-preview-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.booking-preview-table th {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.booking-preview-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.booking-preview-table td strong,
+.booking-preview-table td span {
+  display: block;
+}
+
+.booking-preview-table td span {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.booking-preview-table .numeric {
+  text-align: right;
+  white-space: nowrap;
+}
+
 .job-history {
   display: grid;
   gap: 14px;

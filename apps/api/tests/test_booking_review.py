@@ -278,6 +278,23 @@ class BookingSuggestionTests(TestCase):
         )
         self.assertFalse(any(character in filename for character in '<>:"/\\|?*'))
 
+    def test_csv_safe_rows_escape_formula_like_text_values(self):
+        rows = documents_route._csv_safe_rows(
+            [
+                {
+                    "supplier_name": "=cmd|' /C calc'!A0",
+                    "description": "\tSUMME(A1:A2)",
+                    "gross_amount": "-10.00",
+                    "invoice_number": "RE-1",
+                }
+            ]
+        )
+
+        self.assertEqual(rows[0]["supplier_name"], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[0]["description"], "'\tSUMME(A1:A2)")
+        self.assertEqual(rows[0]["gross_amount"], "-10.00")
+        self.assertEqual(rows[0]["invoice_number"], "RE-1")
+
     def test_manual_normalized_filename_keeps_document_suffix(self):
         document = {
             "tenant_id": "demo-mandant",
@@ -624,6 +641,7 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[1]["payable_delta"], "-7.28")
         self.assertEqual(rows[1]["debit_account"], "3736")
         self.assertEqual(rows[1]["payment_type"], "cash_discount")
+        self.assertEqual(rows[1]["payment_decision_source"], "gewählt")
 
     def test_booking_export_rows_allocate_payment_adjustment_to_split_lines(self):
         rules = [

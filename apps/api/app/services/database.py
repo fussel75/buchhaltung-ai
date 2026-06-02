@@ -1574,7 +1574,8 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
 
         extraction = document.get("extraction") or {}
         raw_result = extraction.get("raw_result") or {}
-        payment_decision = document.get("payment_decision") or _default_payment_decision(extraction)
+        selected_payment_decision = document.get("payment_decision")
+        payment_decision = selected_payment_decision or _default_payment_decision(extraction)
         supplier_name = extraction.get("supplier_name")
         common = {
             "tenant_id": document.get("tenant_id"),
@@ -1588,6 +1589,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
             "currency": extraction.get("currency") or "EUR",
             "payment_type": payment_decision.get("payment_type") if payment_decision else None,
             "payment_label": payment_decision.get("label") if payment_decision else None,
+            "payment_decision_source": "gewählt" if selected_payment_decision else "Standard",
             "payment_due_date": payment_decision.get("due_date") if payment_decision else None,
             "payment_amount": _money_string(payment_decision.get("amount")) if payment_decision else None,
             "discount_base": _money_string(payment_decision.get("discount_base")) if payment_decision else None,
