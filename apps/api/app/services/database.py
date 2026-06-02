@@ -1106,11 +1106,20 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
         return None
 
     if document.get("status") != "review_ready":
-        raise ReviewApprovalError(["Finale Freigabe ist nur im Status Vorschlag möglich."])
+        raise ReviewApprovalError(
+            ["Finale Freigabe ist nur im Status Vorschlag möglich."],
+            details=[
+                {
+                    "code": "invalid_status",
+                    "message": "Finale Freigabe ist nur im Status Vorschlag möglich.",
+                    "status": document.get("status"),
+                }
+            ],
+        )
 
     approval_errors = validate_document_review(document)
     if approval_errors:
-        raise ReviewApprovalError(approval_errors)
+        raise ReviewApprovalError(approval_errors, details=validate_document_review_details(document))
 
     now = datetime.now(UTC)
     with _connect() as connection:
@@ -1143,9 +1152,10 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
 
 
 class ReviewApprovalError(ValueError):
-    def __init__(self, errors: list[str]):
+    def __init__(self, errors: list[str], details: list[dict[str, Any]] | None = None):
         super().__init__("review approval blocked")
         self.errors = errors
+        self.details = details or [{"code": "review_validation", "message": error} for error in errors]
 
 
 _COST_CATEGORY_LABELS = {
@@ -1170,11 +1180,18 @@ def _accounting_rule_context(supplier_name: str | None, cost_category: str | Non
 
 
 def validate_document_review(document: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
+    return [detail["message"] for detail in validate_document_review_details(document)]
+
+
+def validate_document_review_details(document: dict[str, Any]) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
     extraction = document.get("extraction") or {}
     raw_result = extraction.get("raw_result") or {}
     suggestions = document.get("booking_suggestions") or []
     supplier_name = extraction.get("supplier_name")
+
+    def add_error(message: str, code: str = "review_validation", **context: Any) -> None:
+        errors.append({"code": code, "message": message, **context})
 
     required_extraction_fields = {
         "supplier_name": "Lieferant",
@@ -1187,80 +1204,113 @@ def validate_document_review(document: dict[str, Any]) -> list[str]:
     }
     for field_name, label in required_extraction_fields.items():
         if extraction.get(field_name) in (None, ""):
-            errors.append(f"Pflichtfeld fehlt: {label}.")
+            add_error(f"Pflichtfeld fehlt: {label}.", field=field_name)
 
     confidence = _decimal_or_none(extraction.get("confidence"))
     if confidence is not None and confidence < Decimal("0.80"):
-        errors.append("Extraktion ist zu unsicher für finale Freigabe.")
+        add_error("Extraktion ist zu unsicher für finale Freigabe.", code="low_confidence")
     if raw_result.get("document_type") in (None, ""):
-        errors.append("Pflichtfeld fehlt: Belegart.")
+        add_error("Pflichtfeld fehlt: Belegart.", field="document_type")
     if extraction.get("warnings"):
-        errors.append("Offene Extraktionswarnungen müssen vor finaler Freigabe geklärt werden.")
+        add_error("Offene Extraktionswarnungen müssen vor finaler Freigabe geklärt werden.", code="open_warnings")
     structured_validation = raw_result.get("structured_validation") or {}
     if raw_result.get("structured_validation_errors") or structured_validation.get("status") == "failed":
-        errors.append("E-Rechnungsvalidierung ist fehlgeschlagen.")
+        add_error("E-Rechnungsvalidierung ist fehlgeschlagen.", code="structured_validation_failed")
 
     if not suggestions:
-        errors.append("Keine Buchungsvorschläge vorhanden.")
+        add_error("Keine Buchungsvorschläge vorhanden.", code="missing_booking_suggestions")
 
     for suggestion in suggestions:
         line_no = suggestion.get("line_no") or "?"
         if not suggestion.get("booking_type"):
-            errors.append(f"Zeile {line_no}: Belegart fehlt.")
+            add_error(f"Zeile {line_no}: Belegart fehlt.", line_no=line_no, field="booking_type")
         if not suggestion.get("cost_category"):
-            errors.append(f"Zeile {line_no}: Kostenart fehlt.")
+            add_error(f"Zeile {line_no}: Kostenart fehlt.", line_no=line_no, field="cost_category")
         if not suggestion.get("description"):
-            errors.append(f"Zeile {line_no}: Beschreibung fehlt.")
+            add_error(f"Zeile {line_no}: Beschreibung fehlt.", line_no=line_no, field="description")
         for amount_field, label in (
             ("net_amount", "Netto"),
             ("tax_amount", "USt"),
             ("gross_amount", "Brutto"),
         ):
             if _decimal_or_none(suggestion.get(amount_field)) is None:
-                errors.append(f"Zeile {line_no}: {label} fehlt.")
+                add_error(f"Zeile {line_no}: {label} fehlt.", line_no=line_no, field=amount_field)
 
-        accounting_rule = find_accounting_rule(
-            tenant_id=document.get("tenant_id"),
-            supplier_name=supplier_name,
-            cost_category=suggestion.get("cost_category"),
-        )
-        if not accounting_rule:
-            context = _accounting_rule_context(supplier_name, suggestion.get("cost_category"))
-            errors.append(
-                f"Zeile {line_no}: Kontierungsregel fehlt für {context}. "
-                "Bitte unter Stammdaten -> Kontierungsregeln anlegen."
+        cost_category = suggestion.get("cost_category")
+        accounting_rule = None
+        if cost_category:
+            accounting_rule = find_accounting_rule(
+                tenant_id=document.get("tenant_id"),
+                supplier_name=supplier_name,
+                cost_category=cost_category,
             )
-        elif not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account"):
-            context = _accounting_rule_context(supplier_name, suggestion.get("cost_category"))
-            errors.append(
+        if cost_category and not accounting_rule:
+            context = _accounting_rule_context(supplier_name, cost_category)
+            add_error(
+                f"Zeile {line_no}: Kontierungsregel fehlt für {context}. "
+                "Bitte unter Stammdaten -> Kontierungsregeln anlegen.",
+                code="missing_accounting_rule",
+                line_no=line_no,
+                supplier_name=supplier_name,
+                cost_category=cost_category,
+                cost_category_label=_cost_category_label(cost_category),
+                suggested_name=f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
+            )
+        elif accounting_rule and (not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account")):
+            context = _accounting_rule_context(supplier_name, cost_category)
+            add_error(
                 f"Zeile {line_no}: Kontierungsregel ist unvollständig für {context}. "
-                "Aufwandskonto oder Gegenkonto fehlt."
+                "Aufwandskonto oder Gegenkonto fehlt.",
+                code="incomplete_accounting_rule",
+                line_no=line_no,
+                supplier_name=supplier_name,
+                cost_category=cost_category,
+                cost_category_label=_cost_category_label(cost_category),
+                suggested_name=accounting_rule.get("name") or f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
             )
 
     if suggestions and (len(suggestions) > 1 or raw_result.get("allocation_lines")):
-        errors.extend(_validate_split_totals(suggestions, extraction))
+        for message in _validate_split_totals(suggestions, extraction):
+            add_error(message, code="split_total_mismatch")
 
     payment_terms = _payment_terms_from_extraction(extraction)
     payment_decision = document.get("payment_decision")
     if len(payment_terms) > 1 and not payment_decision:
-        errors.append("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewählt werden.")
+        add_error(
+            "Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewählt werden.",
+            code="missing_payment_decision",
+        )
     payment_decision = payment_decision or _default_payment_decision(extraction)
     payment_delta = _payment_delta(extraction, payment_decision)
     if payment_delta is not None and payment_delta != Decimal("0.00") and suggestions:
         first_suggestion = suggestions[0]
+        cost_category = first_suggestion.get("cost_category")
         accounting_rule = find_accounting_rule(
             tenant_id=document.get("tenant_id"),
             supplier_name=supplier_name,
-            cost_category=first_suggestion.get("cost_category"),
+            cost_category=cost_category,
         )
         if not accounting_rule:
-            context = _accounting_rule_context(supplier_name, first_suggestion.get("cost_category"))
-            errors.append(
+            context = _accounting_rule_context(supplier_name, cost_category)
+            add_error(
                 f"Zahlungsdifferenz/Skonto: Kontierungsregel fehlt für {context}. "
-                "Bitte unter Stammdaten -> Kontierungsregeln anlegen."
+                "Bitte unter Stammdaten -> Kontierungsregeln anlegen.",
+                code="missing_accounting_rule",
+                line_no="payment_delta",
+                supplier_name=supplier_name,
+                cost_category=cost_category,
+                cost_category_label=_cost_category_label(cost_category),
+                suggested_name=f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
             )
         elif not accounting_rule.get("discount_account"):
-            errors.append("Zahlungsdifferenz/Skonto: Skontokonto fehlt in der Kontierungsregel.")
+            add_error(
+                "Zahlungsdifferenz/Skonto: Skontokonto fehlt in der Kontierungsregel.",
+                code="missing_discount_account",
+                supplier_name=supplier_name,
+                cost_category=cost_category,
+                cost_category_label=_cost_category_label(cost_category),
+                suggested_name=accounting_rule.get("name"),
+            )
 
     return errors
 

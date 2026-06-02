@@ -21,6 +21,7 @@ from app.services.database import (
     build_booking_export_rows,
     find_accounting_rule,
     validate_document_review,
+    validate_document_review_details,
 )
 
 
@@ -1195,6 +1196,7 @@ class BookingSuggestionTests(TestCase):
 
         with patch.object(database_service, "list_accounting_rules", return_value=[]):
             errors = validate_document_review(document)
+            details = validate_document_review_details(document)
 
         self.assertIn(
             "Zeile 1: Kontierungsregel fehlt für Kostenart Material / Lieferant Lüchau Baustoffe GmbH. "
@@ -1202,6 +1204,11 @@ class BookingSuggestionTests(TestCase):
             errors,
         )
         self.assertIn("Zahlungsentscheidung fehlt: Skonto/ohne Abzug/Gutschrift-Verrechnung muss gewählt werden.", errors)
+        missing_rule = next(detail for detail in details if detail["code"] == "missing_accounting_rule")
+        self.assertEqual(missing_rule["supplier_name"], "Lüchau Baustoffe GmbH")
+        self.assertEqual(missing_rule["cost_category"], "material")
+        self.assertEqual(missing_rule["cost_category_label"], "Material")
+        self.assertEqual(missing_rule["suggested_name"], "Material Lüchau Baustoffe GmbH")
 
     def test_review_validation_accepts_complete_review(self):
         document = {

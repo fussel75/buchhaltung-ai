@@ -226,6 +226,8 @@ function UploadApp() {
   const [approvalDocumentId, setApprovalDocumentId] = useState(null);
   const [focusedReviewDocumentId, setFocusedReviewDocumentId] = useState(null);
   const [approvalError, setApprovalError] = useState("");
+  const [approvalIssues, setApprovalIssues] = useState([]);
+  const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -277,6 +279,7 @@ function UploadApp() {
   const focusedReviewPositionLabel = focusedReviewIndex >= 0
     ? `${focusedReviewIndex + 1} / ${focusableReviewDocuments.length}`
     : "";
+  const clearAccountingRuleDraft = useCallback(() => setAccountingRuleDraft(null), []);
 
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
@@ -701,11 +704,13 @@ function UploadApp() {
       if (document.status !== "review_ready") {
         const message = "Finale Freigabe ist nur im Status Vorschlag möglich.";
         setApprovalError(message);
+        setApprovalIssues([]);
         setError(message);
         return;
       }
 
       setApprovalError("");
+      setApprovalIssues([]);
       setError("");
       setNotice("");
       setApprovingIds((current) => [...current, document.id]);
@@ -717,12 +722,14 @@ function UploadApp() {
 
         if (!response.ok) {
           const result = await response.json().catch(() => ({}));
+          setApprovalIssues(extractApprovalIssues(result.detail));
           throw new Error(formatApprovalError(result.detail, response.status));
         }
 
         const result = await response.json();
         await loadDocuments();
         setApprovalDocumentId(null);
+        setApprovalIssues([]);
         setNotice(`Beleg final freigegeben: ${result.document.original_filename}`);
       } catch (approveError) {
         setApprovalError(approveError.message);
@@ -733,6 +740,39 @@ function UploadApp() {
     },
     [apiFetch, loadDocuments],
   );
+
+  function prepareAccountingRuleFromApproval(issue) {
+    if (issue?.code !== "missing_accounting_rule") {
+      setNotice("Bitte die bestehende Kontierungsregel unter Stammdaten bearbeiten.");
+      return;
+    }
+    if (user?.role !== "admin") {
+      setNotice("Kontierungsregel fehlt. Bitte einen Admin bitten, die Regel unter Stammdaten anzulegen.");
+      return;
+    }
+    const supplierName = issue?.supplier_name || approvalDocument?.extraction?.supplier_name || "";
+    const costCategory = issue?.cost_category ?? approvalDocument?.booking_suggestions?.[0]?.cost_category ?? "";
+    const suggestedName = issue?.suggested_name || defaultAccountingRuleName(supplierName, costCategory);
+
+    setAccountingRuleDraft({
+      id: `${Date.now()}-${costCategory}-${supplierName}`,
+      form: {
+        name: suggestedName,
+        supplier_match_text: supplierName,
+        cost_category: costCategory,
+        debit_account: "",
+        credit_account: "",
+        tax_key: "",
+        tax_rate: "19.00",
+        discount_account: "",
+      },
+    });
+    setApprovalDocumentId(null);
+    setApprovalError("");
+    setApprovalIssues([]);
+    setActiveView("masterdata");
+    setNotice("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
+  }
 
   const reopenReview = useCallback(
     async (document) => {
@@ -1212,6 +1252,7 @@ function UploadApp() {
                         type="button"
                         onClick={() => {
                           setApprovalError("");
+                          setApprovalIssues([]);
                           setApprovalDocumentId(document.id);
                         }}
                         disabled={approvingIds.includes(document.id)}
@@ -1373,10 +1414,17 @@ function UploadApp() {
         tenantProfile={tenantProfile}
         isApproving={approvalDocument ? approvingIds.includes(approvalDocument.id) : false}
         error={approvalError}
-        onCancel={() => setApprovalDocumentId(null)}
+        issues={approvalIssues}
+        canPrepareAccountingRule={user?.role === "admin"}
+        onCancel={() => {
+          setApprovalDocumentId(null);
+          setApprovalError("");
+          setApprovalIssues([]);
+        }}
         onConfirm={() => {
           if (approvalDocument) approveDocument(approvalDocument);
         }}
+        onPrepareAccountingRule={prepareAccountingRuleFromApproval}
       />
 
       <ReviewFocusDialog
@@ -1399,7 +1447,14 @@ function UploadApp() {
       />
 
       {activeView === "masterdata" && user?.role === "admin" ? (
-        <MasterdataAdmin apiFetch={apiFetch} tenantId={activeTenantId} tenantProfile={tenantProfile} onProfileSaved={setTenantProfile} />
+        <MasterdataAdmin
+          apiFetch={apiFetch}
+          tenantId={activeTenantId}
+          tenantProfile={tenantProfile}
+          accountingRuleDraft={accountingRuleDraft}
+          onAccountingRuleDraftConsumed={clearAccountingRuleDraft}
+          onProfileSaved={setTenantProfile}
+        />
       ) : null}
 
       {activeView === "users" && user?.role === "admin" ? (
@@ -2069,7 +2124,17 @@ function ReviewFocusDialog({
   );
 }
 
-function ApprovalDialog({ document, tenantProfile, isApproving, error, onCancel, onConfirm }) {
+function ApprovalDialog({
+  document,
+  tenantProfile,
+  isApproving,
+  error,
+  issues,
+  canPrepareAccountingRule,
+  onCancel,
+  onConfirm,
+  onPrepareAccountingRule,
+}) {
   const dialogRef = useRef(null);
 
   useEffect(() => {
@@ -2118,6 +2183,10 @@ function ApprovalDialog({ document, tenantProfile, isApproving, error, onCancel,
   const payment = approvalPaymentSummary(document);
   const paymentTerms = paymentTermLinesForDocument(document);
   const requiresPaymentDecision = paymentTerms.length > 1 && !document.payment_decision;
+  const accountingRuleIssues = (issues || []).filter((issue) =>
+    ["missing_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
+  );
+  const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
   const totalNet = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.net_amount), 0);
   const totalTax = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.tax_amount), 0);
   const totalGross = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.gross_amount), 0);
@@ -2145,6 +2214,36 @@ function ApprovalDialog({ document, tenantProfile, isApproving, error, onCancel,
           </p>
         ) : null}
         {error ? <p className="approval-blocker">{error}</p> : null}
+
+        {accountingRuleIssues.length ? (
+          <div className="approval-fix-panel">
+            <div>
+              <strong>{accountingRuleFixTitle(accountingRuleIssues)}</strong>
+              <span>
+                {canPrepareAccountingRule
+                  ? missingAccountingRuleIssues.length
+                    ? "Die App kann die passende Regel vorbereiten. Konten müssen danach fachlich ergänzt werden."
+                    : "Die bestehende Regel muss unter Stammdaten bearbeitet werden."
+                  : "Bitte einen Admin bitten, die passende Regel unter Stammdaten anzulegen."}
+              </span>
+            </div>
+            {canPrepareAccountingRule && missingAccountingRuleIssues.length ? (
+              <div className="approval-fix-actions">
+                {dedupeAccountingRuleIssues(missingAccountingRuleIssues).map((issue) => (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    key={`${issue.supplier_name || "-"}-${issue.cost_category || ""}-${issue.code}`}
+                    onClick={() => onPrepareAccountingRule(issue)}
+                    disabled={issue.field === "cost_category" && !issue.cost_category}
+                  >
+                    {issue.cost_category_label || formatCostCategory(issue.cost_category)} / {issue.supplier_name || "ohne Lieferant"}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="approval-facts">
           <Field label="Datei" value={document.original_filename} />
@@ -2342,7 +2441,7 @@ function UserAdmin({ apiFetch, currentUser, activeTenantId }) {
   );
 }
 
-function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) {
+function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, accountingRuleDraft, onAccountingRuleDraftConsumed, onProfileSaved }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
@@ -2379,6 +2478,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
     discount_account: "",
   });
   const [message, setMessage] = useState("");
+  const accountingSectionRef = useRef(null);
 
   useEffect(() => {
     setProfileForm(tenantProfile);
@@ -2408,6 +2508,20 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
   useEffect(() => {
     loadMasterdata().catch((error) => setMessage(error.message));
   }, [loadMasterdata]);
+
+  useEffect(() => {
+    if (!accountingRuleDraft?.form) return;
+    setAccountingForm((current) => ({
+      ...current,
+      ...accountingRuleDraft.form,
+    }));
+    setMessage("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
+    window.setTimeout(() => {
+      accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      accountingSectionRef.current?.querySelector("input")?.focus();
+    }, 0);
+    onAccountingRuleDraftConsumed?.();
+  }, [accountingRuleDraft, onAccountingRuleDraftConsumed]);
 
   async function createAssignment(event) {
     event.preventDefault();
@@ -2999,7 +3113,7 @@ function MasterdataAdmin({ apiFetch, tenantId, tenantProfile, onProfileSaved }) 
           </div>
         </section>
 
-        <section className="admin-card admin-card-wide">
+        <section className="admin-card admin-card-wide" ref={accountingSectionRef}>
           <div className="card-header">
             <div>
               <p className="eyebrow">Buchungsentwurf und Export</p>
@@ -3928,6 +4042,30 @@ function formatApprovalError(detail, status) {
   }
   if (typeof detail === "string") return detail;
   return `Finale Freigabe fehlgeschlagen: ${status}`;
+}
+
+function extractApprovalIssues(detail) {
+  return Array.isArray(detail?.details) ? detail.details : [];
+}
+
+function dedupeAccountingRuleIssues(issues) {
+  const seen = new Set();
+  return issues.filter((issue) => {
+    const key = `${issue.code || ""}|${issue.supplier_name || ""}|${issue.cost_category || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function accountingRuleFixTitle(issues) {
+  if (issues.some((issue) => issue.code === "missing_discount_account")) return "Skontokonto fehlt";
+  if (issues.some((issue) => issue.code === "incomplete_accounting_rule")) return "Kontierungsregel unvollständig";
+  return "Kontierungsregel fehlt";
+}
+
+function defaultAccountingRuleName(supplierName, costCategory) {
+  return [formatCostCategory(costCategory), supplierName].filter(Boolean).join(" ").trim() || "Neue Kontierungsregel";
 }
 
 function splitAliases(value) {

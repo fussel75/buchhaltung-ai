@@ -555,7 +555,10 @@ def approve_document(document_id: UUID, request: Request) -> dict[str, Any]:
     try:
         document = approve_document_review(document_id, actor=actor)
     except ReviewApprovalError as error:
-        raise HTTPException(status_code=409, detail={"message": "Freigabe blockiert", "errors": error.errors}) from error
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Freigabe blockiert", "errors": error.errors, "details": error.details},
+        ) from error
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
     return {"document": document}

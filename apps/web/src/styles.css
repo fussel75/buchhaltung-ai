@@ -1374,6 +1374,45 @@ code {
   line-height: 1.35;
 }
 
+.approval-fix-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #cfe4d6;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #f4fbf6;
+}
+
+.approval-fix-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.approval-fix-panel strong {
+  color: var(--text);
+}
+
+.approval-fix-panel span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.approval-fix-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.approval-fix-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 .approval-facts {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1988,6 +2027,7 @@ code {
   .review-workspace,
   .review-facts,
   .approval-facts,
+  .approval-fix-panel,
   .extraction-grid,
   .form-grid,
   .form-grid > .form-field,
@@ -2058,6 +2098,14 @@ code {
   .month-export {
     width: 100%;
     min-width: 0;
+  }
+
+  .approval-fix-actions {
+    justify-content: stretch;
+  }
+
+  .approval-fix-actions button {
+    width: 100%;
   }
 
   .review-facts .field:nth-child(n) {
