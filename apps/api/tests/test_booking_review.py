@@ -625,6 +625,176 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[1]["debit_account"], "3736")
         self.assertEqual(rows[1]["payment_type"], "cash_discount")
 
+    def test_booking_export_rows_allocate_payment_adjustment_to_split_lines(self):
+        rules = [
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Fremdleistung Standard",
+                "supplier_match_text": None,
+                "cost_category": "subcontractor",
+                "debit_account": "3100",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3737",
+                "is_active": True,
+            },
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            rows = build_booking_export_rows(
+                [
+                    {
+                        "id": str(uuid4()),
+                        "tenant_id": "demo-mandant",
+                        "original_filename": "split.pdf",
+                        "normalized_filename": "ERg split.pdf",
+                        "status": "review_approved",
+                        "extraction": {
+                            "supplier_name": "Muster Lieferant GmbH",
+                            "invoice_number": "S-1",
+                            "invoice_date": "2026-05-07",
+                            "gross_amount": "357.00",
+                            "currency": "EUR",
+                            "raw_result": {"document_type": "incoming_invoice"},
+                        },
+                        "booking_suggestions": [
+                            {
+                                "line_no": 1,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "assignment_kind": "construction_project",
+                                "assignment_code": "Wewe20",
+                                "description": "Material",
+                                "net_amount": "100.00",
+                                "tax_amount": "19.00",
+                                "gross_amount": "119.00",
+                            },
+                            {
+                                "line_no": 2,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "subcontractor",
+                                "assignment_kind": "construction_project",
+                                "assignment_code": "Neula51",
+                                "description": "Fremdleistung",
+                                "net_amount": "200.00",
+                                "tax_amount": "38.00",
+                                "gross_amount": "238.00",
+                            },
+                        ],
+                        "payment_decision": {
+                            "payment_type": "cash_discount",
+                            "label": "Skontozahlung",
+                            "due_date": "2026-05-21",
+                            "amount": "346.29",
+                            "discount_base": "300.00",
+                            "discount_percent": "3.00",
+                            "discount_amount": "10.71",
+                        },
+                    }
+                ]
+            )
+
+        adjustment_rows = [row for row in rows if row["row_type"] == "payment_adjustment"]
+        self.assertEqual(len(adjustment_rows), 2)
+        self.assertEqual(adjustment_rows[0]["line_no"], 1)
+        self.assertEqual(adjustment_rows[0]["assignment_code"], "Wewe20")
+        self.assertEqual(adjustment_rows[0]["gross_amount"], "-3.57")
+        self.assertEqual(adjustment_rows[0]["debit_account"], "3736")
+        self.assertEqual(adjustment_rows[1]["line_no"], 2)
+        self.assertEqual(adjustment_rows[1]["assignment_code"], "Neula51")
+        self.assertEqual(adjustment_rows[1]["gross_amount"], "-7.14")
+        self.assertEqual(adjustment_rows[1]["debit_account"], "3737")
+
+    def test_booking_export_rows_skip_zero_payment_adjustment_splits(self):
+        rules = [
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            rows = build_booking_export_rows(
+                [
+                    {
+                        "id": str(uuid4()),
+                        "tenant_id": "demo-mandant",
+                        "original_filename": "kleiner-skonto.pdf",
+                        "normalized_filename": "ERg kleiner Skonto.pdf",
+                        "status": "review_approved",
+                        "extraction": {
+                            "supplier_name": "Muster Lieferant GmbH",
+                            "invoice_number": "S-2",
+                            "invoice_date": "2026-05-07",
+                            "gross_amount": "3.00",
+                            "currency": "EUR",
+                            "raw_result": {"document_type": "incoming_invoice"},
+                        },
+                        "booking_suggestions": [
+                            {
+                                "line_no": 1,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "description": "Position 1",
+                                "net_amount": "0.84",
+                                "tax_amount": "0.16",
+                                "gross_amount": "1.00",
+                            },
+                            {
+                                "line_no": 2,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "description": "Position 2",
+                                "net_amount": "0.84",
+                                "tax_amount": "0.16",
+                                "gross_amount": "1.00",
+                            },
+                            {
+                                "line_no": 3,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "description": "Position 3",
+                                "net_amount": "0.84",
+                                "tax_amount": "0.16",
+                                "gross_amount": "1.00",
+                            },
+                        ],
+                        "payment_decision": {
+                            "payment_type": "cash_discount",
+                            "label": "Skontozahlung",
+                            "due_date": "2026-05-21",
+                            "amount": "2.99",
+                            "discount_base": "3.00",
+                            "discount_percent": "0.33",
+                            "discount_amount": "0.01",
+                        },
+                    }
+                ]
+            )
+
+        adjustment_rows = [row for row in rows if row["row_type"] == "payment_adjustment"]
+        self.assertEqual(len(adjustment_rows), 1)
+        self.assertEqual(adjustment_rows[0]["gross_amount"], "-0.01")
+        self.assertNotIn("-0.00", [row["gross_amount"] for row in rows])
+
     def test_booking_export_rows_skip_unapproved_documents(self):
         rows = build_booking_export_rows(
             [
@@ -1432,6 +1602,85 @@ class BookingSuggestionTests(TestCase):
         discount = next(detail for detail in details if detail["code"] == "missing_discount_account")
         self.assertEqual(discount["accounting_rule_id"], rule_id)
         self.assertEqual(discount["accounting_rule_name"], "Material Foerch")
+
+    def test_review_validation_requires_discount_account_for_each_split_line(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "split-skonto.pdf",
+            "extraction": {
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "S-3",
+                "invoice_date": "2026-05-07",
+                "net_amount": "300.00",
+                "tax_amount": "57.00",
+                "gross_amount": "357.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "assignment_kind": "construction_project",
+                    "assignment_code": "Wewe20",
+                    "description": "Material",
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "119.00",
+                    "currency": "EUR",
+                },
+                {
+                    "line_no": 2,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "subcontractor",
+                    "assignment_kind": "construction_project",
+                    "assignment_code": "Neula51",
+                    "description": "Fremdleistung",
+                    "net_amount": "200.00",
+                    "tax_amount": "38.00",
+                    "gross_amount": "238.00",
+                    "currency": "EUR",
+                },
+            ],
+            "payment_decision": {"payment_type": "cash_discount", "amount": "346.29"},
+        }
+        rules = [
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Fremdleistung Standard",
+                "supplier_match_text": None,
+                "cost_category": "subcontractor",
+                "debit_account": "3100",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "",
+                "is_active": True,
+            },
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            details = validate_document_review_details(document)
+
+        discount_errors = [detail for detail in details if detail["code"] == "missing_discount_account"]
+        self.assertEqual(len(discount_errors), 1)
+        self.assertEqual(discount_errors[0]["line_no"], 2)
+        self.assertEqual(discount_errors[0]["cost_category"], "subcontractor")
+        self.assertEqual(discount_errors[0]["accounting_rule_name"], "Fremdleistung Standard")
 
     def test_review_validation_blocks_warnings_and_split_mismatch(self):
         document = {

@@ -1288,36 +1288,26 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
     payment_decision = payment_decision or _default_payment_decision(extraction)
     payment_delta = _payment_delta(extraction, payment_decision)
     if payment_delta is not None and payment_delta != Decimal("0.00") and suggestions:
-        first_suggestion = suggestions[0]
-        cost_category = first_suggestion.get("cost_category")
-        accounting_rule = find_accounting_rule(
-            tenant_id=document.get("tenant_id"),
-            supplier_name=supplier_name,
-            cost_category=cost_category,
-        )
-        if not accounting_rule:
-            context = _accounting_rule_context(supplier_name, cost_category)
-            add_error(
-                f"Zahlungsdifferenz/Skonto: Kontierungsregel fehlt für {context}. "
-                "Bitte unter Stammdaten -> Kontierungsregeln anlegen.",
-                code="missing_accounting_rule",
-                line_no="payment_delta",
+        for suggestion in suggestions:
+            line_no = suggestion.get("line_no") or "?"
+            cost_category = suggestion.get("cost_category")
+            accounting_rule = find_accounting_rule(
+                tenant_id=document.get("tenant_id"),
                 supplier_name=supplier_name,
                 cost_category=cost_category,
-                cost_category_label=_cost_category_label(cost_category),
-                suggested_name=f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
             )
-        elif not accounting_rule.get("discount_account"):
-            add_error(
-                "Zahlungsdifferenz/Skonto: Skontokonto fehlt in der Kontierungsregel.",
-                code="missing_discount_account",
-                supplier_name=supplier_name,
-                cost_category=cost_category,
-                cost_category_label=_cost_category_label(cost_category),
-                accounting_rule_id=str(accounting_rule.get("id")) if accounting_rule.get("id") else None,
-                accounting_rule_name=accounting_rule.get("name"),
-                suggested_name=accounting_rule.get("name"),
-            )
+            if accounting_rule and not accounting_rule.get("discount_account"):
+                add_error(
+                    f"Zeile {line_no}: Zahlungsdifferenz/Skonto braucht ein Skontokonto in der Kontierungsregel.",
+                    code="missing_discount_account",
+                    line_no=line_no,
+                    supplier_name=supplier_name,
+                    cost_category=cost_category,
+                    cost_category_label=_cost_category_label(cost_category),
+                    accounting_rule_id=str(accounting_rule.get("id")) if accounting_rule.get("id") else None,
+                    accounting_rule_name=accounting_rule.get("name"),
+                    suggested_name=accounting_rule.get("name"),
+                )
 
     return errors
 
@@ -1629,31 +1619,83 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                 }
             )
 
-        payment_delta = _payment_delta(extraction, payment_decision)
-        if payment_delta is not None and payment_delta != Decimal("0.00"):
-            accounting_rule = find_accounting_rule(
-                tenant_id=document.get("tenant_id"),
-                supplier_name=supplier_name,
-                cost_category=(document.get("booking_suggestions") or [{}])[0].get("cost_category"),
-            )
-            rows.append(
-                {
-                    **common,
-                    "row_type": "payment_adjustment",
-                    "line_no": None,
-                    "booking_type": raw_result.get("document_type") or "incoming_invoice",
-                    "cost_category": "payment_discount",
-                    "assignment_kind": None,
-                    "assignment_code": None,
-                    "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
-                    "net_amount": None,
-                    "tax_amount": None,
-                    "gross_amount": _money_string(payment_delta),
-                    "payable_delta": _money_string(payment_delta),
-                    **_accounting_export_fields(accounting_rule, payment_adjustment=True),
-                }
-            )
+        rows.extend(_payment_adjustment_export_rows(document, common, extraction, payment_decision, supplier_name))
     return rows
+
+
+def _payment_adjustment_export_rows(
+    document: dict[str, Any],
+    common: dict[str, Any],
+    extraction: dict[str, Any],
+    payment_decision: dict[str, Any] | None,
+    supplier_name: str | None,
+) -> list[dict[str, Any]]:
+    payment_delta = _payment_delta(extraction, payment_decision)
+    if payment_delta is None or payment_delta == Decimal("0.00"):
+        return []
+
+    suggestions = document.get("booking_suggestions") or []
+    allocations = _allocate_payment_delta(payment_delta, suggestions)
+    if not allocations:
+        allocations = [(None, payment_delta)]
+
+    raw_result = extraction.get("raw_result") or {}
+    rows = []
+    for suggestion, allocated_delta in allocations:
+        if allocated_delta == Decimal("0.00"):
+            continue
+        cost_category = suggestion.get("cost_category") if suggestion else None
+        accounting_rule = find_accounting_rule(
+            tenant_id=document.get("tenant_id"),
+            supplier_name=supplier_name,
+            cost_category=cost_category,
+        )
+        rows.append(
+            {
+                **common,
+                "row_type": "payment_adjustment",
+                "line_no": suggestion.get("line_no") if suggestion else None,
+                "booking_type": suggestion.get("booking_type") if suggestion else raw_result.get("document_type") or "incoming_invoice",
+                "cost_category": cost_category or "payment_discount",
+                "assignment_kind": suggestion.get("assignment_kind") if suggestion else None,
+                "assignment_code": suggestion.get("assignment_code") if suggestion else None,
+                "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
+                "net_amount": None,
+                "tax_amount": None,
+                "gross_amount": _money_string(allocated_delta),
+                "payable_delta": _money_string(allocated_delta),
+                **_accounting_export_fields(accounting_rule, payment_adjustment=True),
+            }
+        )
+    return rows
+
+
+def _allocate_payment_delta(
+    payment_delta: Decimal,
+    suggestions: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], Decimal]]:
+    weighted_suggestions = [
+        (suggestion, _decimal_or_none(suggestion.get("gross_amount")))
+        for suggestion in suggestions
+    ]
+    weighted_suggestions = [(suggestion, amount) for suggestion, amount in weighted_suggestions if amount]
+    if not weighted_suggestions:
+        return []
+
+    total_gross = sum((amount for _, amount in weighted_suggestions), Decimal("0.00"))
+    if total_gross == Decimal("0.00"):
+        return []
+
+    allocations: list[tuple[dict[str, Any], Decimal]] = []
+    allocated_total = Decimal("0.00")
+    for index, (suggestion, gross_amount) in enumerate(weighted_suggestions):
+        if index == len(weighted_suggestions) - 1:
+            allocated = _round_money(payment_delta - allocated_total)
+        else:
+            allocated = _round_money(payment_delta * gross_amount / total_gross)
+            allocated_total += allocated
+        allocations.append((suggestion, allocated))
+    return allocations
 
 
 def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, Any]]:
