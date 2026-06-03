@@ -886,6 +886,19 @@ function UploadApp() {
     setNotice("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
   }
 
+  function openAccountingRulesFromApproval() {
+    if (user?.role !== "admin") {
+      setNotice("Kontierungsregel braucht Pflege. Bitte einen Admin bitten, die Regel unter Stammdaten zu prüfen.");
+      return;
+    }
+    approvalValidationRequestRef.current += 1;
+    setApprovalDocumentId(null);
+    setApprovalError("");
+    setApprovalIssues([]);
+    setActiveView("masterdata");
+    setNotice("Bitte die Kontierungsregeln prüfen und eindeutiger machen.");
+  }
+
   function focusBookingSuggestionFromApproval(issue) {
     if (!approvalDocument) return;
     const lineNo = issue?.line_no ? String(issue.line_no) : "";
@@ -1629,6 +1642,7 @@ function UploadApp() {
         onConfirm={() => {
           if (approvalDocument) approveDocument(approvalDocument);
         }}
+        onOpenAccountingRules={openAccountingRulesFromApproval}
         onPrepareAccountingRule={prepareAccountingRuleFromApproval}
         onFixBookingSuggestion={focusBookingSuggestionFromApproval}
       />
@@ -2343,6 +2357,7 @@ function ApprovalDialog({
   canPrepareAccountingRule,
   onCancel,
   onConfirm,
+  onOpenAccountingRules,
   onPrepareAccountingRule,
   onFixBookingSuggestion,
 }) {
@@ -2448,16 +2463,23 @@ function ApprovalDialog({
               <span>{accountingRuleFixHint}</span>
             </div>
             {ambiguousAccountingRuleIssues.length ? (
-              <ul className="approval-fix-list">
-                {ambiguousAccountingRuleIssues.map((issue, index) => (
-                  <li key={`${issue.line_no || index}-${issue.cost_category || ""}`}>
-                    <strong>Zeile {issue.line_no || "?"}</strong>
-                    <span>
-                      {(issue.matching_rules || []).map((rule) => rule.name).filter(Boolean).join(", ") || issue.message}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="approval-fix-list-wrap">
+                <ul className="approval-fix-list">
+                  {ambiguousAccountingRuleIssues.map((issue, index) => (
+                    <li key={`${issue.line_no || index}-${issue.cost_category || ""}`}>
+                      <strong>Zeile {issue.line_no || "?"}</strong>
+                      <span>
+                        {(issue.matching_rules || []).map((rule) => rule.name).filter(Boolean).join(", ") || issue.message}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {canPrepareAccountingRule ? (
+                  <button className="secondary-button compact-button" type="button" onClick={onOpenAccountingRules}>
+                    Stammdaten öffnen
+                  </button>
+                ) : null}
+              </div>
             ) : null}
             {canPrepareAccountingRule && hasAccountingRuleActions ? (
               <div className="approval-fix-actions">

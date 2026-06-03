@@ -3133,7 +3133,16 @@ def _serialize_payment_decision(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_match_text(value: str) -> str:
-    return " ".join(value.casefold().split())
+    normalized = value.casefold()
+    replacements = {
+        "ä": "ae",
+        "ö": "oe",
+        "ü": "ue",
+        "ß": "ss",
+    }
+    for source, replacement in replacements.items():
+        normalized = normalized.replace(source, replacement)
+    return " ".join(normalized.split())
 
 
 def _serialize_date(value: Any) -> str | None:

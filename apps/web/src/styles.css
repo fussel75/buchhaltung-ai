@@ -1637,9 +1637,16 @@ code {
   line-height: 1.35;
 }
 
-.approval-fix-list {
+.approval-fix-list-wrap {
   display: grid;
   grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+}
+
+.approval-fix-list {
+  display: grid;
   gap: 6px;
   margin: 0;
   padding: 0;
@@ -1654,6 +1661,10 @@ code {
 
 .approval-fix-list span {
   overflow-wrap: anywhere;
+}
+
+.approval-fix-list-wrap button {
+  min-height: 32px;
 }
 
 .approval-fix-actions {
@@ -2365,6 +2376,7 @@ code {
   .review-facts,
   .approval-facts,
   .approval-fix-panel,
+  .approval-fix-list-wrap,
   .approval-export-panel li,
   .extraction-grid,
   .form-grid,
