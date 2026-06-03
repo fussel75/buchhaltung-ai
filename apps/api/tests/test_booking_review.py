@@ -392,6 +392,80 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(csv_error.exception.status_code, 409)
         self.assertEqual(csv_error.exception.detail["documents"][0]["errors"], preview["export_issues"][0]["errors"])
 
+    def test_booking_export_route_reports_ambiguous_accounting_rule(self):
+        request = SimpleNamespace(state=SimpleNamespace())
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "foerch.pdf",
+            "normalized_filename": "ERg 3161691971.pdf",
+            "status": "review_approved",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "gross_amount": "8.77",
+                "currency": "EUR",
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "assignment_kind": "project",
+                    "assignment_code": "Neula51",
+                    "description": "Zargenschaum",
+                    "net_amount": "7.37",
+                    "tax_amount": "1.40",
+                    "gross_amount": "8.77",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "8.77"},
+        }
+        rules = [
+            {
+                "name": "Förch Material 3400",
+                "supplier_match_text": "Förch",
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Förch Material 3425",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3425",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+        ]
+
+        with (
+            patch.object(documents_route, "require_tenant_access"),
+            patch.object(documents_route, "list_documents_for_month", return_value=[document]),
+            patch.object(documents_route, "validate_document_review", return_value=[]),
+            patch.object(database_service, "list_accounting_rules", return_value=rules),
+        ):
+            preview = documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="json")
+            with self.assertRaises(HTTPException) as csv_error:
+                documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="csv")
+
+        self.assertTrue(preview["is_blocked"])
+        self.assertEqual(preview["rows"][0]["accounting_rule_status"], "ambiguous")
+        self.assertIn("Kontierungsregel mehrdeutig", preview["export_issues"][0]["errors"][0])
+        self.assertNotIn("Kontierungsregel fehlt", preview["export_issues"][0]["errors"])
+        self.assertEqual(csv_error.exception.status_code, 409)
+        self.assertIn("Kontierungsregel mehrdeutig", csv_error.exception.detail["documents"][0]["errors"][0])
+
     def test_manual_normalized_filename_keeps_document_suffix(self):
         document = {
             "tenant_id": "demo-mandant",
@@ -1059,6 +1133,70 @@ class BookingSuggestionTests(TestCase):
         )
 
         self.assertEqual(rows, [])
+
+    def test_booking_export_rows_mark_ambiguous_accounting_rules(self):
+        rules = [
+            {
+                "name": "Förch Material 3400",
+                "supplier_match_text": "Förch",
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Förch Material 3425",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3425",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+        ]
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "foerch.pdf",
+            "normalized_filename": "ERg 3161691971.pdf",
+            "status": "review_approved",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "currency": "EUR",
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "assignment_kind": "project",
+                    "assignment_code": "Neula51",
+                    "description": "Zargenschaum",
+                    "net_amount": "7.37",
+                    "tax_amount": "1.40",
+                    "gross_amount": "8.77",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "8.77"},
+        }
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            rows = build_booking_export_rows([document])
+            issues = validate_booking_export_rows(rows)
+
+        self.assertEqual(rows[0]["accounting_rule_status"], "ambiguous")
+        self.assertEqual(rows[0]["accounting_rule_matches"], "Förch Material 3400, Förch Material 3425")
+        self.assertIn("Kontierungsregel mehrdeutig", rows[0]["export_warnings"])
+        self.assertIn("Förch Material 3400, Förch Material 3425", rows[0]["export_warnings"])
+        self.assertIn("Kontierungsregel mehrdeutig: Förch Material 3400, Förch Material 3425", issues[0]["errors"])
 
     def test_accounting_rule_matching_prefers_supplier_and_cost_category(self):
         rules = [

@@ -4073,6 +4073,8 @@ function BookingPreviewLine({ row }) {
         <summary>CSV-Details</summary>
         <div className="booking-preview-detail-grid">
           <PreviewField label="Kontierungsregel" value={row.accounting_rule || "-"} />
+          <PreviewField label="Regelstatus" value={formatAccountingRuleStatus(row)} />
+          {row.accounting_rule_matches ? <PreviewField label="Passende Regeln" value={row.accounting_rule_matches} /> : null}
           <PreviewField label="Aufwandskonto" value={row.debit_account || "-"} />
           <PreviewField label="Gegenkonto" value={row.credit_account || "-"} />
           <PreviewField label="Skontokonto" value={row.discount_account || "-"} />
@@ -4389,6 +4391,15 @@ function uniqueList(values) {
 function formatAccountPair(row) {
   if (row.row_type === "payment_adjustment") return row.discount_account || "-";
   return [row.debit_account, row.credit_account].filter(Boolean).join(" / ") || "-";
+}
+
+function formatAccountingRuleStatus(row) {
+  const labels = {
+    ambiguous: "Mehrdeutig",
+    matched: "Eindeutig",
+    missing: "Fehlt",
+  };
+  return labels[row.accounting_rule_status] || (row.accounting_rule ? "Eindeutig" : "Fehlt");
 }
 
 function formatAssignment(rawResult, tenantProfile = assignmentProfileFromRaw(rawResult)) {

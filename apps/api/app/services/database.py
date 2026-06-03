@@ -1240,6 +1240,10 @@ def validate_booking_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
 
 def _booking_export_row_issues(row: dict[str, Any]) -> list[str]:
     issues = []
+    if row.get("accounting_rule_status") == "ambiguous":
+        matches = row.get("accounting_rule_matches") or "-"
+        issues.append(f"Kontierungsregel mehrdeutig: {matches}")
+
     required_fields = {
         "document_id": "Dokument-ID",
         "invoice_number": "Belegnummer",
@@ -1251,13 +1255,19 @@ def _booking_export_row_issues(row: dict[str, Any]) -> list[str]:
         "booking_type": "Buchungsart",
         "description": "Beschreibung",
         "cost_category": "Kostenart",
-        "debit_account": "Aufwandskonto",
-        "credit_account": "Gegenkonto",
-        "accounting_rule": "Kontierungsregel",
     }
     for field_name, label in required_fields.items():
         if row.get(field_name) in (None, ""):
             issues.append(f"{label} fehlt")
+
+    if row.get("accounting_rule_status") != "ambiguous":
+        for field_name, label in (
+            ("debit_account", "Aufwandskonto"),
+            ("credit_account", "Gegenkonto"),
+            ("accounting_rule", "Kontierungsregel"),
+        ):
+            if row.get(field_name) in (None, ""):
+                issues.append(f"{label} fehlt")
 
     if row.get("row_type") == "payment_adjustment":
         for field_name, label in (
@@ -1265,10 +1275,11 @@ def _booking_export_row_issues(row: dict[str, Any]) -> list[str]:
             ("gross_amount", "Brutto-Differenz"),
             ("net_amount", "Netto-Differenz"),
             ("tax_amount", "USt-Differenz"),
-            ("discount_account", "Skontokonto"),
         ):
             if row.get(field_name) in (None, ""):
                 issues.append(f"{label} fehlt")
+        if row.get("accounting_rule_status") != "ambiguous" and row.get("discount_account") in (None, ""):
+            issues.append("Skontokonto fehlt")
     else:
         for field_name, label in (
             ("net_amount", "Netto"),
@@ -1294,7 +1305,13 @@ def _booking_export_row_issues(row: dict[str, Any]) -> list[str]:
             issues.append(f"{label} ist keine gültige Zahl")
 
     tax_amount = _decimal_or_none(row.get("tax_amount"))
-    if tax_amount and tax_amount != Decimal("0.00") and not row.get("tax_key") and not row.get("tax_rate"):
+    if (
+        row.get("accounting_rule_status") != "ambiguous"
+        and tax_amount
+        and tax_amount != Decimal("0.00")
+        and not row.get("tax_key")
+        and not row.get("tax_rate")
+    ):
         issues.append("Steuerangabe fehlt")
 
     if row.get("row_type") == "payment_adjustment":
@@ -1759,7 +1776,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
         }
 
         for suggestion in document.get("booking_suggestions") or []:
-            accounting_rule = find_accounting_rule(
+            accounting_rule_fields = _resolve_accounting_rule_export_fields(
                 tenant_id=document.get("tenant_id"),
                 supplier_name=supplier_name,
                 cost_category=suggestion.get("cost_category"),
@@ -1777,7 +1794,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                 "tax_amount": _money_string(suggestion.get("tax_amount")),
                 "gross_amount": _money_string(suggestion.get("gross_amount")),
                 "payable_delta": None,
-                **_accounting_export_fields(accounting_rule),
+                **accounting_rule_fields,
             }
             row["export_warnings"] = _booking_export_warnings(row)
             rows.append(row)
@@ -1809,10 +1826,11 @@ def _payment_adjustment_export_rows(
             continue
         adjustment_net, adjustment_tax = _payment_adjustment_net_tax(allocated_delta, suggestion, extraction, payment_delta)
         cost_category = suggestion.get("cost_category") if suggestion else None
-        accounting_rule = find_accounting_rule(
+        accounting_rule_fields = _resolve_accounting_rule_export_fields(
             tenant_id=document.get("tenant_id"),
             supplier_name=supplier_name,
             cost_category=cost_category,
+            payment_adjustment=True,
         )
         row = {
             **common,
@@ -1827,7 +1845,7 @@ def _payment_adjustment_export_rows(
             "tax_amount": _money_string(adjustment_tax),
             "gross_amount": _money_string(allocated_delta),
             "payable_delta": _money_string(allocated_delta),
-            **_accounting_export_fields(accounting_rule, payment_adjustment=True),
+            **accounting_rule_fields,
         }
         row["export_warnings"] = _booking_export_warnings(row)
         rows.append(row)
@@ -1868,7 +1886,10 @@ def _booking_export_warnings(row: dict[str, Any]) -> str:
         warnings.append("Zahlung nicht manuell gewählt")
     if not row.get("assignment_code"):
         warnings.append("Zuordnung fehlt")
-    if not row.get("accounting_rule"):
+    if row.get("accounting_rule_status") == "ambiguous":
+        matches = row.get("accounting_rule_matches")
+        warnings.append(f"Kontierungsregel mehrdeutig: {matches}" if matches else "Kontierungsregel mehrdeutig")
+    elif not row.get("accounting_rule"):
         warnings.append("Kontierungsregel fehlt")
     if row.get("row_type") == "payment_adjustment":
         if row.get("net_amount") in (None, "") or row.get("tax_amount") in (None, ""):
@@ -2005,6 +2026,8 @@ def _accounting_export_fields(
             "tax_rate": None,
             "discount_account": None,
             "accounting_rule": None,
+            "accounting_rule_status": "missing",
+            "accounting_rule_matches": None,
         }
     debit_account = rule["discount_account"] if payment_adjustment and rule.get("discount_account") else rule["debit_account"]
     return {
@@ -2014,7 +2037,26 @@ def _accounting_export_fields(
         "tax_rate": _money_string(rule["tax_rate"]),
         "discount_account": rule["discount_account"],
         "accounting_rule": rule["name"],
+        "accounting_rule_status": "matched",
+        "accounting_rule_matches": None,
     }
+
+
+def _resolve_accounting_rule_export_fields(
+    tenant_id: str | None,
+    supplier_name: str | None,
+    cost_category: str | None,
+    payment_adjustment: bool = False,
+) -> dict[str, Any]:
+    matches = find_accounting_rule_matches(tenant_id, supplier_name, cost_category)
+    if len(matches) == 1:
+        return _accounting_export_fields(matches[0], payment_adjustment=payment_adjustment)
+    if len(matches) > 1:
+        fields = _accounting_export_fields(None, payment_adjustment=payment_adjustment)
+        fields["accounting_rule_status"] = "ambiguous"
+        fields["accounting_rule_matches"] = ", ".join(rule["name"] for rule in matches)
+        return fields
+    return _accounting_export_fields(None, payment_adjustment=payment_adjustment)
 
 
 def _payment_terms_from_extraction(extraction: dict[str, Any]) -> list[dict[str, Any]]:
