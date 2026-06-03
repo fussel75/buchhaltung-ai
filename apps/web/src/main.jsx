@@ -229,6 +229,7 @@ function UploadApp() {
   const [focusedReviewDocumentId, setFocusedReviewDocumentId] = useState(null);
   const [approvalError, setApprovalError] = useState("");
   const [approvalIssues, setApprovalIssues] = useState([]);
+  const [highlightedBookingTarget, setHighlightedBookingTarget] = useState(null);
   const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
   const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
@@ -836,6 +837,40 @@ function UploadApp() {
     setNotice("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
   }
 
+  function focusBookingSuggestionFromApproval(issue) {
+    if (!approvalDocument) return;
+    const lineNo = issue?.line_no ? String(issue.line_no) : "";
+    approvalValidationRequestRef.current += 1;
+    setApprovalDocumentId(null);
+    setApprovalError("");
+    setApprovalIssues([]);
+    setActiveView("review");
+    setReviewFilter("all");
+    setFocusedReviewDocumentId(null);
+    setExpandedDocumentIds((current) => (
+      current.includes(approvalDocument.id) ? current : [...current, approvalDocument.id]
+    ));
+    setHighlightedBookingTarget({
+      documentId: approvalDocument.id,
+      lineNo,
+      rowType: issue?.row_type || "",
+    });
+    setNotice(
+      lineNo
+        ? `Bitte Buchungszeile ${lineNo} prüfen und speichern. Danach die Freigabe erneut starten.`
+        : "Bitte Buchungsvorschlag prüfen und speichern. Danach die Freigabe erneut starten.",
+    );
+
+    window.setTimeout(() => {
+      const selector = lineNo
+        ? `[data-document-id="${approvalDocument.id}"] [data-booking-line="${lineNo}"]`
+        : `[data-document-id="${approvalDocument.id}"] .booking-suggestions`;
+      const element = window.document.querySelector(selector);
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      element?.querySelector?.("input, select, button")?.focus?.({ preventScroll: true });
+    }, 80);
+  }
+
   const reopenReview = useCallback(
     async (document) => {
       const confirmed = window.confirm(
@@ -1327,7 +1362,7 @@ function UploadApp() {
             {filteredDocuments.map((document) => {
               const isExpanded = expandedDocumentIds.includes(document.id);
               return (
-              <article key={document.id} className="document-card">
+              <article key={document.id} className="document-card" data-document-id={document.id}>
                 <div className="document-head">
                   <div className="document-title">
                     <label className="document-select">
@@ -1486,6 +1521,7 @@ function UploadApp() {
                             document={document}
                             suggestions={document.booking_suggestions}
                             tenantProfile={tenantProfile}
+                            highlightedLineNo={highlightedBookingTarget?.documentId === document.id ? highlightedBookingTarget.lineNo : ""}
                             onSave={saveBookingSuggestion}
                             savingIds={savingSuggestionIds}
                           />
@@ -1545,6 +1581,7 @@ function UploadApp() {
           if (approvalDocument) approveDocument(approvalDocument);
         }}
         onPrepareAccountingRule={prepareAccountingRuleFromApproval}
+        onFixBookingSuggestion={focusBookingSuggestionFromApproval}
       />
 
       <ReviewFocusDialog
@@ -2257,6 +2294,7 @@ function ApprovalDialog({
   onCancel,
   onConfirm,
   onPrepareAccountingRule,
+  onFixBookingSuggestion,
 }) {
   const dialogRef = useRef(null);
 
@@ -2391,12 +2429,21 @@ function ApprovalDialog({
             <ul>
               {exportValidationIssues.map((issue, index) => (
                 <li key={`${issue.row_index || index}-${issue.row_type || "export"}`}>
-                  <span>
-                    {[issue.line_no ? `Zeile ${issue.line_no}` : null, issue.row_type_label || formatExportRowType(issue.row_type)]
-                      .filter(Boolean)
-                      .join(" · ") || "Exportzeile"}
-                  </span>
-                  <small>{(issue.export_errors || []).join(", ") || issue.message}</small>
+                  <div>
+                    <span>
+                      {[issue.line_no ? `Zeile ${issue.line_no}` : null, issue.row_type_label || formatExportRowType(issue.row_type)]
+                        .filter(Boolean)
+                        .join(" · ") || "Exportzeile"}
+                    </span>
+                    <small>{(issue.export_errors || []).join(", ") || issue.message}</small>
+                  </div>
+                  <button
+                    className="secondary-button compact-button"
+                    type="button"
+                    onClick={() => onFixBookingSuggestion(issue)}
+                  >
+                    Zur Korrektur
+                  </button>
                 </li>
               ))}
             </ul>
@@ -3634,7 +3681,7 @@ function PaymentTerms({ document, rawResult, onSelect, isSaving }) {
   );
 }
 
-function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savingIds = [] }) {
+function BookingSuggestions({ document, suggestions, tenantProfile, highlightedLineNo = "", onSave, savingIds = [] }) {
   const [drafts, setDrafts] = useState({});
 
   useEffect(() => {
@@ -3681,8 +3728,13 @@ function BookingSuggestions({ document, suggestions, tenantProfile, onSave, savi
         </div>
         {suggestions.map((suggestion) => {
           const draft = drafts[suggestion.id] ?? bookingSuggestionDraft(suggestion);
+          const isHighlighted = highlightedLineNo && String(suggestion.line_no) === String(highlightedLineNo);
           return (
-            <div className="booking-edit-row" key={suggestion.id}>
+            <div
+              className={`booking-edit-row${isHighlighted ? " booking-edit-row-highlight" : ""}`}
+              key={suggestion.id}
+              data-booking-line={suggestion.line_no}
+            >
               <strong>{suggestion.line_no}</strong>
               <input
                 value={draft.description}

@@ -242,6 +242,13 @@ button:disabled {
   background: var(--surface-muted);
 }
 
+.compact-button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .danger-button {
   border-color: #f0bbb6;
   color: var(--danger);
@@ -1677,11 +1684,17 @@ code {
 
 .approval-export-panel li {
   display: grid;
-  grid-template-columns: minmax(130px, auto) 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 12px;
   align-items: start;
   border-top: 1px solid rgb(185 28 28 / 18%);
   padding-top: 7px;
+}
+
+.approval-export-panel li > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
 }
 
 .approval-export-panel li:first-child {
@@ -1823,6 +1836,23 @@ code {
   min-height: 58px;
   border-top: 1px solid #edf0f3;
   padding: 10px 12px;
+}
+
+.booking-edit-row-highlight {
+  position: relative;
+  border-radius: 8px;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+.booking-edit-row-highlight::before {
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: "";
 }
 
 .booking-row:first-child {
