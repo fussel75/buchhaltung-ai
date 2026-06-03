@@ -291,7 +291,7 @@ function UploadApp() {
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
       setDocuments([]);
-      return;
+      return [];
     }
 
     const response = await apiFetch(`/documents?tenant_id=${encodeURIComponent(activeTenantId)}`);
@@ -301,7 +301,9 @@ function UploadApp() {
     }
 
     const result = await response.json();
-    setDocuments(result.documents ?? []);
+    const loadedDocuments = result.documents ?? [];
+    setDocuments(loadedDocuments);
+    return loadedDocuments;
   }, [activeTenantId, apiFetch]);
 
   const loadBulkJobs = useCallback(async () => {
@@ -790,6 +792,51 @@ function UploadApp() {
     [apiFetch],
   );
 
+  const returnToApprovalAfterAccountingRule = useCallback(
+    async (documentId) => {
+      if (!documentId) return;
+
+      setActiveView("review");
+      setReviewFilter("all");
+      setFocusedReviewDocumentId(null);
+      setExpandedDocumentIds((current) => (
+        current.includes(documentId) ? current : [...current, documentId]
+      ));
+      setHighlightedBookingTarget({ documentId, lineNo: "", rowType: "" });
+      setApprovalDocumentId(documentId);
+      setApprovalError("");
+      setApprovalIssues([]);
+      setError("");
+      setNotice("Kontierungsregel gespeichert. Freigabeprüfung läuft erneut.");
+
+      const requestId = approvalValidationRequestRef.current + 1;
+      approvalValidationRequestRef.current = requestId;
+      setValidatingIds((current) => [...current, documentId]);
+
+      try {
+        await loadDocuments();
+        const response = await apiFetch(`/documents/${documentId}/review-validation`);
+        if (!response.ok) {
+          throw new Error(`Freigabeprüfung fehlgeschlagen: ${response.status}`);
+        }
+        const result = await response.json();
+        if (approvalValidationRequestRef.current !== requestId) return;
+        const details = Array.isArray(result.details) ? result.details : [];
+        const errors = Array.isArray(result.errors) ? result.errors : [];
+        setApprovalIssues(details);
+        setApprovalError(errors.length ? formatApprovalError({ message: "Freigabe blockiert", errors }, 409) : "");
+        setNotice(errors.length ? "Freigabeprüfung erneut blockiert. Bitte die Hinweise im Dialog prüfen." : "Freigabeprüfung erfolgreich. Der Beleg kann final freigegeben werden.");
+      } catch (validationError) {
+        if (approvalValidationRequestRef.current !== requestId) return;
+        setApprovalError(validationError.message);
+        setError(validationError.message);
+      } finally {
+        setValidatingIds((current) => current.filter((id) => id !== documentId));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
   function prepareAccountingRuleFromApproval(issue) {
     if (user?.role !== "admin") {
       setNotice("Kontierungsregel braucht Pflege. Bitte einen Admin bitten, die Regel unter Stammdaten zu prüfen.");
@@ -803,6 +850,7 @@ function UploadApp() {
         supplier_name: issue?.supplier_name || "",
         cost_category: issue?.cost_category || "",
         focus_field: issue?.code === "missing_discount_account" ? "discount_account" : "debit_account",
+        return_document_id: approvalDocument?.id || "",
       });
       approvalValidationRequestRef.current += 1;
       setApprovalDocumentId(null);
@@ -818,6 +866,7 @@ function UploadApp() {
 
     setAccountingRuleDraft({
       id: `${Date.now()}-${costCategory}-${supplierName}`,
+      return_document_id: approvalDocument?.id || "",
       form: {
         name: suggestedName,
         supplier_match_text: supplierName,
@@ -1612,6 +1661,7 @@ function UploadApp() {
           accountingRuleEditTarget={accountingRuleEditTarget}
           onAccountingRuleDraftConsumed={clearAccountingRuleDraft}
           onAccountingRuleEditTargetConsumed={clearAccountingRuleEditTarget}
+          onAccountingRuleSaved={returnToApprovalAfterAccountingRule}
           onProfileSaved={setTenantProfile}
         />
       ) : null}
@@ -2658,6 +2708,7 @@ function MasterdataAdmin({
   accountingRuleEditTarget,
   onAccountingRuleDraftConsumed,
   onAccountingRuleEditTargetConsumed,
+  onAccountingRuleSaved,
   onProfileSaved,
 }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
@@ -2669,6 +2720,7 @@ function MasterdataAdmin({
   const [supplierEditForm, setSupplierEditForm] = useState(null);
   const [accountingEditId, setAccountingEditId] = useState(null);
   const [accountingEditForm, setAccountingEditForm] = useState(null);
+  const [accountingReturnDocumentId, setAccountingReturnDocumentId] = useState("");
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -2743,6 +2795,7 @@ function MasterdataAdmin({
       ...current,
       ...accountingRuleDraft.form,
     }));
+    setAccountingReturnDocumentId(accountingRuleDraft.return_document_id || "");
     setMessage("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
     window.setTimeout(() => {
       accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2756,10 +2809,12 @@ function MasterdataAdmin({
     const rule = findAccountingRuleForTarget(accountingRules, accountingRuleEditTarget);
     if (!rule) {
       setMessage("Kontierungsregel konnte nicht automatisch gefunden werden. Bitte manuell in den Stammdaten prüfen.");
+      setAccountingReturnDocumentId("");
       onAccountingRuleEditTargetConsumed?.();
       return;
     }
 
+    setAccountingReturnDocumentId(accountingRuleEditTarget.return_document_id || "");
     startAccountingEdit(rule);
     setMessage("Kontierungsregel geöffnet. Bitte fehlende Konten ergänzen und speichern.");
     window.setTimeout(() => {
@@ -2976,7 +3031,14 @@ function MasterdataAdmin({
       discount_account: "",
     });
     await loadMasterdata();
-    setMessage("Kontierungsregel angelegt.");
+    if (accountingReturnDocumentId) {
+      const returnDocumentId = accountingReturnDocumentId;
+      setAccountingReturnDocumentId("");
+      setMessage("Kontierungsregel angelegt. Zurück zur Freigabeprüfung.");
+      onAccountingRuleSaved?.(returnDocumentId);
+    } else {
+      setMessage("Kontierungsregel angelegt.");
+    }
   }
 
   async function updateAccountingRule(rule, payload) {
@@ -3041,7 +3103,14 @@ function MasterdataAdmin({
     }
     cancelAccountingEdit();
     await loadMasterdata();
-    setMessage("Kontierungsregel gespeichert.");
+    if (accountingReturnDocumentId) {
+      const returnDocumentId = accountingReturnDocumentId;
+      setAccountingReturnDocumentId("");
+      setMessage("Kontierungsregel gespeichert. Zurück zur Freigabeprüfung.");
+      onAccountingRuleSaved?.(returnDocumentId);
+    } else {
+      setMessage("Kontierungsregel gespeichert.");
+    }
   }
 
   return (
