@@ -21,6 +21,7 @@ from app.services.database import (
     _booking_suggestions_from_extraction,
     build_booking_export_rows,
     find_accounting_rule,
+    find_accounting_rule_matches,
     validate_booking_export_rows,
     validate_document_review,
     validate_document_review_details,
@@ -1025,6 +1026,93 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(rule["name"], "Luechau Material")
 
+    def test_accounting_rule_matching_reports_equal_best_matches(self):
+        rules = [
+            {
+                "name": "Foerch Material 3400",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Foerch Material 3425",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3425",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Material Standard",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            matches = find_accounting_rule_matches(
+                tenant_id="demo-mandant",
+                supplier_name="Theo Foerch GmbH & Co. KG",
+                cost_category="material",
+            )
+            rule = find_accounting_rule(
+                tenant_id="demo-mandant",
+                supplier_name="Theo Foerch GmbH & Co. KG",
+                cost_category="material",
+            )
+
+        self.assertEqual([match["name"] for match in matches], ["Foerch Material 3400", "Foerch Material 3425"])
+        self.assertIsNone(rule)
+
+    def test_accounting_rule_matching_prefers_more_specific_supplier_text(self):
+        rules = [
+            {
+                "name": "Foerch Material",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "name": "Theo Foerch Material",
+                "supplier_match_text": "Theo Foerch",
+                "cost_category": "material",
+                "debit_account": "3425",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            rule = find_accounting_rule(
+                tenant_id="demo-mandant",
+                supplier_name="Theo Foerch GmbH & Co. KG",
+                cost_category="material",
+            )
+
+        self.assertEqual(rule["name"], "Theo Foerch Material")
+
     def test_supplier_rule_update_can_clear_default_assignment(self):
         rule_id = uuid4()
         row = {
@@ -1840,6 +1928,74 @@ class BookingSuggestionTests(TestCase):
         discount = next(detail for detail in details if detail["code"] == "missing_discount_account")
         self.assertEqual(discount["accounting_rule_id"], rule_id)
         self.assertEqual(discount["accounting_rule_name"], "Material Foerch")
+
+    def test_review_validation_blocks_ambiguous_accounting_rule(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "84.03",
+                "tax_amount": "15.97",
+                "gross_amount": "100.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "net_amount": "84.03",
+                    "tax_amount": "15.97",
+                    "gross_amount": "100.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "100.00"},
+        }
+        rules = [
+            {
+                "id": str(uuid4()),
+                "name": "Foerch Material 3400",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+            {
+                "id": str(uuid4()),
+                "name": "Foerch Material 3425",
+                "supplier_match_text": "Foerch",
+                "cost_category": "material",
+                "debit_account": "3425",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            },
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            errors = validate_document_review(document)
+            details = validate_document_review_details(document)
+
+        ambiguous = next(detail for detail in details if detail["code"] == "ambiguous_accounting_rule")
+        self.assertIn("Mehrere Kontierungsregeln passen", ambiguous["message"])
+        self.assertEqual(ambiguous["line_no"], 1)
+        self.assertEqual([rule["name"] for rule in ambiguous["matching_rules"]], ["Foerch Material 3400", "Foerch Material 3425"])
+        self.assertNotIn("Kontierungsregel fehlt", "\n".join(errors))
 
     def test_review_validation_requires_discount_account_for_each_split_line(self):
         document = {

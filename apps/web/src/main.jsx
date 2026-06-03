@@ -2395,15 +2395,26 @@ function ApprovalDialog({
   const paymentTerms = paymentTermLinesForDocument(document);
   const requiresPaymentDecision = paymentTerms.length > 1 && !document.payment_decision;
   const accountingRuleIssues = (issues || []).filter((issue) =>
-    ["missing_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
+    ["missing_accounting_rule", "ambiguous_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
   );
   const exportValidationIssues = (issues || []).filter((issue) => issue.code === "export_validation");
   const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
-  const editableAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code !== "missing_accounting_rule");
+  const ambiguousAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "ambiguous_accounting_rule");
+  const editableAccountingRuleIssues = accountingRuleIssues.filter((issue) =>
+    !["missing_accounting_rule", "ambiguous_accounting_rule"].includes(issue.code),
+  );
+  const hasAccountingRuleActions = Boolean(missingAccountingRuleIssues.length || editableAccountingRuleIssues.length);
   const showGenericApprovalError = Boolean(error) && !accountingRuleIssues.length && !exportValidationIssues.length;
   const totalNet = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.net_amount), 0);
   const totalTax = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.tax_amount), 0);
   const totalGross = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.gross_amount), 0);
+  const accountingRuleFixHint = ambiguousAccountingRuleIssues.length
+    ? "Mehrere Regeln passen gleich gut. Bitte die Regeln unter Stammdaten eindeutiger machen."
+    : canPrepareAccountingRule
+      ? missingAccountingRuleIssues.length
+        ? "Die App kann die passende Regel vorbereiten. Konten müssen danach fachlich ergänzt werden."
+        : "Die bestehende Regel muss unter Stammdaten bearbeitet werden."
+      : "Bitte einen Admin bitten, die passende Regel unter Stammdaten anzulegen.";
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -2434,15 +2445,21 @@ function ApprovalDialog({
           <div className="approval-fix-panel">
             <div>
               <strong>{accountingRuleFixTitle(accountingRuleIssues)}</strong>
-              <span>
-                {canPrepareAccountingRule
-                  ? missingAccountingRuleIssues.length
-                    ? "Die App kann die passende Regel vorbereiten. Konten müssen danach fachlich ergänzt werden."
-                    : "Die bestehende Regel muss unter Stammdaten bearbeitet werden."
-                  : "Bitte einen Admin bitten, die passende Regel unter Stammdaten anzulegen."}
-              </span>
+              <span>{accountingRuleFixHint}</span>
             </div>
-            {canPrepareAccountingRule ? (
+            {ambiguousAccountingRuleIssues.length ? (
+              <ul className="approval-fix-list">
+                {ambiguousAccountingRuleIssues.map((issue, index) => (
+                  <li key={`${issue.line_no || index}-${issue.cost_category || ""}`}>
+                    <strong>Zeile {issue.line_no || "?"}</strong>
+                    <span>
+                      {(issue.matching_rules || []).map((rule) => rule.name).filter(Boolean).join(", ") || issue.message}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {canPrepareAccountingRule && hasAccountingRuleActions ? (
               <div className="approval-fix-actions">
                 {dedupeAccountingRuleIssues(missingAccountingRuleIssues).map((issue) => (
                   <button
@@ -4645,6 +4662,7 @@ function dedupeAccountingRuleIssues(issues) {
 }
 
 function accountingRuleFixTitle(issues) {
+  if (issues.some((issue) => issue.code === "ambiguous_accounting_rule")) return "Kontierungsregel mehrdeutig";
   if (issues.some((issue) => issue.code === "missing_discount_account")) return "Skontokonto fehlt";
   if (issues.some((issue) => issue.code === "incomplete_accounting_rule")) return "Kontierungsregel unvollständig";
   return "Kontierungsregel fehlt";

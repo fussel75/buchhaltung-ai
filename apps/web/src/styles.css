@@ -1637,6 +1637,25 @@ code {
   line-height: 1.35;
 }
 
+.approval-fix-list {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approval-fix-list li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.approval-fix-list span {
+  overflow-wrap: anywhere;
+}
+
 .approval-fix-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1377,13 +1377,34 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
 
         cost_category = suggestion.get("cost_category")
         accounting_rule = None
+        accounting_rule_matches: list[dict[str, Any]] = []
         if cost_category:
-            accounting_rule = find_accounting_rule(
+            accounting_rule_matches = find_accounting_rule_matches(
                 tenant_id=document.get("tenant_id"),
                 supplier_name=supplier_name,
                 cost_category=cost_category,
             )
-        if cost_category and not accounting_rule:
+            accounting_rule = accounting_rule_matches[0] if len(accounting_rule_matches) == 1 else None
+        if len(accounting_rule_matches) > 1:
+            context = _accounting_rule_context(supplier_name, cost_category)
+            add_error(
+                f"Zeile {line_no}: Mehrere Kontierungsregeln passen für {context}. "
+                "Bitte unter Stammdaten die Regeln eindeutiger machen.",
+                code="ambiguous_accounting_rule",
+                line_no=line_no,
+                supplier_name=supplier_name,
+                cost_category=cost_category,
+                cost_category_label=_cost_category_label(cost_category),
+                matching_rules=[
+                    {
+                        "id": str(rule.get("id")) if rule.get("id") else None,
+                        "name": rule.get("name"),
+                        "supplier_match_text": rule.get("supplier_match_text"),
+                    }
+                    for rule in accounting_rule_matches
+                ],
+            )
+        elif cost_category and not accounting_rule:
             context = _accounting_rule_context(supplier_name, cost_category)
             add_error(
                 f"Zeile {line_no}: Kontierungsregel fehlt für {context}. "
@@ -1427,11 +1448,12 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
         for suggestion in suggestions:
             line_no = suggestion.get("line_no") or "?"
             cost_category = suggestion.get("cost_category")
-            accounting_rule = find_accounting_rule(
+            accounting_rule_matches = find_accounting_rule_matches(
                 tenant_id=document.get("tenant_id"),
                 supplier_name=supplier_name,
                 cost_category=cost_category,
             )
+            accounting_rule = accounting_rule_matches[0] if len(accounting_rule_matches) == 1 else None
             if accounting_rule and not accounting_rule.get("discount_account"):
                 add_error(
                     f"Zeile {line_no}: Zahlungsdifferenz/Skonto braucht ein Skontokonto in der Kontierungsregel.",
@@ -2782,27 +2804,52 @@ def find_accounting_rule(
     supplier_name: str | None,
     cost_category: str | None,
 ) -> dict[str, Any] | None:
+    matches = find_accounting_rule_matches(tenant_id, supplier_name, cost_category)
+    return matches[0] if len(matches) == 1 else None
+
+
+def find_accounting_rule_matches(
+    tenant_id: str | None,
+    supplier_name: str | None,
+    cost_category: str | None,
+) -> list[dict[str, Any]]:
     if not tenant_id:
-        return None
+        return []
     supplier_text = _normalize_match_text(supplier_name or "")
-    best_rule = None
-    best_score = -1
+    best_rank: tuple[int, int] | None = None
+    best_rules: list[dict[str, Any]] = []
     for rule in list_accounting_rules(tenant_id):
-        if not rule["is_active"]:
+        rank = _accounting_rule_rank(rule, supplier_text, cost_category)
+        if rank is None:
             continue
-        score = 0
-        if rule["cost_category"]:
-            if rule["cost_category"] != cost_category:
-                continue
-            score += 2
-        if rule["supplier_match_text"]:
-            if _normalize_match_text(rule["supplier_match_text"]) not in supplier_text:
-                continue
-            score += 4
-        if score > best_score:
-            best_rule = rule
-            best_score = score
-    return best_rule
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best_rules = [rule]
+        elif rank == best_rank:
+            best_rules.append(rule)
+    return best_rules
+
+
+def _accounting_rule_rank(
+    rule: dict[str, Any],
+    supplier_text: str,
+    cost_category: str | None,
+) -> tuple[int, int] | None:
+    if not rule["is_active"]:
+        return None
+    score = 0
+    supplier_specificity = 0
+    if rule["cost_category"]:
+        if rule["cost_category"] != cost_category:
+            return None
+        score += 2
+    if rule["supplier_match_text"]:
+        normalized_match = _normalize_match_text(rule["supplier_match_text"])
+        if normalized_match not in supplier_text:
+            return None
+        score += 4
+        supplier_specificity = len(normalized_match)
+    return score, supplier_specificity
 
 
 def find_supplier_rule(tenant_id: str, *texts: str | None) -> dict[str, Any] | None:
