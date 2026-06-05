@@ -4925,7 +4925,7 @@ function accountingRuleMatchLabel(rule) {
   const ruleName = rule?.name || "Regel öffnen";
   const details = [
     rule?.supplier_match_text ? `Erkennung: ${rule.supplier_match_text}` : null,
-    rule?.cost_category ? formatCostCategory(rule.cost_category) : null,
+    rule?.cost_category_label || (rule?.cost_category ? formatCostCategory(rule.cost_category) : null),
   ].filter(Boolean);
   return details.length ? `${ruleName} (${details.join(", ")})` : ruleName;
 }

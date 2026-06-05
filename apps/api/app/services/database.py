@@ -1113,9 +1113,10 @@ def approve_document_review(document_id: UUID, actor: str = "system") -> dict[st
             ],
         )
 
-    approval_errors = validate_document_review(document)
+    approval_details = validate_document_review_details(document)
+    approval_errors = [detail["message"] for detail in approval_details]
     if approval_errors:
-        raise ReviewApprovalError(approval_errors, details=validate_document_review_details(document))
+        raise ReviewApprovalError(approval_errors, details=approval_details)
 
     now = datetime.now(UTC)
     with _connect() as connection:
@@ -1409,6 +1410,8 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                         "id": str(rule.get("id")) if rule.get("id") else None,
                         "name": rule.get("name"),
                         "supplier_match_text": rule.get("supplier_match_text"),
+                        "cost_category": rule.get("cost_category"),
+                        "cost_category_label": _cost_category_label(rule.get("cost_category")),
                     }
                     for rule in accounting_rule_matches
                 ],

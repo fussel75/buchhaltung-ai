@@ -713,7 +713,8 @@ class BookingSuggestionTests(TestCase):
 
         with (
             patch.object(database_service, "get_document", side_effect=[document, approved_document]),
-            patch.object(database_service, "validate_document_review", return_value=[]),
+            patch.object(database_service, "validate_document_review", side_effect=AssertionError("legacy validation path should not be called")),
+            patch.object(database_service, "validate_document_review_details", return_value=[]),
             patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
             patch.object(database_service, "insert_audit_event") as audit_event,
         ):
@@ -2320,6 +2321,8 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(ambiguous["line_no"], 1)
         self.assertEqual([rule["id"] for rule in ambiguous["matching_rules"]], [rules[0]["id"], rules[1]["id"]])
         self.assertEqual([rule["name"] for rule in ambiguous["matching_rules"]], ["Foerch Material 3400", "Foerch Material 3425"])
+        self.assertEqual([rule["cost_category"] for rule in ambiguous["matching_rules"]], ["material", "material"])
+        self.assertEqual([rule["cost_category_label"] for rule in ambiguous["matching_rules"]], ["Material", "Material"])
         self.assertNotIn("Kontierungsregel fehlt", "\n".join(errors))
 
     def test_review_validation_requires_discount_account_for_each_split_line(self):
