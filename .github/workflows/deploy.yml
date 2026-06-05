@@ -50,10 +50,12 @@ jobs:
             -o StrictHostKeyChecking=yes
           )
 
+          deploy_log="$(mktemp)"
+
           for attempt in 1 2 3 4 5; do
             set +e
-            ssh "${ssh_options[@]}" "root@$SSH_HOST"
-            status="$?"
+            ssh "${ssh_options[@]}" "root@$SSH_HOST" 2>&1 | tee "$deploy_log"
+            status="${PIPESTATUS[0]}"
             set -e
 
             if [ "$status" -eq 0 ]; then
@@ -61,11 +63,15 @@ jobs:
             fi
 
             if [ "$status" -ne 255 ]; then
+              tail_summary="$(tail -n 20 "$deploy_log" | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r/%0D/g')"
+              echo "::error title=Remote deploy failed::${tail_summary}"
               echo "Remote deploy failed with exit code ${status}; not retrying."
               exit "$status"
             fi
 
             if [ "$attempt" -eq 5 ]; then
+              tail_summary="$(tail -n 20 "$deploy_log" | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r/%0D/g')"
+              echo "::error title=SSH connection failed::${tail_summary}"
               echo "SSH connection failed after 5 attempts."
               exit 255
             fi
