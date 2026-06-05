@@ -2128,6 +2128,15 @@ code {
   font-weight: 720;
 }
 
+.field-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
 .toggle-field {
   display: flex;
   align-items: center;

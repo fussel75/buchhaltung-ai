@@ -2787,6 +2787,9 @@ function MasterdataAdmin({
     discount_account: "",
   });
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState("notice");
+  const [supplierFormErrors, setSupplierFormErrors] = useState({});
+  const [accountingFormErrors, setAccountingFormErrors] = useState({});
   const accountingSectionRef = useRef(null);
   const savedAccountingFramework = accountingFramework(tenantProfile.accounting_framework);
   const profileAccountingFramework = accountingFramework(profileForm.accounting_framework);
@@ -2825,7 +2828,10 @@ function MasterdataAdmin({
   }, [apiFetch, tenantId]);
 
   useEffect(() => {
-    loadMasterdata().catch((error) => setMessage(error.message));
+    loadMasterdata().catch((error) => {
+      setMessageTone("error");
+      setMessage(error.message);
+    });
   }, [loadMasterdata]);
 
   useEffect(() => {
@@ -2835,6 +2841,7 @@ function MasterdataAdmin({
       ...accountingRuleDraft.form,
     }));
     setAccountingReturnDocumentId(accountingRuleDraft.return_document_id || "");
+    setMessageTone("notice");
     setMessage("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
     window.setTimeout(() => {
       accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2847,6 +2854,7 @@ function MasterdataAdmin({
     if (!accountingRuleEditTarget || !accountingRules.length) return;
     const rule = findAccountingRuleForTarget(accountingRules, accountingRuleEditTarget);
     if (!rule) {
+      setMessageTone("error");
       setMessage("Kontierungsregel konnte nicht automatisch gefunden werden. Bitte manuell in den Stammdaten prüfen.");
       setAccountingReturnDocumentId("");
       onAccountingRuleEditTargetConsumed?.();
@@ -2855,6 +2863,7 @@ function MasterdataAdmin({
 
     setAccountingReturnDocumentId(accountingRuleEditTarget.return_document_id || "");
     startAccountingEdit(rule);
+    setMessageTone("notice");
     setMessage("Kontierungsregel geöffnet. Bitte fehlende Konten ergänzen und speichern.");
     window.setTimeout(() => {
       accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2878,7 +2887,9 @@ function MasterdataAdmin({
       }),
     });
     if (!response.ok) {
-      setMessage(`Zuordnung konnte nicht angelegt werden: ${response.status}`);
+      const apiError = await readApiError(response, "Zuordnung konnte nicht angelegt werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     setAssignmentForm({
@@ -2890,6 +2901,7 @@ function MasterdataAdmin({
       aliases: "",
     });
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Zuordnung angelegt.");
   }
 
@@ -2909,10 +2921,13 @@ function MasterdataAdmin({
       }),
     });
     if (!response.ok) {
-      setMessage(`Zuordnung konnte nicht aktualisiert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Zuordnung konnte nicht aktualisiert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Zuordnung aktualisiert.");
   }
 
@@ -2937,6 +2952,7 @@ function MasterdataAdmin({
   async function saveAssignmentEdit(assignment) {
     if (!assignmentEditForm) return;
     if (!assignmentEditForm.code.trim() || !assignmentEditForm.label.trim()) {
+      setMessageTone("error");
       setMessage(`${tenantProfile.assignment_label_singular} braucht Code und Name.`);
       return;
     }
@@ -2949,11 +2965,14 @@ function MasterdataAdmin({
       })),
     });
     if (!response.ok) {
-      setMessage(`Zuordnung konnte nicht gespeichert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Zuordnung konnte nicht gespeichert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     cancelAssignmentEdit();
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Zuordnung gespeichert.");
   }
 
@@ -2965,27 +2984,35 @@ function MasterdataAdmin({
       body: JSON.stringify(profileForm),
     });
     if (!response.ok) {
-      setMessage(`Mandantenprofil konnte nicht gespeichert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Mandantenprofil konnte nicht gespeichert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     const result = await response.json();
     onProfileSaved(result.tenant_profile);
+    setMessageTone("notice");
     setMessage("Mandantenprofil gespeichert.");
   }
 
   async function createSupplierRule(event) {
     event.preventDefault();
+    setSupplierFormErrors({});
     const response = await apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(emptyToNull(supplierForm)),
     });
     if (!response.ok) {
-      setMessage(`Lieferantenregel konnte nicht angelegt werden: ${response.status}`);
+      const apiError = await readApiError(response, "Lieferantenregel konnte nicht angelegt werden");
+      setSupplierFormErrors(apiError.fields);
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     setSupplierForm({ match_text: "", supplier_name: "", customer_number: "", default_cost_category: ["material"], default_assignment_code: "" });
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Lieferantenregel angelegt.");
   }
 
@@ -3004,10 +3031,13 @@ function MasterdataAdmin({
       }),
     });
     if (!response.ok) {
-      setMessage(`Lieferantenregel konnte nicht aktualisiert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Lieferantenregel konnte nicht aktualisiert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Lieferantenregel aktualisiert.");
   }
 
@@ -3031,6 +3061,7 @@ function MasterdataAdmin({
   async function saveSupplierEdit(rule) {
     if (!supplierEditForm) return;
     if (!supplierEditForm.match_text.trim() || !supplierEditForm.supplier_name.trim()) {
+      setMessageTone("error");
       setMessage("Lieferantenregel braucht Erkennungstext und Lieferant.");
       return;
     }
@@ -3040,23 +3071,30 @@ function MasterdataAdmin({
       body: JSON.stringify(emptyToNull(supplierEditForm)),
     });
     if (!response.ok) {
-      setMessage(`Lieferantenregel konnte nicht gespeichert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Lieferantenregel konnte nicht gespeichert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     cancelSupplierEdit();
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Lieferantenregel gespeichert.");
   }
 
   async function createAccountingRule(event) {
     event.preventDefault();
+    setAccountingFormErrors({});
     const response = await apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(emptyToNull(accountingForm)),
     });
     if (!response.ok) {
-      setMessage(`Kontierungsregel konnte nicht angelegt werden: ${response.status}`);
+      const apiError = await readApiError(response, "Kontierungsregel konnte nicht angelegt werden");
+      setAccountingFormErrors(apiError.fields);
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     setAccountingForm({
@@ -3073,9 +3111,11 @@ function MasterdataAdmin({
     if (accountingReturnDocumentId) {
       const returnDocumentId = accountingReturnDocumentId;
       setAccountingReturnDocumentId("");
+      setMessageTone("notice");
       setMessage("Kontierungsregel angelegt. Zurück zur Freigabeprüfung.");
       onAccountingRuleSaved?.(returnDocumentId);
     } else {
+      setMessageTone("notice");
       setMessage("Kontierungsregel angelegt.");
     }
   }
@@ -3098,10 +3138,13 @@ function MasterdataAdmin({
       }),
     });
     if (!response.ok) {
-      setMessage(`Kontierungsregel konnte nicht aktualisiert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Kontierungsregel konnte nicht aktualisiert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     await loadMasterdata();
+    setMessageTone("notice");
     setMessage("Kontierungsregel aktualisiert.");
   }
 
@@ -3128,6 +3171,7 @@ function MasterdataAdmin({
   async function saveAccountingEdit(rule) {
     if (!accountingEditForm) return;
     if (!accountingEditForm.name.trim() || !accountingEditForm.debit_account.trim() || !accountingEditForm.credit_account.trim()) {
+      setMessageTone("error");
       setMessage("Kontierungsregel braucht Name, Aufwandskonto und Gegenkonto.");
       return;
     }
@@ -3137,7 +3181,9 @@ function MasterdataAdmin({
       body: JSON.stringify(emptyToNull(accountingEditForm)),
     });
     if (!response.ok) {
-      setMessage(`Kontierungsregel konnte nicht gespeichert werden: ${response.status}`);
+      const apiError = await readApiError(response, "Kontierungsregel konnte nicht gespeichert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
       return;
     }
     cancelAccountingEdit();
@@ -3145,9 +3191,11 @@ function MasterdataAdmin({
     if (accountingReturnDocumentId) {
       const returnDocumentId = accountingReturnDocumentId;
       setAccountingReturnDocumentId("");
+      setMessageTone("notice");
       setMessage("Kontierungsregel gespeichert. Zurück zur Freigabeprüfung.");
       onAccountingRuleSaved?.(returnDocumentId);
     } else {
+      setMessageTone("notice");
       setMessage("Kontierungsregel gespeichert.");
     }
   }
@@ -3161,7 +3209,7 @@ function MasterdataAdmin({
         </div>
         <span className="tenant-chip">{tenantId}</span>
       </div>
-      {message ? <p className="notice">{message}</p> : null}
+      {message ? <p className={messageTone}>{message}</p> : null}
 
       <div className="admin-grid">
         <section className="admin-card admin-card-wide">
@@ -3375,22 +3423,22 @@ function MasterdataAdmin({
             <StatusPill value={`${supplierRules.length} Regeln`} />
           </div>
           <form className="form-grid supplier-form" onSubmit={createSupplierRule}>
-            <FormField label="Erkennungstext">
+            <FormField label="Erkennungstext" error={fieldError(supplierFormErrors, "match_text")}>
               <input placeholder="Holz Junge" value={supplierForm.match_text} onChange={(event) => setSupplierForm({ ...supplierForm, match_text: event.target.value })} required />
             </FormField>
-            <FormField label="Lieferant">
+            <FormField label="Lieferant" error={fieldError(supplierFormErrors, "supplier_name")}>
               <input placeholder="Holz Junge GmbH" value={supplierForm.supplier_name} onChange={(event) => setSupplierForm({ ...supplierForm, supplier_name: event.target.value })} required />
             </FormField>
-            <FormField label="Unsere Kunden-Nr.">
+            <FormField label="Unsere Kunden-Nr." error={fieldError(supplierFormErrors, "customer_number")}>
               <input placeholder="109324" value={supplierForm.customer_number} onChange={(event) => setSupplierForm({ ...supplierForm, customer_number: event.target.value })} />
             </FormField>
-            <FormField label="Kostenart">
+            <FormField label="Kostenart" error={fieldError(supplierFormErrors, "default_cost_category")}>
               <CategoryChecklist
                 value={supplierForm.default_cost_category}
                 onChange={(categories) => setSupplierForm({ ...supplierForm, default_cost_category: categories })}
               />
             </FormField>
-            <FormField label={tenantProfile.assignment_code_label}>
+            <FormField label={tenantProfile.assignment_code_label} error={fieldError(supplierFormErrors, "default_assignment_code")}>
               <input list="assignment-code-options" placeholder="optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
             </FormField>
             <button type="submit">Regel anlegen</button>
@@ -3494,13 +3542,13 @@ function MasterdataAdmin({
             <StatusPill value={`${accountingRules.length} Regeln`} />
           </div>
           <form className="form-grid accounting-form" onSubmit={createAccountingRule}>
-            <FormField label="Name">
+            <FormField label="Name" error={fieldError(accountingFormErrors, "name")}>
               <input placeholder="Material 19%" value={accountingForm.name} onChange={(event) => setAccountingForm({ ...accountingForm, name: event.target.value })} required />
             </FormField>
-            <FormField label="Lieferant enthält">
+            <FormField label="Lieferant enthält" error={fieldError(accountingFormErrors, "supplier_match_text")}>
               <input placeholder="optional, z.B. Lüchau" value={accountingForm.supplier_match_text} onChange={(event) => setAccountingForm({ ...accountingForm, supplier_match_text: event.target.value })} />
             </FormField>
-            <FormField label="Kostenart">
+            <FormField label="Kostenart" error={fieldError(accountingFormErrors, "cost_category")}>
               <select value={accountingForm.cost_category} onChange={(event) => setAccountingForm({ ...accountingForm, cost_category: event.target.value })}>
                 <option value="">Alle Kostenarten</option>
                 <option value="material">Material</option>
@@ -3511,19 +3559,19 @@ function MasterdataAdmin({
                 <option value="general_overhead">Sonstige Gemeinkosten</option>
               </select>
             </FormField>
-            <FormField label="Aufwandskonto">
+            <FormField label="Aufwandskonto" error={fieldError(accountingFormErrors, "debit_account")}>
               <input list="accounting-debit-options" placeholder="z.B. 3400" value={accountingForm.debit_account} onChange={(event) => setAccountingForm({ ...accountingForm, debit_account: event.target.value })} required />
             </FormField>
-            <FormField label="Gegenkonto">
+            <FormField label="Gegenkonto" error={fieldError(accountingFormErrors, "credit_account")}>
               <input list="accounting-credit-options" placeholder="z.B. Kreditor/Sammelkonto" value={accountingForm.credit_account} onChange={(event) => setAccountingForm({ ...accountingForm, credit_account: event.target.value })} required />
             </FormField>
-            <FormField label="Steuerschlüssel">
+            <FormField label="Steuerschlüssel" error={fieldError(accountingFormErrors, "tax_key")}>
               <input placeholder="optional" value={accountingForm.tax_key} onChange={(event) => setAccountingForm({ ...accountingForm, tax_key: event.target.value })} />
             </FormField>
-            <FormField label="Steuersatz">
+            <FormField label="Steuersatz" error={fieldError(accountingFormErrors, "tax_rate")}>
               <input placeholder="19.00" value={accountingForm.tax_rate} onChange={(event) => setAccountingForm({ ...accountingForm, tax_rate: event.target.value })} />
             </FormField>
-            <FormField label="Skontokonto">
+            <FormField label="Skontokonto" error={fieldError(accountingFormErrors, "discount_account")}>
               <input list="accounting-discount-options" placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
             </FormField>
             <button className="secondary-button" type="button" onClick={() => setAccountingForm((current) => applyAccountingSuggestions(current, activeAccountingFramework))}>
@@ -3659,11 +3707,12 @@ function MasterdataAdmin({
   );
 }
 
-function FormField({ label, children }) {
+function FormField({ label, children, error }) {
   return (
     <div className="form-field">
       <span>{label}</span>
       {children}
+      {error ? <small className="field-error">{error}</small> : null}
     </div>
   );
 }
@@ -4270,6 +4319,17 @@ function formatBulkJobFailures(job, prefix) {
 
 function formatApiError(detail, fallback) {
   if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const details = detail
+      .slice(0, 4)
+      .map((entry) => {
+        const field = apiErrorFieldLabel(entry.loc);
+        const message = entry.msg || entry.message || "ungültiger Wert";
+        return field ? `${field}: ${message}` : message;
+      })
+      .join("; ");
+    return details ? `${fallback}: ${details}${detail.length > 4 ? " ..." : ""}` : fallback;
+  }
   if (detail?.documents?.length) {
     const details = detail.documents
       .slice(0, 3)
@@ -4282,6 +4342,57 @@ function formatApiError(detail, fallback) {
   }
   if (detail?.message) return detail.message;
   return fallback;
+}
+
+async function readApiError(response, fallback) {
+  const result = await response.json().catch(() => null);
+  const detail = result?.detail ?? result;
+  const message = formatApiError(detail, `${fallback}: ${response.status}`);
+  return {
+    message,
+    fields: apiFieldErrors(detail),
+  };
+}
+
+function apiFieldErrors(detail) {
+  const errors = {};
+  if (!Array.isArray(detail)) return errors;
+  detail.forEach((entry) => {
+    const field = apiErrorFieldName(entry.loc);
+    if (!field) return;
+    errors[field] = entry.msg || entry.message || "Ungültiger Wert";
+  });
+  return errors;
+}
+
+function apiErrorFieldName(loc) {
+  if (!Array.isArray(loc)) return "";
+  const field = [...loc].reverse().find((part) => typeof part === "string" && part !== "body");
+  return field || "";
+}
+
+function apiErrorFieldLabel(loc) {
+  const field = apiErrorFieldName(loc);
+  const labels = {
+    match_text: "Erkennungstext",
+    supplier_name: "Lieferant",
+    customer_number: "Unsere Kunden-Nr.",
+    default_cost_category: "Kostenart",
+    default_assignment_code: "Zuordnung",
+    name: "Name",
+    supplier_match_text: "Lieferant enthält",
+    cost_category: "Kostenart",
+    debit_account: "Aufwandskonto",
+    credit_account: "Gegenkonto",
+    tax_key: "Steuerschlüssel",
+    tax_rate: "Steuersatz",
+    discount_account: "Skontokonto",
+  };
+  return labels[field] || field;
+}
+
+function fieldError(errors, ...fields) {
+  return fields.map((field) => errors?.[field]).find(Boolean) || "";
 }
 
 function delay(milliseconds) {
