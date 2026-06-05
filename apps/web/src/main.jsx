@@ -2790,6 +2790,9 @@ function MasterdataAdmin({
   const [messageTone, setMessageTone] = useState("notice");
   const [supplierFormErrors, setSupplierFormErrors] = useState({});
   const [accountingFormErrors, setAccountingFormErrors] = useState({});
+  const [assignmentEditErrors, setAssignmentEditErrors] = useState({});
+  const [supplierEditErrors, setSupplierEditErrors] = useState({});
+  const [accountingEditErrors, setAccountingEditErrors] = useState({});
   const accountingSectionRef = useRef(null);
   const savedAccountingFramework = accountingFramework(tenantProfile.accounting_framework);
   const profileAccountingFramework = accountingFramework(profileForm.accounting_framework);
@@ -2933,6 +2936,7 @@ function MasterdataAdmin({
 
   function startAssignmentEdit(assignment) {
     setAssignmentEditId(assignment.id);
+    setAssignmentEditErrors({});
     setAssignmentEditForm({
       code: assignment.code || "",
       label: assignment.label || "",
@@ -2947,11 +2951,16 @@ function MasterdataAdmin({
   function cancelAssignmentEdit() {
     setAssignmentEditId(null);
     setAssignmentEditForm(null);
+    setAssignmentEditErrors({});
   }
 
   async function saveAssignmentEdit(assignment) {
     if (!assignmentEditForm) return;
     if (!assignmentEditForm.code.trim() || !assignmentEditForm.label.trim()) {
+      setAssignmentEditErrors({
+        code: assignmentEditForm.code.trim() ? "" : "Code ist erforderlich.",
+        label: assignmentEditForm.label.trim() ? "" : "Name ist erforderlich.",
+      });
       setMessageTone("error");
       setMessage(`${tenantProfile.assignment_label_singular} braucht Code und Name.`);
       return;
@@ -2966,6 +2975,7 @@ function MasterdataAdmin({
     });
     if (!response.ok) {
       const apiError = await readApiError(response, "Zuordnung konnte nicht gespeichert werden");
+      setAssignmentEditErrors(apiError.fields);
       setMessageTone("error");
       setMessage(apiError.message);
       return;
@@ -3043,6 +3053,7 @@ function MasterdataAdmin({
 
   function startSupplierEdit(rule) {
     setSupplierEditId(rule.id);
+    setSupplierEditErrors({});
     setSupplierEditForm({
       match_text: rule.match_text || "",
       supplier_name: rule.supplier_name || "",
@@ -3056,11 +3067,16 @@ function MasterdataAdmin({
   function cancelSupplierEdit() {
     setSupplierEditId(null);
     setSupplierEditForm(null);
+    setSupplierEditErrors({});
   }
 
   async function saveSupplierEdit(rule) {
     if (!supplierEditForm) return;
     if (!supplierEditForm.match_text.trim() || !supplierEditForm.supplier_name.trim()) {
+      setSupplierEditErrors({
+        match_text: supplierEditForm.match_text.trim() ? "" : "Erkennungstext ist erforderlich.",
+        supplier_name: supplierEditForm.supplier_name.trim() ? "" : "Lieferant ist erforderlich.",
+      });
       setMessageTone("error");
       setMessage("Lieferantenregel braucht Erkennungstext und Lieferant.");
       return;
@@ -3072,6 +3088,7 @@ function MasterdataAdmin({
     });
     if (!response.ok) {
       const apiError = await readApiError(response, "Lieferantenregel konnte nicht gespeichert werden");
+      setSupplierEditErrors(apiError.fields);
       setMessageTone("error");
       setMessage(apiError.message);
       return;
@@ -3150,6 +3167,7 @@ function MasterdataAdmin({
 
   function startAccountingEdit(rule) {
     setAccountingEditId(rule.id);
+    setAccountingEditErrors({});
     setAccountingEditForm({
       name: rule.name || "",
       supplier_match_text: rule.supplier_match_text || "",
@@ -3166,11 +3184,17 @@ function MasterdataAdmin({
   function cancelAccountingEdit() {
     setAccountingEditId(null);
     setAccountingEditForm(null);
+    setAccountingEditErrors({});
   }
 
   async function saveAccountingEdit(rule) {
     if (!accountingEditForm) return;
     if (!accountingEditForm.name.trim() || !accountingEditForm.debit_account.trim() || !accountingEditForm.credit_account.trim()) {
+      setAccountingEditErrors({
+        name: accountingEditForm.name.trim() ? "" : "Name ist erforderlich.",
+        debit_account: accountingEditForm.debit_account.trim() ? "" : "Aufwandskonto ist erforderlich.",
+        credit_account: accountingEditForm.credit_account.trim() ? "" : "Gegenkonto ist erforderlich.",
+      });
       setMessageTone("error");
       setMessage("Kontierungsregel braucht Name, Aufwandskonto und Gegenkonto.");
       return;
@@ -3182,6 +3206,7 @@ function MasterdataAdmin({
     });
     if (!response.ok) {
       const apiError = await readApiError(response, "Kontierungsregel konnte nicht gespeichert werden");
+      setAccountingEditErrors(apiError.fields);
       setMessageTone("error");
       setMessage(apiError.message);
       return;
@@ -3329,43 +3354,53 @@ function MasterdataAdmin({
                 <div className={isEditing ? "data-row editing-row" : "data-row"} key={assignment.id}>
                   {isEditing ? (
                     <>
-                      <input
-                        aria-label="Code"
-                        value={assignmentEditForm.code}
-                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, code: event.target.value })}
-                        required
-                      />
-                      <input
-                        aria-label="Projektnummer"
-                        placeholder={usesProjectNumber(assignmentEditForm.kind) ? "z.B. 25-00008" : "optional"}
-                        value={assignmentEditForm.project_number}
-                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, project_number: event.target.value })}
-                      />
-                      <input
-                        aria-label="Name"
-                        value={assignmentEditForm.label}
-                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, label: event.target.value })}
-                        required
-                      />
-                      <select
-                        aria-label="Art"
-                        value={assignmentEditForm.kind}
-                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, kind: event.target.value })}
-                      >
-                        <option value="construction_project">Bauvorhaben</option>
-                        <option value="location">Standort</option>
-                        <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
-                        <option value="cost_object">Kostenobjekt</option>
-                        <option value="vehicle">Fahrzeug</option>
-                        <option value="subscription">Abo/Vertrag</option>
-                        <option value="department">Bereich</option>
-                      </select>
-                      <input
-                        aria-label="Aliase"
-                        placeholder="kommagetrennt"
-                        value={assignmentEditForm.aliases}
-                        onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, aliases: event.target.value })}
-                      />
+                      <InlineEditField error={fieldError(assignmentEditErrors, "code")}>
+                        <input
+                          aria-label="Code"
+                          value={assignmentEditForm.code}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, code: event.target.value })}
+                          required
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(assignmentEditErrors, "project_number")}>
+                        <input
+                          aria-label="Projektnummer"
+                          placeholder={usesProjectNumber(assignmentEditForm.kind) ? "z.B. 25-00008" : "optional"}
+                          value={assignmentEditForm.project_number}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, project_number: event.target.value })}
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(assignmentEditErrors, "label")}>
+                        <input
+                          aria-label="Name"
+                          value={assignmentEditForm.label}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, label: event.target.value })}
+                          required
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(assignmentEditErrors, "kind")}>
+                        <select
+                          aria-label="Art"
+                          value={assignmentEditForm.kind}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, kind: event.target.value })}
+                        >
+                          <option value="construction_project">Bauvorhaben</option>
+                          <option value="location">Standort</option>
+                          <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+                          <option value="cost_object">Kostenobjekt</option>
+                          <option value="vehicle">Fahrzeug</option>
+                          <option value="subscription">Abo/Vertrag</option>
+                          <option value="department">Bereich</option>
+                        </select>
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(assignmentEditErrors, "aliases")}>
+                        <input
+                          aria-label="Aliase"
+                          placeholder="kommagetrennt"
+                          value={assignmentEditForm.aliases}
+                          onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, aliases: event.target.value })}
+                        />
+                      </InlineEditField>
                       <label className="switch">
                         <input
                           type="checkbox"
@@ -3466,34 +3501,44 @@ function MasterdataAdmin({
                 <div className={isEditing ? "data-row editing-row" : "data-row"} key={rule.id}>
                   {isEditing ? (
                     <>
-                      <input
-                        aria-label="Lieferant"
-                        value={supplierEditForm.supplier_name}
-                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, supplier_name: event.target.value })}
-                        required
-                      />
-                      <input
-                        aria-label="Erkennungstext"
-                        value={supplierEditForm.match_text}
-                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, match_text: event.target.value })}
-                        required
-                      />
-                      <input
-                        aria-label="Unsere Kunden-Nr."
-                        value={supplierEditForm.customer_number}
-                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, customer_number: event.target.value })}
-                      />
-                      <CategoryChecklist
-                        value={supplierEditForm.default_cost_category}
-                        onChange={(categories) => setSupplierEditForm({ ...supplierEditForm, default_cost_category: categories })}
-                      />
-                      <input
-                        aria-label={tenantProfile.assignment_code_label}
-                        list="assignment-code-options"
-                        placeholder="leer = keine feste Zuordnung"
-                        value={supplierEditForm.default_assignment_code}
-                        onChange={(event) => setSupplierEditForm({ ...supplierEditForm, default_assignment_code: event.target.value })}
-                      />
+                      <InlineEditField error={fieldError(supplierEditErrors, "supplier_name")}>
+                        <input
+                          aria-label="Lieferant"
+                          value={supplierEditForm.supplier_name}
+                          onChange={(event) => setSupplierEditForm({ ...supplierEditForm, supplier_name: event.target.value })}
+                          required
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(supplierEditErrors, "match_text")}>
+                        <input
+                          aria-label="Erkennungstext"
+                          value={supplierEditForm.match_text}
+                          onChange={(event) => setSupplierEditForm({ ...supplierEditForm, match_text: event.target.value })}
+                          required
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(supplierEditErrors, "customer_number")}>
+                        <input
+                          aria-label="Unsere Kunden-Nr."
+                          value={supplierEditForm.customer_number}
+                          onChange={(event) => setSupplierEditForm({ ...supplierEditForm, customer_number: event.target.value })}
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(supplierEditErrors, "default_cost_category")}>
+                        <CategoryChecklist
+                          value={supplierEditForm.default_cost_category}
+                          onChange={(categories) => setSupplierEditForm({ ...supplierEditForm, default_cost_category: categories })}
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(supplierEditErrors, "default_assignment_code")}>
+                        <input
+                          aria-label={tenantProfile.assignment_code_label}
+                          list="assignment-code-options"
+                          placeholder="leer = keine feste Zuordnung"
+                          value={supplierEditForm.default_assignment_code}
+                          onChange={(event) => setSupplierEditForm({ ...supplierEditForm, default_assignment_code: event.target.value })}
+                        />
+                      </InlineEditField>
                       <label className="switch">
                         <input
                           type="checkbox"
@@ -3604,58 +3649,72 @@ function MasterdataAdmin({
                 <div className={isEditing ? "data-row editing-row" : "data-row"} data-accounting-rule-id={rule.id} key={rule.id}>
                   {isEditing ? (
                     <>
-                      <input
-                        aria-label="Name"
-                        value={accountingEditForm.name}
-                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, name: event.target.value })}
-                        required
-                      />
-                      <input
-                        aria-label="Lieferant enthält"
-                        placeholder="optional"
-                        value={accountingEditForm.supplier_match_text}
-                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, supplier_match_text: event.target.value })}
-                      />
-                      <CostCategorySelect
-                        value={accountingEditForm.cost_category}
-                        onChange={(value) => setAccountingEditForm({ ...accountingEditForm, cost_category: value })}
-                        includeAll
-                      />
-                      <input
-                        aria-label="Aufwandskonto"
-                        list="accounting-edit-debit-options"
-                        value={accountingEditForm.debit_account}
-                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, debit_account: event.target.value })}
-                        required
-                      />
-                      <input
-                        aria-label="Gegenkonto"
-                        list="accounting-edit-credit-options"
-                        value={accountingEditForm.credit_account}
-                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, credit_account: event.target.value })}
-                        required
-                      />
-                      <div className="inline-fields">
+                      <InlineEditField error={fieldError(accountingEditErrors, "name")}>
                         <input
-                          aria-label="Steuerschlüssel"
-                          placeholder="Schl."
-                          value={accountingEditForm.tax_key}
-                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_key: event.target.value })}
+                          aria-label="Name"
+                          value={accountingEditForm.name}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, name: event.target.value })}
+                          required
                         />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(accountingEditErrors, "supplier_match_text")}>
                         <input
-                          aria-label="Steuersatz"
-                          placeholder="19.00"
-                          value={accountingEditForm.tax_rate}
-                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_rate: event.target.value })}
+                          aria-label="Lieferant enthält"
+                          placeholder="optional"
+                          value={accountingEditForm.supplier_match_text}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, supplier_match_text: event.target.value })}
                         />
-                      </div>
-                      <input
-                        aria-label="Skontokonto"
-                        list="accounting-edit-discount-options"
-                        placeholder="optional"
-                        value={accountingEditForm.discount_account}
-                        onChange={(event) => setAccountingEditForm({ ...accountingEditForm, discount_account: event.target.value })}
-                      />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(accountingEditErrors, "cost_category")}>
+                        <CostCategorySelect
+                          value={accountingEditForm.cost_category}
+                          onChange={(value) => setAccountingEditForm({ ...accountingEditForm, cost_category: value })}
+                          includeAll
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(accountingEditErrors, "debit_account")}>
+                        <input
+                          aria-label="Aufwandskonto"
+                          list="accounting-edit-debit-options"
+                          value={accountingEditForm.debit_account}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, debit_account: event.target.value })}
+                          required
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(accountingEditErrors, "credit_account")}>
+                        <input
+                          aria-label="Gegenkonto"
+                          list="accounting-edit-credit-options"
+                          value={accountingEditForm.credit_account}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, credit_account: event.target.value })}
+                          required
+                        />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(accountingEditErrors, "tax_key", "tax_rate")}>
+                        <div className="inline-fields">
+                          <input
+                            aria-label="Steuerschlüssel"
+                            placeholder="Schl."
+                            value={accountingEditForm.tax_key}
+                            onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_key: event.target.value })}
+                          />
+                          <input
+                            aria-label="Steuersatz"
+                            placeholder="19.00"
+                            value={accountingEditForm.tax_rate}
+                            onChange={(event) => setAccountingEditForm({ ...accountingEditForm, tax_rate: event.target.value })}
+                          />
+                        </div>
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(accountingEditErrors, "discount_account")}>
+                        <input
+                          aria-label="Skontokonto"
+                          list="accounting-edit-discount-options"
+                          placeholder="optional"
+                          value={accountingEditForm.discount_account}
+                          onChange={(event) => setAccountingEditForm({ ...accountingEditForm, discount_account: event.target.value })}
+                        />
+                      </InlineEditField>
                       <label className="switch">
                         <input
                           type="checkbox"
@@ -3711,6 +3770,15 @@ function FormField({ label, children, error }) {
   return (
     <div className="form-field">
       <span>{label}</span>
+      {children}
+      {error ? <small className="field-error">{error}</small> : null}
+    </div>
+  );
+}
+
+function InlineEditField({ children, error }) {
+  return (
+    <div className="inline-edit-field">
       {children}
       {error ? <small className="field-error">{error}</small> : null}
     </div>

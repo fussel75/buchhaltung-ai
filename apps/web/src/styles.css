@@ -2235,6 +2235,16 @@ code {
   min-width: 0;
 }
 
+.inline-edit-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.inline-edit-field .field-error {
+  margin-top: 0;
+}
+
 .row-actions {
   display: flex;
   gap: 8px;
