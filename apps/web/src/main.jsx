@@ -843,13 +843,19 @@ function UploadApp() {
       return;
     }
     if (issue?.code !== "missing_accounting_rule") {
+      const isAmbiguousRule = issue?.code === "ambiguous_accounting_rule";
+      const focusField = issue?.code === "missing_discount_account"
+        ? "discount_account"
+        : isAmbiguousRule
+          ? "supplier_match_text"
+          : "debit_account";
       setAccountingRuleEditTarget({
         id: `${Date.now()}-${issue?.accounting_rule_id || issue?.accounting_rule_name || issue?.cost_category || ""}`,
         rule_id: issue?.accounting_rule_id || "",
         accounting_rule_name: issue?.accounting_rule_name || issue?.suggested_name || "",
         supplier_name: issue?.supplier_name || "",
         cost_category: issue?.cost_category || "",
-        focus_field: issue?.code === "missing_discount_account" ? "discount_account" : "debit_account",
+        focus_field: focusField,
         return_document_id: approvalDocument?.id || "",
       });
       approvalValidationRequestRef.current += 1;
@@ -857,7 +863,9 @@ function UploadApp() {
       setApprovalError("");
       setApprovalIssues([]);
       setActiveView("masterdata");
-      setNotice("Kontierungsregel wird geöffnet. Bitte fehlende Konten ergänzen und speichern.");
+      setNotice(isAmbiguousRule
+        ? "Kontierungsregel wird geöffnet. Bitte Erkennung oder Kostenart eindeutiger machen und speichern."
+        : "Kontierungsregel wird geöffnet. Bitte fehlende Konten ergänzen und speichern.");
       return;
     }
     const supplierName = issue?.supplier_name || approvalDocument?.extraction?.supplier_name || "";
@@ -2465,18 +2473,40 @@ function ApprovalDialog({
             {ambiguousAccountingRuleIssues.length ? (
               <div className="approval-fix-list-wrap">
                 <ul className="approval-fix-list">
-                  {ambiguousAccountingRuleIssues.map((issue, index) => (
-                    <li key={`${issue.line_no || index}-${issue.cost_category || ""}`}>
-                      <strong>Zeile {issue.line_no || "?"}</strong>
-                      <span>
-                        {(issue.matching_rules || []).map((rule) => rule.name).filter(Boolean).join(", ") || issue.message}
-                      </span>
-                    </li>
-                  ))}
+                  {ambiguousAccountingRuleIssues.map((issue, index) => {
+                    const matchingRules = Array.isArray(issue.matching_rules) ? issue.matching_rules : [];
+                    return (
+                      <li key={`${issue.line_no || index}-${issue.cost_category || ""}`}>
+                        <strong>Zeile {issue.line_no || "?"}</strong>
+                        <span>{accountingRuleIssueContext(issue) || "Mehrere Kontierungsregeln passen gleich gut."}</span>
+                        {matchingRules.length ? (
+                          <div className="approval-rule-matches">
+                            {matchingRules.map((rule, ruleIndex) => (
+                              <button
+                                className="secondary-button compact-button"
+                                type="button"
+                                key={`${rule.id || rule.rule_id || rule.name || ruleIndex}-${issue.line_no || index}`}
+                                onClick={() => onPrepareAccountingRule({
+                                  ...issue,
+                                  accounting_rule_id: rule.id || rule.rule_id || issue.accounting_rule_id || "",
+                                  accounting_rule_name: rule.name || issue.accounting_rule_name || "",
+                                  supplier_name: issue.supplier_name || rule.supplier_name || "",
+                                  cost_category: issue.cost_category || rule.cost_category || "",
+                                })}
+                                disabled={!canPrepareAccountingRule || !(rule.id || rule.rule_id)}
+                              >
+                                {accountingRuleMatchLabel(rule)}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
                 {canPrepareAccountingRule ? (
                   <button className="secondary-button compact-button" type="button" onClick={onOpenAccountingRules}>
-                    Stammdaten öffnen
+                    Alle Regeln öffnen
                   </button>
                 ) : null}
               </div>
@@ -2867,12 +2897,12 @@ function MasterdataAdmin({
     setAccountingReturnDocumentId(accountingRuleEditTarget.return_document_id || "");
     startAccountingEdit(rule);
     setMessageTone("notice");
-    setMessage("Kontierungsregel geöffnet. Bitte fehlende Konten ergänzen und speichern.");
+    setMessage(accountingRuleEditTarget.focus_field === "supplier_match_text"
+      ? "Kontierungsregel geöffnet. Bitte Erkennung oder Kostenart eindeutiger machen und speichern."
+      : "Kontierungsregel geöffnet. Bitte fehlende Konten ergänzen und speichern.");
     window.setTimeout(() => {
       accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      const focusSelector = accountingRuleEditTarget.focus_field === "discount_account"
-        ? 'input[aria-label="Skontokonto"]'
-        : 'input[aria-label="Aufwandskonto"]';
+      const focusSelector = `[data-accounting-field="${accountingRuleEditTarget.focus_field || "debit_account"}"]`;
       const row = accountingSectionRef.current?.querySelector(`[data-accounting-rule-id="${rule.id}"]`);
       row?.querySelector(focusSelector)?.focus();
     }, 0);
@@ -3660,6 +3690,7 @@ function MasterdataAdmin({
                       <InlineEditField error={fieldError(accountingEditErrors, "supplier_match_text")}>
                         <input
                           aria-label="Lieferant enthält"
+                          data-accounting-field="supplier_match_text"
                           placeholder="optional"
                           value={accountingEditForm.supplier_match_text}
                           onChange={(event) => setAccountingEditForm({ ...accountingEditForm, supplier_match_text: event.target.value })}
@@ -3675,6 +3706,7 @@ function MasterdataAdmin({
                       <InlineEditField error={fieldError(accountingEditErrors, "debit_account")}>
                         <input
                           aria-label="Aufwandskonto"
+                          data-accounting-field="debit_account"
                           list="accounting-edit-debit-options"
                           value={accountingEditForm.debit_account}
                           onChange={(event) => setAccountingEditForm({ ...accountingEditForm, debit_account: event.target.value })}
@@ -3709,6 +3741,7 @@ function MasterdataAdmin({
                       <InlineEditField error={fieldError(accountingEditErrors, "discount_account")}>
                         <input
                           aria-label="Skontokonto"
+                          data-accounting-field="discount_account"
                           list="accounting-edit-discount-options"
                           placeholder="optional"
                           value={accountingEditForm.discount_account}
@@ -4878,6 +4911,23 @@ function accountingRuleFixTitle(issues) {
   if (issues.some((issue) => issue.code === "missing_discount_account")) return "Skontokonto fehlt";
   if (issues.some((issue) => issue.code === "incomplete_accounting_rule")) return "Kontierungsregel unvollständig";
   return "Kontierungsregel fehlt";
+}
+
+function accountingRuleIssueContext(issue) {
+  return [
+    issue?.supplier_name ? `Lieferant: ${issue.supplier_name}` : null,
+    issue?.cost_category ? `Kostenart: ${formatCostCategory(issue.cost_category)}` : null,
+    issue?.message && !String(issue.message).includes("Mehrere Regeln") ? issue.message : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function accountingRuleMatchLabel(rule) {
+  const ruleName = rule?.name || "Regel öffnen";
+  const details = [
+    rule?.supplier_match_text ? `Erkennung: ${rule.supplier_match_text}` : null,
+    rule?.cost_category ? formatCostCategory(rule.cost_category) : null,
+  ].filter(Boolean);
+  return details.length ? `${ruleName} (${details.join(", ")})` : ruleName;
 }
 
 function findAccountingRuleForTarget(rules, target) {

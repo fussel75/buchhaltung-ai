@@ -2318,6 +2318,7 @@ class BookingSuggestionTests(TestCase):
         ambiguous = next(detail for detail in details if detail["code"] == "ambiguous_accounting_rule")
         self.assertIn("Mehrere Kontierungsregeln passen", ambiguous["message"])
         self.assertEqual(ambiguous["line_no"], 1)
+        self.assertEqual([rule["id"] for rule in ambiguous["matching_rules"]], [rules[0]["id"], rules[1]["id"]])
         self.assertEqual([rule["name"] for rule in ambiguous["matching_rules"]], ["Foerch Material 3400", "Foerch Material 3425"])
         self.assertNotIn("Kontierungsregel fehlt", "\n".join(errors))
 

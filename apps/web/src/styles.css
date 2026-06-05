@@ -1663,6 +1663,21 @@ code {
   overflow-wrap: anywhere;
 }
 
+.approval-rule-matches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.approval-rule-matches button {
+  min-height: 30px;
+  max-width: 100%;
+  padding: 0 10px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .approval-fix-list-wrap button {
   min-height: 32px;
 }
