@@ -10,16 +10,9 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from app.config import get_settings
+from app.services.cost_categories import COST_CATEGORY_LABELS, VALID_COST_CATEGORIES, split_cost_category_values
 from app.services.storage import StoredDocument, rename_stored_document
 
-VALID_COST_CATEGORIES = {
-    "material",
-    "subcontractor",
-    "fuel_vehicle",
-    "software_subscription",
-    "security_subscription",
-    "general_overhead",
-}
 VALID_ACCOUNTING_FRAMEWORKS = {"SKR03", "SKR04"}
 BULK_JOB_ACTIONS = {"extract", "prepare_review"}
 BULK_JOB_ACTIVE_STATUSES = {"queued", "running"}
@@ -1161,21 +1154,10 @@ class ReviewApprovalError(ValueError):
         self.details = details or [{"code": "review_validation", "message": error} for error in errors]
 
 
-_COST_CATEGORY_LABELS = {
-    "material": "Material",
-    "subcontractor": "Fremdleistung",
-    "fuel_vehicle": "Fahrzeug/Tanken",
-    "software_subscription": "Software/Abo",
-    "security_subscription": "Überwachung/Abo",
-    "general_overhead": "Sonstige Gemeinkosten",
-    "payment_discount": "Skonto/Zahlungsdifferenz",
-}
-
-
 def _cost_category_label(value: str | None) -> str:
     if not value:
         return "-"
-    return _COST_CATEGORY_LABELS.get(value, value)
+    return COST_CATEGORY_LABELS.get(value, value)
 
 
 def _accounting_rule_context(supplier_name: str | None, cost_category: str | None) -> str:
@@ -1395,6 +1377,16 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
         cost_category = suggestion.get("cost_category")
         accounting_rule = None
         accounting_rule_matches: list[dict[str, Any]] = []
+        if cost_category and cost_category not in VALID_COST_CATEGORIES:
+            add_error(
+                f"Zeile {line_no}: Kostenart unbekannt: {cost_category}.",
+                code="invalid_cost_category",
+                line_no=line_no,
+                field="cost_category",
+                cost_category=cost_category,
+                cost_category_label=_cost_category_label(cost_category),
+            )
+            continue
         if cost_category:
             accounting_rule_matches = find_accounting_rule_matches(
                 tenant_id=document.get("tenant_id"),
@@ -2982,17 +2974,11 @@ def _normalize_allowed_tenant_ids(tenant_ids: list[str] | None, role: str) -> li
 
 
 def _split_cost_categories(value: str | list[str] | None) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        raw_values = value
-    else:
-        raw_values = value.replace(";", ",").split(",")
     return list(
         dict.fromkeys(
-            item.strip()
-            for item in raw_values
-            if item and item.strip() in VALID_COST_CATEGORIES
+            item
+            for item in split_cost_category_values(value)
+            if item in VALID_COST_CATEGORIES
         )
     )
 

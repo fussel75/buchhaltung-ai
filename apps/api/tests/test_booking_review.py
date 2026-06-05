@@ -234,6 +234,82 @@ class BookingSuggestionTests(TestCase):
                 gross_amount="119.00",
             )
 
+    def test_extraction_update_rejects_unknown_cost_category(self):
+        with self.assertRaises(ValidationError):
+            documents_route.ExtractionUpdate(cost_category="software")
+
+    def test_supplier_rule_rejects_unknown_default_cost_category(self):
+        with self.assertRaises(ValidationError):
+            masterdata_route.SupplierRuleRequest(
+                match_text="konzept 54",
+                supplier_name="konzept 54 GmbH & Co.KG",
+                default_cost_category=["material", "software"],
+            )
+
+    def test_supplier_rule_accepts_multiple_known_default_cost_categories(self):
+        payload = masterdata_route.SupplierRuleRequest(
+            match_text="konzept 54",
+            supplier_name="konzept 54 GmbH & Co.KG",
+            default_cost_category="material,subcontractor",
+        )
+
+        self.assertEqual(payload.default_cost_category, "material,subcontractor")
+
+    def test_accounting_rule_rejects_unknown_cost_category(self):
+        with self.assertRaises(ValidationError):
+            masterdata_route.AccountingRuleRequest(
+                name="Software falsch",
+                cost_category="software",
+                debit_account="4806",
+                credit_account="70000",
+            )
+
+    def test_accounting_rule_can_clear_cost_category(self):
+        payload = masterdata_route.AccountingRuleRequest(
+            name="Allgemeine Regel",
+            cost_category="",
+            debit_account="3400",
+            credit_account="70000",
+        )
+
+        self.assertIsNone(payload.cost_category)
+
+    def test_review_validation_rejects_legacy_unknown_cost_category(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "status": "review_ready",
+            "extraction": {
+                "supplier_name": "Muster Lieferant GmbH",
+                "invoice_number": "R-1",
+                "invoice_date": "2026-05-05",
+                "net_amount": "100.00",
+                "tax_amount": "19.00",
+                "gross_amount": "119.00",
+                "currency": "EUR",
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "software",
+                    "assignment_kind": "cost_object",
+                    "assignment_code": "Abo",
+                    "description": "Software Abo",
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "119.00",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "119.00"},
+        }
+
+        details = validate_document_review_details(document)
+
+        self.assertEqual(details[0]["code"], "invalid_cost_category")
+        self.assertEqual(details[0]["message"], "Zeile 1: Kostenart unbekannt: software.")
+
     def test_booking_update_rejects_too_long_assignment_code(self):
         with self.assertRaises(ValidationError):
             BookingSuggestionUpdate(
@@ -2403,7 +2479,7 @@ class BookingSuggestionTests(TestCase):
                 {
                     "line_no": 1,
                     "booking_type": "incoming_invoice",
-                    "cost_category": "software",
+                    "cost_category": "software_subscription",
                     "description": "Software Abo",
                     "net_amount": "100.00",
                     "tax_amount": "19.00",
@@ -2417,7 +2493,7 @@ class BookingSuggestionTests(TestCase):
             {
                 "name": "Software Standard",
                 "supplier_match_text": None,
-                "cost_category": "software",
+                "cost_category": "software_subscription",
                 "debit_account": "4806",
                 "credit_account": "70000",
                 "tax_key": "9",

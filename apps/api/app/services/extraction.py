@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pypdf import PdfReader
 
 from app.config import get_settings
+from app.services.cost_categories import VALID_COST_CATEGORIES, split_cost_category_values
 from app.services.database import (
     find_assignment_unit_by_text,
     find_supplier_rule,
@@ -20,14 +21,6 @@ from app.services.database import (
     save_document_extraction,
 )
 
-VALID_COST_CATEGORIES = {
-    "material",
-    "subcontractor",
-    "fuel_vehicle",
-    "software_subscription",
-    "security_subscription",
-    "general_overhead",
-}
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
 REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready", "review_approved"}
 
@@ -1256,17 +1249,11 @@ def _cost_category_for_supplier_rule(
 
 
 def _split_cost_categories(value: str | list[str] | None) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        raw_values = value
-    else:
-        raw_values = value.replace(";", ",").split(",")
     return list(
         dict.fromkeys(
-            item.strip()
-            for item in raw_values
-            if item and item.strip() in VALID_COST_CATEGORIES
+            item
+            for item in split_cost_category_values(value)
+            if item in VALID_COST_CATEGORIES
         )
     )
 

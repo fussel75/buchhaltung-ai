@@ -2,9 +2,10 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.routes.users import require_admin, require_tenant_access
+from app.services.cost_categories import CostCategory, invalid_cost_category_values
 from app.services.database import (
     create_accounting_rule,
     create_assignment_unit,
@@ -52,17 +53,32 @@ class SupplierRuleRequest(BaseModel):
     default_assignment_code: str | None = None
     is_active: bool = True
 
+    @field_validator("default_cost_category")
+    @classmethod
+    def validate_default_cost_category(cls, value: str | list[str] | None) -> str | list[str] | None:
+        if value == "":
+            return None
+        invalid = invalid_cost_category_values(value)
+        if invalid:
+            raise ValueError(f"Unbekannte Kostenart: {', '.join(invalid)}")
+        return value
+
 
 class AccountingRuleRequest(BaseModel):
     name: str
     supplier_match_text: str | None = None
-    cost_category: str | None = None
+    cost_category: CostCategory | None = None
     debit_account: str
     credit_account: str
     tax_key: str | None = None
     tax_rate: Decimal | None = None
     discount_account: str | None = None
     is_active: bool = True
+
+    @field_validator("cost_category", mode="before")
+    @classmethod
+    def normalize_optional_cost_category(cls, value: str | None) -> str | None:
+        return None if value == "" else value
 
 
 class TenantProfileRequest(BaseModel):

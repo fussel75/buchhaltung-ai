@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.services.cost_categories import CostCategory
 from app.services.database import (
     approve_document_review,
     BulkJobConflictError,
@@ -64,14 +65,7 @@ class DocumentReextractRequest(BaseModel):
 
 class BookingSuggestionUpdate(BaseModel):
     booking_type: Literal["incoming_invoice", "credit_note"]
-    cost_category: Literal[
-        "material",
-        "subcontractor",
-        "fuel_vehicle",
-        "software_subscription",
-        "security_subscription",
-        "general_overhead",
-    ] | None = None
+    cost_category: CostCategory | None = None
     assignment_code: str | None = Field(default=None, max_length=80)
     assignment_kind: Literal[
         "construction_project",
@@ -115,14 +109,7 @@ class ExtractionUpdate(BaseModel):
     service_period: str | None = Field(default=None, max_length=120)
     customer_number: str | None = Field(default=None, max_length=120)
     document_type: Literal["incoming_invoice", "credit_note"] | None = None
-    cost_category: Literal[
-        "material",
-        "subcontractor",
-        "fuel_vehicle",
-        "software_subscription",
-        "security_subscription",
-        "general_overhead",
-    ] | None = None
+    cost_category: CostCategory | None = None
     assignment_code: str | None = Field(default=None, max_length=80)
     assignment_kind: Literal[
         "construction_project",
