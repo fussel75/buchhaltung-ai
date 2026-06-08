@@ -2783,6 +2783,7 @@ function MasterdataAdmin({
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
+  const [bwaImports, setBwaImports] = useState([]);
   const [assignmentEditId, setAssignmentEditId] = useState(null);
   const [assignmentEditForm, setAssignmentEditForm] = useState(null);
   const [supplierEditId, setSupplierEditId] = useState(null);
@@ -2817,6 +2818,7 @@ function MasterdataAdmin({
   });
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState("notice");
+  const [isUploadingBwa, setIsUploadingBwa] = useState(false);
   const [supplierFormErrors, setSupplierFormErrors] = useState({});
   const [accountingFormErrors, setAccountingFormErrors] = useState({});
   const [assignmentEditErrors, setAssignmentEditErrors] = useState({});
@@ -2843,20 +2845,23 @@ function MasterdataAdmin({
   }, [tenantProfile]);
 
   const loadMasterdata = useCallback(async () => {
-    const [assignmentsResponse, suppliersResponse, accountingResponse] = await Promise.all([
+    const [assignmentsResponse, suppliersResponse, accountingResponse, bwaResponse] = await Promise.all([
       apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`),
+      apiFetch(`/masterdata/bwa-imports?tenant_id=${encodeURIComponent(tenantId)}`),
     ]);
-    if (!assignmentsResponse.ok || !suppliersResponse.ok || !accountingResponse.ok) {
+    if (!assignmentsResponse.ok || !suppliersResponse.ok || !accountingResponse.ok || !bwaResponse.ok) {
       throw new Error("Stammdaten konnten nicht geladen werden.");
     }
     const assignmentsResult = await assignmentsResponse.json();
     const suppliersResult = await suppliersResponse.json();
     const accountingResult = await accountingResponse.json();
+    const bwaResult = await bwaResponse.json();
     setAssignmentUnits(assignmentsResult.assignment_units ?? []);
     setSupplierRules(suppliersResult.supplier_rules ?? []);
     setAccountingRules(accountingResult.accounting_rules ?? []);
+    setBwaImports(bwaResult.bwa_imports ?? []);
   }, [apiFetch, tenantId]);
 
   useEffect(() => {
@@ -3251,6 +3256,36 @@ function MasterdataAdmin({
       setMessageTone("notice");
       setMessage("Kontierungsregel gespeichert.");
     }
+  }
+
+  async function uploadBwa(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = form.elements.bwa_file?.files?.[0];
+    if (!file) {
+      setMessageTone("error");
+      setMessage("Bitte zuerst eine BWA-Datei auswählen.");
+      return;
+    }
+    setIsUploadingBwa(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await apiFetch(`/masterdata/bwa-imports?tenant_id=${encodeURIComponent(tenantId)}`, {
+      method: "POST",
+      body: formData,
+    });
+    setIsUploadingBwa(false);
+    if (!response.ok) {
+      const apiError = await readApiError(response, "BWA konnte nicht hochgeladen werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
+      return;
+    }
+    const result = await response.json();
+    form.reset();
+    await loadMasterdata();
+    setMessageTone("notice");
+    setMessage(result.duplicate ? "BWA erneut analysiert." : "BWA gespeichert und analysiert.");
   }
 
   return (
@@ -3777,6 +3812,62 @@ function MasterdataAdmin({
           <AccountSuggestionDatalist id="accounting-edit-debit-options" suggestions={editDebitSuggestions} />
           <AccountSuggestionDatalist id="accounting-edit-credit-options" suggestions={editCreditSuggestions} />
           <AccountSuggestionDatalist id="accounting-edit-discount-options" suggestions={editDiscountSuggestions} />
+        </section>
+
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Lernquellen</p>
+              <h3>BWA-Importe</h3>
+            </div>
+            <StatusPill value={`${bwaImports.length} Dateien`} tone={bwaImports.length ? "green" : "gray"} />
+          </div>
+          <form className="bwa-upload" onSubmit={uploadBwa}>
+            <FormField label="BWA-Datei">
+              <input name="bwa_file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+            </FormField>
+            <button type="submit" disabled={isUploadingBwa}>
+              {isUploadingBwa ? "Analysiere ..." : "BWA hochladen"}
+            </button>
+            <p className="form-hint">
+              BWA-Daten dienen als Lernhinweis für Konten und bisherige Buchungslogik. Sie werden nicht blind als Vorlage übernommen.
+            </p>
+          </form>
+          <div className="data-table bwa-table">
+            <div className="data-row data-head">
+              <span>Datei</span>
+              <span>Zeitraum</span>
+              <span>Kontohinweise</span>
+              <span>Größe</span>
+              <span>Importiert</span>
+            </div>
+            {bwaImports.map((bwaImport) => (
+              <div className="data-row" key={bwaImport.id}>
+                <strong>{safeVisibleFilename(bwaImport.original_filename)}</strong>
+                <span>{bwaImport.period || "-"}</span>
+                <span>{bwaImport.account_hints?.length || 0} Konten</span>
+                <span>{formatSize(bwaImport.size_bytes)}</span>
+                <span>{formatDateTime(bwaImport.created_at)}</span>
+                {bwaImport.account_hints?.length ? (
+                  <div className="bwa-hints">
+                    {bwaImport.account_hints.slice(0, 8).map((hint) => (
+                      <span key={`${bwaImport.id}-${hint.account}-${hint.label}`}>
+                        <strong>{hint.account}</strong> {hint.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {bwaImport.warnings?.length ? (
+                  <p className="inline-note">{bwaImport.warnings.join(" ")}</p>
+                ) : null}
+              </div>
+            ))}
+            {!bwaImports.length ? (
+              <div className="data-row empty-row">
+                <span>Noch keine BWA-Dateien für diesen Mandanten.</span>
+              </div>
+            ) : null}
+          </div>
         </section>
       </div>
     </section>

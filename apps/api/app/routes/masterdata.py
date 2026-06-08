@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, field_validator
 
 from app.routes.users import require_admin, require_tenant_access
@@ -9,11 +9,13 @@ from app.services.cost_categories import CostCategory, invalid_cost_category_val
 from app.services.database import (
     create_accounting_rule,
     create_assignment_unit,
+    create_bwa_import,
     create_supplier_rule,
     ensure_tenant_profile,
     get_tenant_profile,
     list_accounting_rules,
     list_assignment_units,
+    list_bwa_imports,
     list_supplier_rules,
     tenant_profile_template,
     update_accounting_rule,
@@ -21,6 +23,8 @@ from app.services.database import (
     update_supplier_rule,
     upsert_tenant_profile,
 )
+from app.services.bwa import analyze_bwa_file
+from app.services.storage import UploadRejectedError, delete_stored_document, store_bwa_document
 
 router = APIRouter()
 
@@ -98,6 +102,50 @@ def _normalize_tenant_id(tenant_id: str) -> str:
     if not normalized:
         raise HTTPException(status_code=400, detail="tenant_id is required")
     return normalized
+
+
+@router.get("/bwa-imports")
+def get_bwa_imports(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    require_admin(request)
+    require_tenant_access(request, normalized_tenant_id)
+    return {"bwa_imports": list_bwa_imports(normalized_tenant_id)}
+
+
+@router.post("/bwa-imports", status_code=status.HTTP_201_CREATED)
+async def post_bwa_import(
+    request: Request,
+    file: UploadFile = File(...),
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    require_admin(request)
+    require_tenant_access(request, normalized_tenant_id)
+    try:
+        stored = await store_bwa_document(file=file, tenant_id=normalized_tenant_id)
+        analysis = analyze_bwa_file(
+            storage_path=str(stored.storage_path),
+            original_filename=stored.original_filename,
+            content_type=stored.content_type,
+        )
+        bwa_import, inserted = create_bwa_import(
+            tenant_id=normalized_tenant_id,
+            stored=stored,
+            period=analysis.period,
+            account_hints=analysis.account_hints,
+            warnings=analysis.warnings,
+            text_excerpt=analysis.text_excerpt,
+        )
+    except UploadRejectedError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+    except Exception:
+        if "stored" in locals():
+            delete_stored_document(stored)
+        raise
+    return {"bwa_import": bwa_import, "duplicate": not inserted}
 
 
 @router.get("/tenant-profile")

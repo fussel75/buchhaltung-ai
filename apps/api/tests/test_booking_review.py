@@ -1,16 +1,19 @@
+from asyncio import run
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import call, patch
+from unittest.mock import ANY, call, patch
 from uuid import uuid4
 
 from pydantic import ValidationError
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from app.routes import documents as documents_route
 from app.routes import masterdata as masterdata_route
+from app.services import bwa as bwa_service
 from app.services import bulk_jobs as bulk_job_service
 from app.services import database as database_service
 from app.services import extraction as extraction_service
@@ -148,6 +151,70 @@ class TenantProfileTests(TestCase):
 
         self.assertEqual(profile["accounting_framework"], "SKR04")
         self.assertEqual(cursor.statements[0][1][9], "SKR04")
+
+
+class BwaImportTests(TestCase):
+    def test_bwa_parser_extracts_account_hints_and_period(self):
+        analysis = bwa_service.BwaAnalysis(
+            period=bwa_service._detect_period("BWA Mai 2026"),
+            account_hints=[
+                bwa_service._account_hint_from_line("3400 Wareneingang 19% 1.234,56 9.876,54"),
+                bwa_service._account_hint_from_line("4920 Telefon 123,45"),
+            ],
+            warnings=[],
+            text_excerpt="",
+        )
+
+        self.assertEqual(analysis.period, "2026-05")
+        self.assertEqual(analysis.account_hints[0]["account"], "3400")
+        self.assertEqual(analysis.account_hints[0]["label"], "Wareneingang 19%")
+        self.assertEqual(analysis.account_hints[0]["amounts"][0], "1234.56")
+        self.assertEqual(analysis.account_hints[1]["label"], "Telefon")
+
+    def test_bwa_upload_route_stores_analysis_for_tenant(self):
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        file = UploadFile(file=BytesIO(b"bwa"), filename="BWA-2026-05.pdf")
+        stored = SimpleNamespace(
+            original_filename="BWA-2026-05.pdf",
+            content_type="application/pdf",
+            sha256="abc",
+            size_bytes=3,
+            storage_path=Path("demo-mandant/bwa/BWA-2026-05.pdf"),
+        )
+        analysis = bwa_service.BwaAnalysis(
+            period="2026-05",
+            account_hints=[{"account": "3400", "label": "Wareneingang", "amounts": ["100.00"]}],
+            warnings=[],
+            text_excerpt="3400 Wareneingang 100,00",
+        )
+        saved = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "BWA-2026-05.pdf",
+            "period": "2026-05",
+            "account_hints": analysis.account_hints,
+        }
+
+        with (
+            patch.object(masterdata_route, "require_admin") as require_admin,
+            patch.object(masterdata_route, "require_tenant_access") as require_tenant_access,
+            patch.object(masterdata_route, "store_bwa_document", return_value=stored) as store_file,
+            patch.object(masterdata_route, "analyze_bwa_file", return_value=analysis) as analyze_file,
+            patch.object(masterdata_route, "create_bwa_import", return_value=(saved, True)) as create_import,
+        ):
+            result = run(masterdata_route.post_bwa_import(request=request, file=file, tenant_id=" demo-mandant "))
+
+        require_admin.assert_called_once_with(request)
+        require_tenant_access.assert_called_once_with(request, "demo-mandant")
+        store_file.assert_called_once()
+        analyze_file.assert_called_once_with(
+            storage_path=ANY,
+            original_filename="BWA-2026-05.pdf",
+            content_type="application/pdf",
+        )
+        create_import.assert_called_once()
+        self.assertFalse(result["duplicate"])
+        self.assertEqual(result["bwa_import"]["period"], "2026-05")
 
 
 class BookingSuggestionTests(TestCase):

@@ -12,6 +12,7 @@ from app.config import get_settings
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".xml"}
+ALLOWED_BWA_SUFFIXES = {".pdf", ".csv", ".txt", ".xlsx"}
 ALLOWED_UPLOAD_CONTENT_TYPES = {
     "application/pdf",
     "application/xml",
@@ -20,6 +21,13 @@ ALLOWED_UPLOAD_CONTENT_TYPES = {
     "image/jpeg",
     "image/webp",
     "image/tiff",
+    "application/octet-stream",
+}
+ALLOWED_BWA_CONTENT_TYPES = {
+    "application/pdf",
+    "text/csv",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/octet-stream",
 }
 
@@ -52,13 +60,39 @@ def _safe_tenant_segment(tenant_id: str) -> str:
 
 
 async def store_original_document(file: UploadFile, tenant_id: str) -> StoredDocument:
+    return await _store_uploaded_file(
+        file=file,
+        tenant_id=tenant_id,
+        bucket="originals",
+        allowed_suffixes=ALLOWED_UPLOAD_SUFFIXES,
+        allowed_content_types=ALLOWED_UPLOAD_CONTENT_TYPES,
+    )
+
+
+async def store_bwa_document(file: UploadFile, tenant_id: str) -> StoredDocument:
+    return await _store_uploaded_file(
+        file=file,
+        tenant_id=tenant_id,
+        bucket="bwa",
+        allowed_suffixes=ALLOWED_BWA_SUFFIXES,
+        allowed_content_types=ALLOWED_BWA_CONTENT_TYPES,
+    )
+
+
+async def _store_uploaded_file(
+    file: UploadFile,
+    tenant_id: str,
+    bucket: str,
+    allowed_suffixes: set[str],
+    allowed_content_types: set[str],
+) -> StoredDocument:
     settings = get_settings()
     now = datetime.now(UTC)
     suffix = _safe_suffix(file.filename)
     content_type = _safe_content_type(file.content_type)
-    _validate_upload_type(suffix, content_type)
+    _validate_upload_type(suffix, content_type, allowed_suffixes, allowed_content_types)
 
-    relative_dir = Path(_safe_tenant_segment(tenant_id)) / "originals" / f"{now:%Y}" / f"{now:%m}"
+    relative_dir = Path(_safe_tenant_segment(tenant_id)) / bucket / f"{now:%Y}" / f"{now:%m}"
     target_dir = settings.storage_root / relative_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -106,11 +140,16 @@ def _safe_content_type(content_type: str | None) -> str:
     return content_type.split(";", 1)[0].strip().lower() or "application/octet-stream"
 
 
-def _validate_upload_type(suffix: str, content_type: str) -> None:
-    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
-        allowed = ", ".join(sorted(ALLOWED_UPLOAD_SUFFIXES))
+def _validate_upload_type(
+    suffix: str,
+    content_type: str,
+    allowed_suffixes: set[str],
+    allowed_content_types: set[str],
+) -> None:
+    if suffix not in allowed_suffixes:
+        allowed = ", ".join(sorted(allowed_suffixes))
         raise UploadRejectedError(f"Dateityp nicht erlaubt. Erlaubt sind: {allowed}.", status_code=415)
-    if content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+    if content_type not in allowed_content_types:
         raise UploadRejectedError(f"Content-Type nicht erlaubt: {content_type}.", status_code=415)
 
 

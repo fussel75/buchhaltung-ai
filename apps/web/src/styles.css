@@ -2124,6 +2124,19 @@ code {
   grid-column: span 2;
 }
 
+.bwa-upload {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) auto minmax(280px, 1fr);
+  gap: 12px;
+  align-items: end;
+  border-top: 1px solid #edf0f3;
+  padding-top: 16px;
+}
+
+.bwa-upload .form-hint {
+  margin: 0;
+}
+
 .form-hint {
   margin: 10px 0 14px;
   color: var(--muted);
@@ -2232,6 +2245,37 @@ code {
 
 .accounting-table .data-row {
   grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.8fr) minmax(135px, 0.9fr) minmax(90px, 0.6fr) minmax(105px, 0.7fr) minmax(105px, 0.7fr) minmax(95px, 0.65fr) minmax(90px, 0.55fr) minmax(125px, 0.75fr);
+}
+
+.bwa-table .data-row {
+  grid-template-columns: minmax(240px, 1.45fr) minmax(90px, 0.5fr) minmax(115px, 0.55fr) minmax(90px, 0.45fr) minmax(140px, 0.7fr);
+}
+
+.bwa-table .data-row > .bwa-hints,
+.bwa-table .data-row > .inline-note,
+.bwa-table .empty-row > span {
+  grid-column: 1 / -1;
+}
+
+.bwa-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.bwa-hints span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.bwa-hints strong {
+  margin-right: 4px;
+  color: var(--text);
 }
 
 .switch,
@@ -2424,8 +2468,10 @@ code {
   .assignment-form > button,
   .supplier-form > .form-field:nth-child(n),
   .supplier-form > button,
+  .bwa-upload,
   .assignment-table .data-row,
   .supplier-table .data-row,
+  .bwa-table .data-row,
   .accounting-table .data-row,
   .payment-row,
   .booking-row,

@@ -290,6 +290,32 @@ def init_database() -> None:
             )
             cursor.execute(
                 """
+                create table if not exists tenant_bwa_imports (
+                    id uuid primary key,
+                    tenant_id text not null,
+                    original_filename text not null,
+                    content_type text not null,
+                    sha256 text not null,
+                    size_bytes integer not null,
+                    storage_path text not null,
+                    period text,
+                    account_hints jsonb not null default '[]'::jsonb,
+                    warnings jsonb not null default '[]'::jsonb,
+                    text_excerpt text,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null,
+                    unique (tenant_id, sha256)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists tenant_bwa_imports_tenant_created_idx
+                    on tenant_bwa_imports (tenant_id, created_at desc)
+                """
+            )
+            cursor.execute(
+                """
                 create table if not exists document_bulk_jobs (
                     id uuid primary key,
                     tenant_id text not null,
@@ -2514,6 +2540,73 @@ def list_assignment_units(tenant_id: str) -> list[dict[str, Any]]:
             return [_serialize_assignment_unit(row) for row in cursor.fetchall()]
 
 
+def list_bwa_imports(tenant_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_bwa_imports
+                where tenant_id = %s
+                order by created_at desc
+                """,
+                (tenant_id,),
+            )
+            return [_serialize_bwa_import(row) for row in cursor.fetchall()]
+
+
+def create_bwa_import(
+    tenant_id: str,
+    stored: StoredDocument,
+    period: str | None,
+    account_hints: list[dict[str, Any]],
+    warnings: list[str],
+    text_excerpt: str,
+) -> tuple[dict[str, Any], bool]:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into tenant_bwa_imports (
+                    id, tenant_id, original_filename, content_type, sha256, size_bytes,
+                    storage_path, period, account_hints, warnings, text_excerpt,
+                    created_at, updated_at
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                on conflict (tenant_id, sha256) do update set
+                    original_filename = excluded.original_filename,
+                    content_type = excluded.content_type,
+                    size_bytes = excluded.size_bytes,
+                    storage_path = excluded.storage_path,
+                    period = excluded.period,
+                    account_hints = excluded.account_hints,
+                    warnings = excluded.warnings,
+                    text_excerpt = excluded.text_excerpt,
+                    updated_at = excluded.updated_at
+                returning *, (xmax = 0) as inserted
+                """,
+                (
+                    uuid4(),
+                    tenant_id,
+                    stored.original_filename,
+                    stored.content_type,
+                    stored.sha256,
+                    stored.size_bytes,
+                    str(stored.storage_path),
+                    period,
+                    Jsonb(account_hints),
+                    Jsonb(warnings),
+                    text_excerpt,
+                    now,
+                    now,
+                ),
+            )
+            row = cursor.fetchone()
+            inserted = bool(row.pop("inserted", False))
+            return _serialize_bwa_import(row), inserted
+
+
 def create_assignment_unit(
     tenant_id: str,
     code: str,
@@ -3059,6 +3152,24 @@ def _serialize_accounting_rule(row: dict[str, Any]) -> dict[str, Any]:
         "tax_rate": str(row["tax_rate"]) if row["tax_rate"] is not None else None,
         "discount_account": row["discount_account"],
         "is_active": row["is_active"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _serialize_bwa_import(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "tenant_id": row["tenant_id"],
+        "original_filename": row["original_filename"],
+        "content_type": row["content_type"],
+        "sha256": row["sha256"],
+        "size_bytes": row["size_bytes"],
+        "storage_path": row["storage_path"],
+        "period": row["period"],
+        "account_hints": row.get("account_hints") or [],
+        "warnings": row.get("warnings") or [],
+        "text_excerpt": row.get("text_excerpt") or "",
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
     }
