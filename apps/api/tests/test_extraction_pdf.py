@@ -171,6 +171,46 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["assignment_type"], "assigned")
         self.assertEqual(result["project_code"], "Neula51")
 
+    def test_supplier_rule_default_assignment_does_not_assign_project(self):
+        text = """
+        Holz Junge GmbH
+        Rechnung 26206401
+        Kundennummer 109324
+        Netto 1.210,95
+        MwSt 230,08
+        Gesamtbetrag 1.441,03
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Kreditrechnung_26206401_P8X0U9.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "holz-junge.pdf",
+            "size_bytes": 715000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(
+                extraction_service,
+                "find_supplier_rule",
+                return_value={
+                    "supplier_name": "Holz Junge GmbH",
+                    "customer_number": "109324",
+                    "default_cost_category": ["material"],
+                    "default_assignment_code": "Wewe20",
+                },
+            ),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+            patch.object(extraction_service, "get_assignment_unit_by_code") as get_by_code,
+        ):
+            result = _build_pdf_text_result(document)
+
+        get_by_code.assert_not_called()
+        self.assertIsNone(result["assignment_code"])
+        self.assertEqual(result["assignment_type"], "general_cost")
+
     def test_foerch_reads_customer_reference_from_column_text(self):
         text = """
         THEO FOERCH GmbH & Co. KG

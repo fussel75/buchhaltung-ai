@@ -2804,7 +2804,6 @@ function MasterdataAdmin({
     supplier_name: "",
     customer_number: "",
     default_cost_category: ["material"],
-    default_assignment_code: "",
   });
   const [accountingForm, setAccountingForm] = useState({
     name: "",
@@ -3050,7 +3049,7 @@ function MasterdataAdmin({
       setMessage(apiError.message);
       return;
     }
-    setSupplierForm({ match_text: "", supplier_name: "", customer_number: "", default_cost_category: ["material"], default_assignment_code: "" });
+    setSupplierForm({ match_text: "", supplier_name: "", customer_number: "", default_cost_category: ["material"] });
     await loadMasterdata();
     setMessageTone("notice");
     setMessage("Lieferantenregel angelegt.");
@@ -3065,7 +3064,7 @@ function MasterdataAdmin({
         supplier_name: rule.supplier_name,
         customer_number: rule.customer_number,
         default_cost_category: supplierCostCategories(rule),
-        default_assignment_code: rule.default_assignment_code,
+        default_assignment_code: null,
         is_active: rule.is_active,
         ...payload,
       }),
@@ -3089,7 +3088,6 @@ function MasterdataAdmin({
       supplier_name: rule.supplier_name || "",
       customer_number: rule.customer_number || "",
       default_cost_category: supplierCostCategories(rule),
-      default_assignment_code: rule.default_assignment_code || "",
       is_active: rule.is_active,
     });
   }
@@ -3503,9 +3501,6 @@ function MasterdataAdmin({
                 onChange={(categories) => setSupplierForm({ ...supplierForm, default_cost_category: categories })}
               />
             </FormField>
-            <FormField label={tenantProfile.assignment_code_label} error={fieldError(supplierFormErrors, "default_assignment_code")}>
-              <input list="assignment-code-options" placeholder="optional" value={supplierForm.default_assignment_code} onChange={(event) => setSupplierForm({ ...supplierForm, default_assignment_code: event.target.value })} />
-            </FormField>
             <button type="submit">Regel anlegen</button>
           </form>
           <datalist id="assignment-code-options">
@@ -3521,7 +3516,6 @@ function MasterdataAdmin({
               <span>Erkennung</span>
               <span>Kunden-Nr.</span>
               <span>Kostenart</span>
-              <span>{tenantProfile.assignment_code_label}</span>
               <span>Aktiv</span>
               <span>Aktion</span>
             </div>
@@ -3560,15 +3554,6 @@ function MasterdataAdmin({
                           onChange={(categories) => setSupplierEditForm({ ...supplierEditForm, default_cost_category: categories })}
                         />
                       </InlineEditField>
-                      <InlineEditField error={fieldError(supplierEditErrors, "default_assignment_code")}>
-                        <input
-                          aria-label={tenantProfile.assignment_code_label}
-                          list="assignment-code-options"
-                          placeholder="leer = keine feste Zuordnung"
-                          value={supplierEditForm.default_assignment_code}
-                          onChange={(event) => setSupplierEditForm({ ...supplierEditForm, default_assignment_code: event.target.value })}
-                        />
-                      </InlineEditField>
                       <label className="switch">
                         <input
                           type="checkbox"
@@ -3588,7 +3573,6 @@ function MasterdataAdmin({
                       <span>{rule.match_text}</span>
                       <span>{rule.customer_number || "-"}</span>
                       <span>{formatCostCategory(supplierCostCategories(rule))}</span>
-                      <span>{rule.default_assignment_code || "-"}</span>
                       <label className="switch">
                         <input
                           type="checkbox"

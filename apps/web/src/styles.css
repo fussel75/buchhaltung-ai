@@ -2089,8 +2089,7 @@ code {
   grid-column: span 3;
 }
 
-.supplier-form > .form-field:nth-child(3),
-.supplier-form > .form-field:nth-child(5) {
+.supplier-form > .form-field:nth-child(3) {
   grid-column: span 2;
 }
 
@@ -2099,7 +2098,7 @@ code {
 }
 
 .supplier-form > button {
-  grid-column: span 1;
+  grid-column: span 2;
 }
 
 .assignment-form > .form-field:nth-child(1),
@@ -2228,7 +2227,7 @@ code {
 }
 
 .supplier-table .data-row {
-  grid-template-columns: minmax(170px, 1.25fr) minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(150px, 0.95fr) minmax(150px, 0.9fr) minmax(100px, 0.65fr) minmax(130px, 0.8fr);
+  grid-template-columns: minmax(180px, 1.35fr) minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(190px, 1.1fr) minmax(100px, 0.6fr) minmax(130px, 0.75fr);
 }
 
 .accounting-table .data-row {

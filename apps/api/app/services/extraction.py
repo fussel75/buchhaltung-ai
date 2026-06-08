@@ -224,7 +224,7 @@ def _build_cii_xml_result(
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text, supplier_rule)
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
@@ -383,7 +383,7 @@ def _build_ubl_xml_result(
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text, supplier_rule)
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
@@ -558,7 +558,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text, supplier_rule)
+    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text)
     if not assignment and delivery_addresses:
         assignment = _resolve_assignment_for_delivery_addresses(document["tenant_id"], delivery_addresses)
     product_name = _product_name(text)
@@ -1197,14 +1197,9 @@ def _assignment_unit(
     delivery_address: str | None,
     customer_reference: str | None,
     text: str,
-    supplier_rule: dict | None,
 ) -> dict | None:
     for explicit_hint in (customer_reference, delivery_address):
         assignment = find_assignment_unit_by_text(tenant_id, explicit_hint)
-        if assignment and assignment["is_active"]:
-            return assignment
-    if supplier_rule and supplier_rule.get("default_assignment_code"):
-        assignment = get_assignment_unit_by_code(tenant_id, supplier_rule["default_assignment_code"])
         if assignment and assignment["is_active"]:
             return assignment
     return find_assignment_unit_by_text(tenant_id, text[:4000])
