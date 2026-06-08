@@ -156,8 +156,9 @@ class TenantProfileTests(TestCase):
 class BwaImportTests(TestCase):
     def test_bwa_parser_extracts_account_hints_and_period(self):
         analysis = bwa_service.BwaAnalysis(
-            period=bwa_service._detect_period("BWA Mai 2026"),
+            period=bwa_service._detect_period("09.03.2026\nFebruar 2026 - Handelsrecht", "BWA 202601.pdf"),
             account_hints=[
+                bwa_service._bwa_summary_hints("Material-/Wareneinkauf 16.970,00 32.960,24 49.930,24")[0],
                 bwa_service._account_hint_from_line("3400 Wareneingang 19% 1.234,56 9.876,54"),
                 bwa_service._account_hint_from_line("4920 Telefon 123,45"),
             ],
@@ -165,11 +166,13 @@ class BwaImportTests(TestCase):
             text_excerpt="",
         )
 
-        self.assertEqual(analysis.period, "2026-05")
-        self.assertEqual(analysis.account_hints[0]["account"], "3400")
-        self.assertEqual(analysis.account_hints[0]["label"], "Wareneingang 19%")
-        self.assertEqual(analysis.account_hints[0]["amounts"][0], "1234.56")
-        self.assertEqual(analysis.account_hints[1]["label"], "Telefon")
+        self.assertEqual(analysis.period, "2026-02")
+        self.assertEqual(analysis.account_hints[0]["kind"], "bwa_summary")
+        self.assertEqual(analysis.account_hints[0]["label"], "Material-/Wareneinkauf")
+        self.assertEqual(analysis.account_hints[1]["account"], "3400")
+        self.assertEqual(analysis.account_hints[1]["label"], "Wareneingang 19%")
+        self.assertEqual(analysis.account_hints[1]["amounts"][0], "1234.56")
+        self.assertEqual(analysis.account_hints[2]["label"], "Telefon")
 
     def test_bwa_upload_route_stores_analysis_for_tenant(self):
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))

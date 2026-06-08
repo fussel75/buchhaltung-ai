@@ -3830,14 +3830,15 @@ function MasterdataAdmin({
               {isUploadingBwa ? "Analysiere ..." : "BWA hochladen"}
             </button>
             <p className="form-hint">
-              BWA-Daten dienen als Lernhinweis für Konten und bisherige Buchungslogik. Sie werden nicht blind als Vorlage übernommen.
+              BWA-Daten dienen aktuell als sichtbarer Lernhinweis für Kostenarten, Konten und bisherige Buchungslogik. Sie werden nicht blind als Vorlage übernommen.
             </p>
           </form>
           <div className="data-table bwa-table">
             <div className="data-row data-head">
               <span>Datei</span>
               <span>Zeitraum</span>
-              <span>Kontohinweise</span>
+              <span>Erkannt</span>
+              <span>Wirkt als</span>
               <span>Größe</span>
               <span>Importiert</span>
             </div>
@@ -3845,14 +3846,17 @@ function MasterdataAdmin({
               <div className="data-row" key={bwaImport.id}>
                 <strong>{safeVisibleFilename(bwaImport.original_filename)}</strong>
                 <span>{bwaImport.period || "-"}</span>
-                <span>{bwaImport.account_hints?.length || 0} Konten</span>
+                <span>{bwaHintSummary(bwaImport.account_hints)}</span>
+                <span>{bwaEffectSummary(bwaImport.account_hints)}</span>
                 <span>{formatSize(bwaImport.size_bytes)}</span>
                 <span>{formatDateTime(bwaImport.created_at)}</span>
                 {bwaImport.account_hints?.length ? (
                   <div className="bwa-hints">
-                    {bwaImport.account_hints.slice(0, 8).map((hint) => (
-                      <span key={`${bwaImport.id}-${hint.account}-${hint.label}`}>
-                        <strong>{hint.account}</strong> {hint.label}
+                    {bwaImport.account_hints.slice(0, 16).map((hint) => (
+                      <span className={hint.kind === "bwa_summary" ? "bwa-hint summary" : "bwa-hint"} key={`${bwaImport.id}-${hint.kind || "hint"}-${hint.account || ""}-${hint.label}`}>
+                        <strong>{hint.account || hint.label}</strong>
+                        {hint.account ? ` ${hint.label}` : null}
+                        <small>{[hint.source, hint.effect, formatHintAmounts(hint.amounts)].filter(Boolean).join(" · ")}</small>
                       </span>
                     ))}
                   </div>
@@ -4491,6 +4495,26 @@ function formatBulkJobFailures(job, prefix) {
     .map((item) => `${item.document?.original_filename || item.document_id} (${item.error || "unbekannter Fehler"})`)
     .join("; ");
   return `${prefix}: ${details}${failedItems.length > 3 ? " ..." : ""}`;
+}
+
+function bwaHintSummary(hints = []) {
+  const summaryCount = hints.filter((hint) => hint.kind === "bwa_summary").length;
+  const accountCount = hints.length - summaryCount;
+  return [
+    summaryCount ? `${summaryCount} BWA-Zeilen` : null,
+    accountCount ? `${accountCount} Konto-/Lieferantenzeilen` : null,
+  ].filter(Boolean).join(", ") || "-";
+}
+
+function bwaEffectSummary(hints = []) {
+  if (!hints.length) return "-";
+  const effects = Array.from(new Set(hints.map((hint) => hint.effect).filter(Boolean)));
+  return effects.join(", ") || "Lernhinweis";
+}
+
+function formatHintAmounts(amounts = []) {
+  if (!amounts.length) return "";
+  return amounts.slice(0, 3).map((amount) => formatMoney(amount)).join(" / ");
 }
 
 function formatApiError(detail, fallback) {

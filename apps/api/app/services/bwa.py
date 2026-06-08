@@ -38,8 +38,10 @@ def analyze_bwa_file(storage_path: str, original_filename: str, content_type: st
         text = _extract_plain_text(path, warnings)
 
     normalized_text = _normalize_text(text)
+    period = _detect_period(normalized_text, original_filename)
+    warnings.extend(_period_warnings(original_filename, period))
     return BwaAnalysis(
-        period=_detect_period(normalized_text),
+        period=period,
         account_hints=_account_hints(normalized_text),
         warnings=warnings,
         text_excerpt=normalized_text[:4000],
@@ -119,11 +121,24 @@ def _normalize_text(text: str) -> str:
     return text.strip()[:MAX_TEXT_LENGTH]
 
 
-def _detect_period(text: str) -> str | None:
+def _detect_period(text: str, original_filename: str | None = None) -> str | None:
+    datev_period = search(
+        r"\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+"
+        r"(20\d{2})\s*-\s*(?:Handelsrecht|Steuerrecht)",
+        text,
+        flags=2,
+    )
+    if datev_period:
+        return f"{datev_period.group(2)}-{_month_number(datev_period.group(1))}"
+
+    filename_period = _period_from_filename(original_filename)
+    if filename_period:
+        return filename_period
+
     patterns = [
+        r"\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(20\d{2})\b",
         r"\b(20\d{2})[-/.](0[1-9]|1[0-2])\b",
         r"\b(0[1-9]|1[0-2])[-/.](20\d{2})\b",
-        r"\b(Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(20\d{2})\b",
     ]
     for pattern in patterns:
         match = search(pattern, text, flags=2)
@@ -138,11 +153,30 @@ def _detect_period(text: str) -> str | None:
     return None
 
 
+def _period_from_filename(filename: str | None) -> str | None:
+    if not filename:
+        return None
+    match = search(r"\b(20\d{2})(0[1-9]|1[0-2])\b", filename)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
+    return None
+
+
+def _period_warnings(original_filename: str | None, period: str | None) -> list[str]:
+    filename_period = _period_from_filename(original_filename)
+    if filename_period and period and filename_period != period:
+        return [
+            f"Dateiname deutet auf {filename_period}, BWA-Inhalt auf {period}. Inhalt wurde bevorzugt.",
+        ]
+    return []
+
+
 def _month_number(month_name: str) -> str:
     months = {
         "januar": "01",
         "februar": "02",
         "märz": "03",
+        "maerz": "03",
         "april": "04",
         "mai": "05",
         "juni": "06",
@@ -158,12 +192,9 @@ def _month_number(month_name: str) -> str:
 
 def _account_hints(text: str) -> list[dict[str, Any]]:
     hints: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for line in text.splitlines():
-        hint = _account_hint_from_line(line)
-        if not hint:
-            continue
-        key = (hint["account"], hint["label"].lower())
+    seen: set[tuple[str, str, str]] = set()
+    for hint in [*_bwa_summary_hints(text), *_account_line_hints(text)]:
+        key = (hint.get("kind", ""), hint.get("account") or "", hint["label"].lower())
         if key in seen:
             continue
         seen.add(key)
@@ -171,6 +202,48 @@ def _account_hints(text: str) -> list[dict[str, Any]]:
         if len(hints) >= MAX_ACCOUNT_HINTS:
             break
     return hints
+
+
+def _bwa_summary_hints(text: str) -> list[dict[str, Any]]:
+    labels = [
+        "Umsatzerlöse",
+        "Material-/Wareneinkauf",
+        "Personalkosten",
+        "Raumkosten",
+        "Betriebliche Steuern",
+        "Versicherungen/Beiträge",
+        "Fahrzeugkosten (ohne Steuer)",
+        "Kosten Warenabgabe",
+        "Abschreibungen",
+        "Reparatur/Instandhaltung",
+        "Sonstige Kosten",
+        "Zinsaufwand",
+    ]
+    hints: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    for label in labels:
+        for line in lines:
+            cleaned = sub(r"\s+", " ", line).strip()
+            if not cleaned.lower().startswith(label.lower()):
+                continue
+            amounts = _amounts_from_text(cleaned)
+            if not amounts:
+                continue
+            hints.append(
+                {
+                    "kind": "bwa_summary",
+                    "label": label,
+                    "source": "DATEV-BWA",
+                    "amounts": [str(amount) for amount in amounts[:6]],
+                    "effect": "Kostenart-/Kontierungs-Hinweis",
+                }
+            )
+            break
+    return hints
+
+
+def _account_line_hints(text: str) -> list[dict[str, Any]]:
+    return [hint for line in text.splitlines() if (hint := _account_hint_from_line(line))]
 
 
 def _account_hint_from_line(line: str) -> dict[str, Any] | None:
@@ -181,20 +254,34 @@ def _account_hint_from_line(line: str) -> dict[str, Any] | None:
     if not match:
         return None
     account = match.group(1)
+    normalized_account = account.lstrip("0") or account
     rest = match.group(2).strip()
-    if len(account) < 4 and not any(character.isalpha() for character in rest):
+    if normalized_account in {"2024", "2025", "2026", "2027"}:
         return None
-    amounts = [_parse_amount(value.group(0)) for value in finditer(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+\.\d{2}", rest)]
-    amounts = [amount for amount in amounts if amount is not None]
+    if search(r"\b(Jan|Feb|Mrz|Mär|Apr|Mai|Jun|Jul|Aug|Sep|Okt|Nov|Dez)[a-z]*[/\s-]+20\d{2}", rest, flags=2):
+        return None
+    if len(normalized_account) < 4 and not any(character.isalpha() for character in rest):
+        return None
+    amounts = _amounts_from_text(rest)
+    if not amounts:
+        return None
     label = sub(r"\s+-?\d{1,3}(?:\.\d{3})*,\d{2}.*$", "", rest)
     label = sub(r"\s+-?\d+\.\d{2}.*$", "", label).strip(" -;\t")
     if not label or len(label) < 3:
         return None
     return {
-        "account": account,
+        "kind": "account",
+        "account": normalized_account,
         "label": label[:120],
         "amounts": [str(amount) for amount in amounts[:6]],
+        "source": "Summen und Salden",
+        "effect": "Kontierungs-/Lieferanten-Hinweis",
     }
+
+
+def _amounts_from_text(text: str) -> list[Decimal]:
+    amounts = [_parse_amount(value.group(0)) for value in finditer(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+\.\d{2}", text)]
+    return [amount for amount in amounts if amount is not None]
 
 
 def _parse_amount(value: str) -> Decimal | None:
