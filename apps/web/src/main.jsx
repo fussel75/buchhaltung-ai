@@ -826,6 +826,7 @@ function UploadApp() {
         setApprovalIssues(details);
         setApprovalError(errors.length ? formatApprovalError({ message: "Freigabe blockiert", errors }, 409) : "");
         setNotice(errors.length ? "Freigabeprüfung erneut blockiert. Bitte die Hinweise im Dialog prüfen." : "Freigabeprüfung erfolgreich. Der Beleg kann final freigegeben werden.");
+        window.setTimeout(() => focusReviewDocumentCard(documentId, { focusAction: false }), 120);
       } catch (validationError) {
         if (approvalValidationRequestRef.current !== requestId) return;
         setApprovalError(validationError.message);
@@ -5017,6 +5018,16 @@ function formatApprovalError(detail, status) {
 
 function extractApprovalIssues(detail) {
   return Array.isArray(detail?.details) ? detail.details : [];
+}
+
+function focusReviewDocumentCard(documentId, options = {}) {
+  if (!documentId || typeof window === "undefined") return;
+  const element = window.document.querySelector(`[data-document-id="${documentId}"]`);
+  element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (options.focusAction === false) return;
+  const actionButton = Array.from(element?.querySelectorAll("button:not([disabled])") || [])
+    .find((button) => /final freigeben|details|ansehen/i.test(button.textContent || ""));
+  actionButton?.focus?.({ preventScroll: true });
 }
 
 function dedupeAccountingRuleIssues(issues) {
