@@ -2545,7 +2545,7 @@ function ApprovalDialog({
                     onClick={() => onPrepareAccountingRule(issue)}
                     disabled={issue.field === "cost_category" && !issue.cost_category}
                   >
-                    {issue.cost_category_label || formatCostCategory(issue.cost_category)} / {issue.supplier_name || "ohne Lieferant"}
+                    {accountingRuleActionLabel(issue)}
                   </button>
                 ))}
                 {dedupeAccountingRuleIssues(editableAccountingRuleIssues).map((issue) => (
@@ -5051,6 +5051,12 @@ function accountingRuleMatchLabel(rule) {
     rule?.cost_category_label || (rule?.cost_category ? formatCostCategory(rule.cost_category) : null),
   ].filter(Boolean);
   return details.length ? `${ruleName} (${details.join(", ")})` : ruleName;
+}
+
+function accountingRuleActionLabel(issue) {
+  return issue?.suggested_debit_account
+    ? `Regel anlegen (${issue.suggested_debit_account} aus BWA)`
+    : "Regel anlegen";
 }
 
 function findAccountingRuleForTarget(rules, target) {
