@@ -2241,6 +2241,73 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(missing_rule["bwa_account_hints"][1]["account"], "70000")
         self.assertFalse(missing_rule["bwa_account_hints"][1]["is_expense_account_candidate"])
 
+    def test_review_validation_allows_after_bwa_suggested_accounting_rule_exists(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "foerch.pdf",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "7.37",
+                "tax_amount": "1.40",
+                "gross_amount": "8.77",
+                "currency": "EUR",
+                "confidence": Decimal("1.00"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "net_amount": "7.37",
+                    "tax_amount": "1.40",
+                    "gross_amount": "8.77",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "8.77"},
+        }
+        bwa_imports = [
+            {
+                "period": "2026-02",
+                "original_filename": "BWA Februar.pdf",
+                "account_hints": [
+                    {"kind": "account", "account": "3400", "label": "Wareneingang 19%", "amounts": ["7.37"]},
+                    {"kind": "account", "account": "70000", "label": "Theo Foerch GmbH", "amounts": ["8.77"]},
+                ],
+            }
+        ]
+        suggested_rule = {
+            "name": "Material Theo Foerch GmbH",
+            "supplier_match_text": "Theo Foerch",
+            "cost_category": "material",
+            "debit_account": "3400",
+            "credit_account": "70000",
+            "tax_key": "9",
+            "tax_rate": "19.00",
+            "discount_account": "3736",
+            "is_active": True,
+        }
+
+        with (
+            patch.object(database_service, "list_accounting_rules", return_value=[]),
+            patch.object(database_service, "list_bwa_imports", return_value=bwa_imports),
+        ):
+            missing_rule_details = validate_document_review_details(document)
+
+        missing_rule = next(detail for detail in missing_rule_details if detail["code"] == "missing_accounting_rule")
+        self.assertEqual(missing_rule["suggested_debit_account"], suggested_rule["debit_account"])
+
+        with patch.object(database_service, "list_accounting_rules", return_value=[suggested_rule]):
+            errors_after_rule = validate_document_review(document)
+
+        self.assertEqual(errors_after_rule, [])
+
     def test_review_validation_accepts_complete_review(self):
         document = {
             "id": str(uuid4()),
