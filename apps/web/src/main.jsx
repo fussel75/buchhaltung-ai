@@ -2512,30 +2512,6 @@ function ApprovalDialog({
                 ) : null}
               </div>
             ) : null}
-            {missingAccountingRuleIssues.some((issue) => issue.bwa_account_hints?.length) ? (
-              <div className="approval-bwa-hints">
-                <strong>BWA-Hinweise</strong>
-                <span>Aus hochgeladenen BWA-Daten, nur als Vorschlag für die Kontierungsregel.</span>
-                <ul>
-                  {dedupeAccountingRuleIssues(missingAccountingRuleIssues)
-                    .filter((issue) => issue.bwa_account_hints?.length)
-                    .map((issue) => {
-                      const hint = bestBwaAccountHint(issue);
-                      return (
-                        <li key={`bwa-${issue.supplier_name || "-"}-${issue.cost_category || ""}`}>
-                          <span>{accountingRuleIssueContext(issue)}</span>
-                          <strong>{formatBwaAccountHint(hint)}</strong>
-                          <small>
-                            {issue.suggested_debit_account
-                              ? "wird als Aufwandskonto vorgeschlagen"
-                              : "kein automatisch übernehmbares Aufwandskonto"}
-                          </small>
-                        </li>
-                      );
-                    })}
-                </ul>
-              </div>
-            ) : null}
             {canPrepareAccountingRule && hasAccountingRuleActions ? (
               <div className="approval-fix-actions">
                 {dedupeAccountingRuleIssues(missingAccountingRuleIssues).map((issue) => (
@@ -2560,6 +2536,32 @@ function ApprovalDialog({
                   </button>
                 ))}
               </div>
+            ) : null}
+            {missingAccountingRuleIssues.some((issue) => issue.bwa_account_hints?.length) ? (
+              <details className="approval-fix-details">
+                <summary>BWA-Hinweise anzeigen</summary>
+                <div className="approval-bwa-hints">
+                  <span>Aus hochgeladenen BWA-Daten, nur als Vorschlag für die Kontierungsregel.</span>
+                  <ul>
+                    {dedupeAccountingRuleIssues(missingAccountingRuleIssues)
+                      .filter((issue) => issue.bwa_account_hints?.length)
+                      .map((issue) => {
+                        const hint = bestBwaAccountHint(issue);
+                        return (
+                          <li key={`bwa-${issue.supplier_name || "-"}-${issue.cost_category || ""}`}>
+                            <span>{accountingRuleIssueContext(issue)}</span>
+                            <strong>{formatBwaAccountHint(hint)}</strong>
+                            <small>
+                              {issue.suggested_debit_account
+                                ? "wird als Aufwandskonto vorgeschlagen"
+                                : "kein automatisch übernehmbares Aufwandskonto"}
+                            </small>
+                          </li>
+                        );
+                      })}
+                  </ul>
+                </div>
+              </details>
             ) : null}
           </div>
         ) : null}

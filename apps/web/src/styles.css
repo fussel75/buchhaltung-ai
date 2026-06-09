@@ -1682,10 +1682,28 @@ code {
   min-height: 32px;
 }
 
+.approval-fix-details {
+  grid-column: 1 / -1;
+  border-top: 1px solid rgba(20, 26, 34, 0.08);
+  padding-top: 6px;
+}
+
+.approval-fix-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 720;
+  list-style-position: inside;
+}
+
+.approval-fix-details summary:hover {
+  color: var(--text);
+}
+
 .approval-bwa-hints {
   display: grid;
-  grid-column: 1 / -1;
   gap: 5px;
+  margin-top: 7px;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 9px 10px;
