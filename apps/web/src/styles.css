@@ -1748,6 +1748,51 @@ code {
   padding: 0 12px;
 }
 
+.approval-rule-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.approval-rule-form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.approval-rule-form-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.approval-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 9px;
+}
+
+.approval-rule-grid .form-field {
+  display: grid;
+  gap: 4px;
+}
+
+.approval-rule-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.approval-rule-form-actions button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 .approval-export-panel {
   display: grid;
   gap: 10px;
@@ -2603,6 +2648,16 @@ code {
 
   .approval-fix-actions button {
     width: 100%;
+  }
+
+  .approval-rule-form-head,
+  .approval-rule-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .approval-rule-grid {
+    grid-template-columns: 1fr;
   }
 
   .review-facts .field:nth-child(n) {

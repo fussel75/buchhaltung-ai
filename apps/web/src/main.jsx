@@ -869,23 +869,10 @@ function UploadApp() {
         : "Kontierungsregel wird geöffnet. Bitte fehlende Konten ergänzen und speichern.");
       return;
     }
-    const supplierName = issue?.supplier_name || approvalDocument?.extraction?.supplier_name || "";
-    const costCategory = issue?.cost_category ?? approvalDocument?.booking_suggestions?.[0]?.cost_category ?? "";
-    const suggestedName = issue?.suggested_name || defaultAccountingRuleName(supplierName, costCategory);
-
     setAccountingRuleDraft({
-      id: `${Date.now()}-${costCategory}-${supplierName}`,
+      id: `${Date.now()}-${issue?.cost_category || ""}-${issue?.supplier_name || ""}`,
       return_document_id: approvalDocument?.id || "",
-      form: {
-        name: suggestedName,
-        supplier_match_text: supplierName,
-        cost_category: costCategory,
-        debit_account: issue?.suggested_debit_account || "",
-        credit_account: "",
-        tax_key: "",
-        tax_rate: "19.00",
-        discount_account: "",
-      },
+      form: accountingRuleFormFromApprovalIssue(issue, approvalDocument),
     });
     approvalValidationRequestRef.current += 1;
     setApprovalDocumentId(null);
@@ -893,6 +880,25 @@ function UploadApp() {
     setApprovalIssues([]);
     setActiveView("masterdata");
     setNotice("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
+  }
+
+  async function createAccountingRuleFromApproval(form, returnDocumentId) {
+    if (user?.role !== "admin") {
+      throw new Error("Kontierungsregeln dürfen nur durch Admins angelegt werden.");
+    }
+    const response = await apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(activeTenantId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emptyToNull(form)),
+    });
+    if (!response.ok) {
+      const apiError = await readApiError(response, "Kontierungsregel konnte nicht angelegt werden");
+      const saveError = new Error(apiError.message);
+      saveError.fields = apiError.fields;
+      throw saveError;
+    }
+    setNotice("Kontierungsregel angelegt. Freigabeprüfung läuft erneut.");
+    await returnToApprovalAfterAccountingRule(returnDocumentId);
   }
 
   function openAccountingRulesFromApproval() {
@@ -1653,6 +1659,7 @@ function UploadApp() {
         }}
         onOpenAccountingRules={openAccountingRulesFromApproval}
         onPrepareAccountingRule={prepareAccountingRuleFromApproval}
+        onCreateAccountingRule={createAccountingRuleFromApproval}
         onFixBookingSuggestion={focusBookingSuggestionFromApproval}
       />
 
@@ -2368,9 +2375,15 @@ function ApprovalDialog({
   onConfirm,
   onOpenAccountingRules,
   onPrepareAccountingRule,
+  onCreateAccountingRule,
   onFixBookingSuggestion,
 }) {
   const dialogRef = useRef(null);
+  const [inlineAccountingIssue, setInlineAccountingIssue] = useState(null);
+  const [inlineAccountingForm, setInlineAccountingForm] = useState(null);
+  const [inlineAccountingErrors, setInlineAccountingErrors] = useState({});
+  const [inlineAccountingMessage, setInlineAccountingMessage] = useState("");
+  const [isSavingInlineAccountingRule, setIsSavingInlineAccountingRule] = useState(false);
 
   useEffect(() => {
     if (!document) return undefined;
@@ -2410,6 +2423,14 @@ function ApprovalDialog({
     };
   }, [document]);
 
+  useEffect(() => {
+    setInlineAccountingIssue(null);
+    setInlineAccountingForm(null);
+    setInlineAccountingErrors({});
+    setInlineAccountingMessage("");
+    setIsSavingInlineAccountingRule(false);
+  }, [document?.id]);
+
   if (!document) return null;
 
   const extraction = document.extraction || {};
@@ -2439,6 +2460,38 @@ function ApprovalDialog({
         ? "Die App kann die passende Regel vorbereiten. Konten müssen danach fachlich ergänzt werden."
         : "Die bestehende Regel muss unter Stammdaten bearbeitet werden."
       : "Bitte einen Admin bitten, die passende Regel unter Stammdaten anzulegen.";
+
+  function startInlineAccountingRule(issue) {
+    setInlineAccountingIssue(issue);
+    setInlineAccountingForm(accountingRuleFormFromApprovalIssue(issue, document));
+    setInlineAccountingErrors({});
+    setInlineAccountingMessage("");
+  }
+
+  function updateInlineAccountingField(field, value) {
+    setInlineAccountingForm((current) => ({ ...(current || {}), [field]: value }));
+    setInlineAccountingErrors((current) => ({ ...current, [field]: "" }));
+    setInlineAccountingMessage("");
+  }
+
+  async function submitInlineAccountingRule(event) {
+    event.preventDefault();
+    if (!inlineAccountingForm || !inlineAccountingIssue || !onCreateAccountingRule) return;
+    const errorsByField = validateAccountingRuleForm(inlineAccountingForm);
+    setInlineAccountingErrors(errorsByField);
+    setInlineAccountingMessage("");
+    if (Object.keys(errorsByField).length) return;
+
+    setIsSavingInlineAccountingRule(true);
+    try {
+      await onCreateAccountingRule(inlineAccountingForm, document.id);
+    } catch (saveError) {
+      setInlineAccountingErrors(saveError.fields || {});
+      setInlineAccountingMessage(saveError.message || "Kontierungsregel konnte nicht angelegt werden.");
+    } finally {
+      setIsSavingInlineAccountingRule(false);
+    }
+  }
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -2519,7 +2572,7 @@ function ApprovalDialog({
                     className="secondary-button"
                     type="button"
                     key={`${issue.supplier_name || "-"}-${issue.cost_category || ""}-${issue.code}`}
-                    onClick={() => onPrepareAccountingRule(issue)}
+                    onClick={() => startInlineAccountingRule(issue)}
                     disabled={issue.field === "cost_category" && !issue.cost_category}
                   >
                     {accountingRuleActionLabel(issue)}
@@ -2536,6 +2589,104 @@ function ApprovalDialog({
                   </button>
                 ))}
               </div>
+            ) : null}
+            {canPrepareAccountingRule && inlineAccountingForm ? (
+              <form className="approval-rule-form" onSubmit={submitInlineAccountingRule}>
+                <div className="approval-rule-form-head">
+                  <div>
+                    <strong>Kontierungsregel direkt anlegen</strong>
+                    <span>{accountingRuleIssueContext(inlineAccountingIssue)}</span>
+                  </div>
+                  <button
+                    className="secondary-button compact-button"
+                    type="button"
+                    onClick={() => onPrepareAccountingRule(inlineAccountingIssue)}
+                  >
+                    In Stammdaten öffnen
+                  </button>
+                </div>
+                {inlineAccountingMessage ? <p className="field-error">{inlineAccountingMessage}</p> : null}
+                <div className="approval-rule-grid">
+                  <FormField label="Regelname" error={inlineAccountingErrors.name}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.name || ""}
+                      onChange={(event) => updateInlineAccountingField("name", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Erkennung" error={inlineAccountingErrors.supplier_match_text}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.supplier_match_text || ""}
+                      onChange={(event) => updateInlineAccountingField("supplier_match_text", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Kostenart" error={inlineAccountingErrors.cost_category}>
+                    <select
+                      value={inlineAccountingForm.cost_category || ""}
+                      onChange={(event) => updateInlineAccountingField("cost_category", event.target.value)}
+                    >
+                      <option value="">Alle Kostenarten</option>
+                      {COST_CATEGORY_OPTIONS.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="Aufwandskonto" error={inlineAccountingErrors.debit_account}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.debit_account || ""}
+                      onChange={(event) => updateInlineAccountingField("debit_account", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Gegenkonto" error={inlineAccountingErrors.credit_account}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.credit_account || ""}
+                      onChange={(event) => updateInlineAccountingField("credit_account", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Steuerschlüssel" error={inlineAccountingErrors.tax_key}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.tax_key || ""}
+                      onChange={(event) => updateInlineAccountingField("tax_key", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Steuersatz" error={inlineAccountingErrors.tax_rate}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.tax_rate || ""}
+                      onChange={(event) => updateInlineAccountingField("tax_rate", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Skontokonto" error={inlineAccountingErrors.discount_account}>
+                    <input
+                      type="text"
+                      value={inlineAccountingForm.discount_account || ""}
+                      onChange={(event) => updateInlineAccountingField("discount_account", event.target.value)}
+                    />
+                  </FormField>
+                </div>
+                <div className="approval-rule-form-actions">
+                  <button
+                    className="secondary-button compact-button"
+                    type="button"
+                    onClick={() => {
+                      setInlineAccountingIssue(null);
+                      setInlineAccountingForm(null);
+                      setInlineAccountingErrors({});
+                      setInlineAccountingMessage("");
+                    }}
+                    disabled={isSavingInlineAccountingRule}
+                  >
+                    Abbrechen
+                  </button>
+                  <button type="submit" disabled={isSavingInlineAccountingRule}>
+                    {isSavingInlineAccountingRule ? "Speichert..." : "Regel speichern"}
+                  </button>
+                </div>
+              </form>
             ) : null}
             {missingAccountingRuleIssues.some((issue) => issue.bwa_account_hints?.length) ? (
               <details className="approval-fix-details">
@@ -5089,6 +5240,34 @@ function findAccountingRuleForTarget(rules, target) {
 
 function defaultAccountingRuleName(supplierName, costCategory) {
   return [formatCostCategory(costCategory), supplierName].filter(Boolean).join(" ").trim() || "Neue Kontierungsregel";
+}
+
+function accountingRuleFormFromApprovalIssue(issue, document) {
+  const supplierName = issue?.supplier_name || document?.extraction?.supplier_name || "";
+  const costCategory = issue?.cost_category ?? document?.booking_suggestions?.[0]?.cost_category ?? "";
+  const suggestedName = issue?.suggested_name || defaultAccountingRuleName(supplierName, costCategory);
+  return {
+    name: suggestedName,
+    supplier_match_text: supplierName,
+    cost_category: costCategory,
+    debit_account: issue?.suggested_debit_account || "",
+    credit_account: "",
+    tax_key: "",
+    tax_rate: "19.00",
+    discount_account: "",
+  };
+}
+
+function validateAccountingRuleForm(form) {
+  const errors = {};
+  if (!String(form?.name || "").trim()) errors.name = "Regelname fehlt.";
+  if (!String(form?.debit_account || "").trim()) errors.debit_account = "Aufwandskonto fehlt.";
+  if (!String(form?.credit_account || "").trim()) errors.credit_account = "Gegenkonto fehlt.";
+  if (!String(form?.tax_key || "").trim() && !String(form?.tax_rate || "").trim()) {
+    errors.tax_key = "Steuerschlüssel oder Steuersatz fehlt.";
+    errors.tax_rate = "Steuerschlüssel oder Steuersatz fehlt.";
+  }
+  return errors;
 }
 
 function bestBwaAccountHint(issue) {
