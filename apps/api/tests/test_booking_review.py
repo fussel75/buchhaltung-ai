@@ -2233,8 +2233,10 @@ class BookingSuggestionTests(TestCase):
 
         missing_rule = next(detail for detail in details if detail["code"] == "missing_accounting_rule")
         self.assertEqual(missing_rule["bwa_account_hints"][0]["account"], "3400")
+        self.assertTrue(missing_rule["bwa_account_hints"][0]["is_expense_account_candidate"])
         self.assertIn("Kostenart", missing_rule["bwa_account_hints"][0]["reasons"][0])
         self.assertEqual(missing_rule["bwa_account_hints"][1]["account"], "70000")
+        self.assertFalse(missing_rule["bwa_account_hints"][1]["is_expense_account_candidate"])
 
     def test_review_validation_accepts_complete_review(self):
         document = {

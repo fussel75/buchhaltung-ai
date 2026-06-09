@@ -5070,7 +5070,7 @@ function defaultAccountingRuleName(supplierName, costCategory) {
 
 function bestBwaAccountHint(issue) {
   const hints = Array.isArray(issue?.bwa_account_hints) ? issue.bwa_account_hints : [];
-  return hints.find((hint) => hint?.account) || null;
+  return hints.find((hint) => hint?.account && hint?.is_expense_account_candidate) || null;
 }
 
 function formatBwaAccountHint(hint) {

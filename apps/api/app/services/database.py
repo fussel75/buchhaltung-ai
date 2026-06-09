@@ -2960,6 +2960,7 @@ def find_bwa_account_hints(
                         "account": hint.get("account"),
                         "label": hint.get("label"),
                         "kind": hint.get("kind"),
+                        "is_expense_account_candidate": _is_bwa_expense_account_candidate(hint.get("account")),
                         "source": hint.get("source") or "BWA",
                         "effect": hint.get("effect"),
                         "amounts": hint.get("amounts") or [],
@@ -2995,8 +2996,16 @@ def _bwa_cost_category_terms(cost_category: str | None) -> list[str]:
     return [_normalize_match_text(term) for term in terms_by_category.get(cost_category or "", [])]
 
 
+def _is_bwa_expense_account_candidate(account: Any) -> bool:
+    digits = sub(r"\D", "", str(account or ""))
+    if not digits or len(digits) > 4:
+        return False
+    return digits[0] in {"3", "4", "5", "6"}
+
+
 def _bwa_hint_score(hint: dict[str, Any], supplier_text: str, cost_terms: list[str]) -> tuple[int, list[str]]:
     hint_text = _normalize_match_text(" ".join(str(hint.get(key) or "") for key in ("label", "source", "effect")))
+    is_expense_candidate = _is_bwa_expense_account_candidate(hint.get("account"))
     score = 0
     reasons: list[str] = []
 
@@ -3007,10 +3016,10 @@ def _bwa_hint_score(hint: dict[str, Any], supplier_text: str, cost_terms: list[s
         reasons.append("Lieferant in BWA-Kontozeile gefunden")
 
     if cost_terms and any(term in hint_text for term in cost_terms):
-        score += 6 if hint.get("account") else 2
+        score += 6 if is_expense_candidate else 2
         reasons.append("Kostenart passt zur BWA-Zeile")
 
-    if hint.get("kind") == "account" and hint.get("account"):
+    if hint.get("kind") == "account" and is_expense_candidate:
         score += 1
     return score, reasons
 
