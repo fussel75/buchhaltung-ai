@@ -2460,6 +2460,10 @@ function ApprovalDialog({
         ? "Die App kann die passende Regel vorbereiten. Konten müssen danach fachlich ergänzt werden."
         : "Die bestehende Regel muss unter Stammdaten bearbeitet werden."
       : "Bitte einen Admin bitten, die passende Regel unter Stammdaten anzulegen.";
+  const activeAccountingFramework = accountingFramework(tenantProfile?.accounting_framework);
+  const inlineDebitSuggestions = accountSuggestions(activeAccountingFramework, "debit", inlineAccountingForm?.cost_category);
+  const inlineCreditSuggestions = accountSuggestions(activeAccountingFramework, "credit", inlineAccountingForm?.cost_category);
+  const inlineDiscountSuggestions = accountSuggestions(activeAccountingFramework, "discount", inlineAccountingForm?.cost_category);
 
   function startInlineAccountingRule(issue) {
     setInlineAccountingIssue(issue);
@@ -2606,6 +2610,25 @@ function ApprovalDialog({
                   </button>
                 </div>
                 {inlineAccountingMessage ? <p className="field-error">{inlineAccountingMessage}</p> : null}
+                <div className="approval-rule-suggestion-bar">
+                  <span>Kontenvorschläge aus {activeAccountingFramework}</span>
+                  <button
+                    className="secondary-button compact-button"
+                    type="button"
+                    onClick={() => {
+                      setInlineAccountingForm((current) => applyAccountingSuggestions(current || {}, activeAccountingFramework));
+                      setInlineAccountingErrors((current) => ({
+                        ...current,
+                        debit_account: "",
+                        credit_account: "",
+                        discount_account: "",
+                        tax_rate: "",
+                      }));
+                    }}
+                  >
+                    Leere Konten vorschlagen
+                  </button>
+                </div>
                 <div className="approval-rule-grid">
                   <FormField label="Regelname" error={inlineAccountingErrors.name}>
                     <input
@@ -2634,6 +2657,7 @@ function ApprovalDialog({
                   </FormField>
                   <FormField label="Aufwandskonto" error={inlineAccountingErrors.debit_account}>
                     <input
+                      list="approval-accounting-debit-options"
                       type="text"
                       value={inlineAccountingForm.debit_account || ""}
                       onChange={(event) => updateInlineAccountingField("debit_account", event.target.value)}
@@ -2641,6 +2665,7 @@ function ApprovalDialog({
                   </FormField>
                   <FormField label="Gegenkonto" error={inlineAccountingErrors.credit_account}>
                     <input
+                      list="approval-accounting-credit-options"
                       type="text"
                       value={inlineAccountingForm.credit_account || ""}
                       onChange={(event) => updateInlineAccountingField("credit_account", event.target.value)}
@@ -2662,6 +2687,7 @@ function ApprovalDialog({
                   </FormField>
                   <FormField label="Skontokonto" error={inlineAccountingErrors.discount_account}>
                     <input
+                      list="approval-accounting-discount-options"
                       type="text"
                       value={inlineAccountingForm.discount_account || ""}
                       onChange={(event) => updateInlineAccountingField("discount_account", event.target.value)}
@@ -2686,6 +2712,9 @@ function ApprovalDialog({
                     {isSavingInlineAccountingRule ? "Speichert..." : "Regel speichern"}
                   </button>
                 </div>
+                <AccountSuggestionDatalist id="approval-accounting-debit-options" suggestions={inlineDebitSuggestions} />
+                <AccountSuggestionDatalist id="approval-accounting-credit-options" suggestions={inlineCreditSuggestions} />
+                <AccountSuggestionDatalist id="approval-accounting-discount-options" suggestions={inlineDiscountSuggestions} />
               </form>
             ) : null}
             {missingAccountingRuleIssues.some((issue) => issue.bwa_account_hints?.length) ? (
