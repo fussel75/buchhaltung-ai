@@ -871,7 +871,6 @@ function UploadApp() {
     const supplierName = issue?.supplier_name || approvalDocument?.extraction?.supplier_name || "";
     const costCategory = issue?.cost_category ?? approvalDocument?.booking_suggestions?.[0]?.cost_category ?? "";
     const suggestedName = issue?.suggested_name || defaultAccountingRuleName(supplierName, costCategory);
-    const bwaAccountHint = bestBwaAccountHint(issue);
 
     setAccountingRuleDraft({
       id: `${Date.now()}-${costCategory}-${supplierName}`,
@@ -880,7 +879,7 @@ function UploadApp() {
         name: suggestedName,
         supplier_match_text: supplierName,
         cost_category: costCategory,
-        debit_account: bwaAccountHint?.account || "",
+        debit_account: issue?.suggested_debit_account || "",
         credit_account: "",
         tax_key: "",
         tax_rate: "19.00",
@@ -2525,6 +2524,11 @@ function ApprovalDialog({
                         <li key={`bwa-${issue.supplier_name || "-"}-${issue.cost_category || ""}`}>
                           <span>{accountingRuleIssueContext(issue)}</span>
                           <strong>{formatBwaAccountHint(hint)}</strong>
+                          <small>
+                            {issue.suggested_debit_account
+                              ? "wird als Aufwandskonto vorgeschlagen"
+                              : "kein automatisch übernehmbares Aufwandskonto"}
+                          </small>
                         </li>
                       );
                     })}
@@ -5070,7 +5074,13 @@ function defaultAccountingRuleName(supplierName, costCategory) {
 
 function bestBwaAccountHint(issue) {
   const hints = Array.isArray(issue?.bwa_account_hints) ? issue.bwa_account_hints : [];
-  return hints.find((hint) => hint?.account && hint?.is_expense_account_candidate) || null;
+  if (issue?.suggested_debit_account) {
+    return (
+      hints.find((hint) => hint?.account === issue.suggested_debit_account)
+      || { account: issue.suggested_debit_account, label: issue.suggested_debit_account_label, period: null }
+    );
+  }
+  return hints.find((hint) => hint?.account) || null;
 }
 
 function formatBwaAccountHint(hint) {

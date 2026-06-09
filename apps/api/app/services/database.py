@@ -1449,6 +1449,7 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 supplier_name=supplier_name,
                 cost_category=cost_category,
             )
+            suggested_bwa_account = _best_bwa_expense_account_hint(bwa_account_hints)
             add_error(
                 f"Zeile {line_no}: Kontierungsregel fehlt für {context}. "
                 "Bitte unter Stammdaten -> Kontierungsregeln anlegen.",
@@ -1459,6 +1460,9 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 cost_category_label=_cost_category_label(cost_category),
                 suggested_name=f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
                 bwa_account_hints=bwa_account_hints,
+                suggested_debit_account=suggested_bwa_account.get("account") if suggested_bwa_account else None,
+                suggested_debit_account_label=suggested_bwa_account.get("label") if suggested_bwa_account else None,
+                suggested_debit_account_source="BWA" if suggested_bwa_account else None,
             )
         elif accounting_rule and (not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account")):
             context = _accounting_rule_context(supplier_name, cost_category)
@@ -2982,6 +2986,10 @@ def find_bwa_account_hints(
         if len(result) >= limit:
             break
     return result
+
+
+def _best_bwa_expense_account_hint(hints: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((hint for hint in hints if hint.get("account") and hint.get("is_expense_account_candidate")), None)
 
 
 def _bwa_cost_category_terms(cost_category: str | None) -> list[str]:

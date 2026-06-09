@@ -1712,6 +1712,12 @@ code {
   overflow-wrap: anywhere;
 }
 
+.approval-bwa-hints li small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .approval-fix-actions {
   display: flex;
   flex-wrap: wrap;
