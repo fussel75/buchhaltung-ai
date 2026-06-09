@@ -2140,7 +2140,34 @@ class BookingSuggestionTests(TestCase):
             ],
         }
 
-        with patch.object(database_service, "list_accounting_rules", return_value=[]):
+        bwa_imports = [
+            {
+                "period": "2026-02",
+                "original_filename": "BWA Februar.pdf",
+                "account_hints": [
+                    {
+                        "kind": "account",
+                        "account": "3400",
+                        "label": "Wareneingang 19%",
+                        "source": "Summen und Salden",
+                        "effect": "Kontierungs-/Lieferanten-Hinweis",
+                        "amounts": ["278.92"],
+                    },
+                    {
+                        "kind": "account",
+                        "account": "70000",
+                        "label": "Lüchau Baustoffe GmbH",
+                        "source": "Summen und Salden",
+                        "effect": "Kontierungs-/Lieferanten-Hinweis",
+                        "amounts": ["331.91"],
+                    },
+                ],
+            }
+        ]
+        with (
+            patch.object(database_service, "list_accounting_rules", return_value=[]),
+            patch.object(database_service, "list_bwa_imports", return_value=bwa_imports),
+        ):
             errors = validate_document_review(document)
             details = validate_document_review_details(document)
 
@@ -2155,6 +2182,59 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(missing_rule["cost_category"], "material")
         self.assertEqual(missing_rule["cost_category_label"], "Material")
         self.assertEqual(missing_rule["suggested_name"], "Material Lüchau Baustoffe GmbH")
+
+    def test_review_validation_adds_bwa_hints_for_missing_accounting_rule(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "foerch.pdf",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "7.37",
+                "tax_amount": "1.40",
+                "gross_amount": "8.77",
+                "currency": "EUR",
+                "confidence": Decimal("1.00"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "net_amount": "7.37",
+                    "tax_amount": "1.40",
+                    "gross_amount": "8.77",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "8.77"},
+        }
+        bwa_imports = [
+            {
+                "period": "2026-02",
+                "original_filename": "BWA Februar.pdf",
+                "account_hints": [
+                    {"kind": "account", "account": "3400", "label": "Wareneingang 19%", "amounts": ["7.37"]},
+                    {"kind": "account", "account": "70000", "label": "Theo Foerch GmbH", "amounts": ["8.77"]},
+                ],
+            }
+        ]
+
+        with (
+            patch.object(database_service, "list_accounting_rules", return_value=[]),
+            patch.object(database_service, "list_bwa_imports", return_value=bwa_imports),
+        ):
+            details = validate_document_review_details(document)
+
+        missing_rule = next(detail for detail in details if detail["code"] == "missing_accounting_rule")
+        self.assertEqual(missing_rule["bwa_account_hints"][0]["account"], "3400")
+        self.assertIn("Kostenart", missing_rule["bwa_account_hints"][0]["reasons"][0])
+        self.assertEqual(missing_rule["bwa_account_hints"][1]["account"], "70000")
 
     def test_review_validation_accepts_complete_review(self):
         document = {

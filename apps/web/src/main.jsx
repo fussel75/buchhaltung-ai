@@ -871,6 +871,7 @@ function UploadApp() {
     const supplierName = issue?.supplier_name || approvalDocument?.extraction?.supplier_name || "";
     const costCategory = issue?.cost_category ?? approvalDocument?.booking_suggestions?.[0]?.cost_category ?? "";
     const suggestedName = issue?.suggested_name || defaultAccountingRuleName(supplierName, costCategory);
+    const bwaAccountHint = bestBwaAccountHint(issue);
 
     setAccountingRuleDraft({
       id: `${Date.now()}-${costCategory}-${supplierName}`,
@@ -879,7 +880,7 @@ function UploadApp() {
         name: suggestedName,
         supplier_match_text: supplierName,
         cost_category: costCategory,
-        debit_account: "",
+        debit_account: bwaAccountHint?.account || "",
         credit_account: "",
         tax_key: "",
         tax_rate: "19.00",
@@ -2509,6 +2510,25 @@ function ApprovalDialog({
                     Alle Regeln öffnen
                   </button>
                 ) : null}
+              </div>
+            ) : null}
+            {missingAccountingRuleIssues.some((issue) => issue.bwa_account_hints?.length) ? (
+              <div className="approval-bwa-hints">
+                <strong>BWA-Hinweise</strong>
+                <span>Aus hochgeladenen BWA-Daten, nur als Vorschlag für die Kontierungsregel.</span>
+                <ul>
+                  {dedupeAccountingRuleIssues(missingAccountingRuleIssues)
+                    .filter((issue) => issue.bwa_account_hints?.length)
+                    .map((issue) => {
+                      const hint = bestBwaAccountHint(issue);
+                      return (
+                        <li key={`bwa-${issue.supplier_name || "-"}-${issue.cost_category || ""}`}>
+                          <span>{accountingRuleIssueContext(issue)}</span>
+                          <strong>{formatBwaAccountHint(hint)}</strong>
+                        </li>
+                      );
+                    })}
+                </ul>
               </div>
             ) : null}
             {canPrepareAccountingRule && hasAccountingRuleActions ? (
@@ -5046,6 +5066,20 @@ function findAccountingRuleForTarget(rules, target) {
 
 function defaultAccountingRuleName(supplierName, costCategory) {
   return [formatCostCategory(costCategory), supplierName].filter(Boolean).join(" ").trim() || "Neue Kontierungsregel";
+}
+
+function bestBwaAccountHint(issue) {
+  const hints = Array.isArray(issue?.bwa_account_hints) ? issue.bwa_account_hints : [];
+  return hints.find((hint) => hint?.account) || null;
+}
+
+function formatBwaAccountHint(hint) {
+  const parts = [
+    hint?.account,
+    hint?.label,
+    hint?.period ? `BWA ${hint.period}` : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 const ACCOUNTING_ACCOUNT_PRESETS = {

@@ -1444,6 +1444,11 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
             )
         elif cost_category and not accounting_rule:
             context = _accounting_rule_context(supplier_name, cost_category)
+            bwa_account_hints = find_bwa_account_hints(
+                tenant_id=document.get("tenant_id"),
+                supplier_name=supplier_name,
+                cost_category=cost_category,
+            )
             add_error(
                 f"Zeile {line_no}: Kontierungsregel fehlt für {context}. "
                 "Bitte unter Stammdaten -> Kontierungsregeln anlegen.",
@@ -1453,6 +1458,7 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 cost_category=cost_category,
                 cost_category_label=_cost_category_label(cost_category),
                 suggested_name=f"{_cost_category_label(cost_category)} {supplier_name or ''}".strip(),
+                bwa_account_hints=bwa_account_hints,
             )
         elif accounting_rule and (not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account")):
             context = _accounting_rule_context(supplier_name, cost_category)
@@ -2927,6 +2933,86 @@ def update_accounting_rule(
             )
             row = cursor.fetchone()
             return _serialize_accounting_rule(row) if row else None
+
+
+def find_bwa_account_hints(
+    tenant_id: str | None,
+    supplier_name: str | None,
+    cost_category: str | None,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    if not tenant_id:
+        return []
+
+    supplier_text = _normalize_match_text(supplier_name or "")
+    cost_terms = _bwa_cost_category_terms(cost_category)
+    ranked_hints: list[tuple[int, int, dict[str, Any]]] = []
+    for import_index, bwa_import in enumerate(list_bwa_imports(tenant_id)):
+        for hint in bwa_import.get("account_hints") or []:
+            score, reasons = _bwa_hint_score(hint, supplier_text, cost_terms)
+            if score <= 0:
+                continue
+            ranked_hints.append(
+                (
+                    score,
+                    -import_index,
+                    {
+                        "account": hint.get("account"),
+                        "label": hint.get("label"),
+                        "kind": hint.get("kind"),
+                        "source": hint.get("source") or "BWA",
+                        "effect": hint.get("effect"),
+                        "amounts": hint.get("amounts") or [],
+                        "period": bwa_import.get("period"),
+                        "filename": bwa_import.get("original_filename"),
+                        "reasons": reasons,
+                    },
+                )
+            )
+
+    seen: set[tuple[str, str]] = set()
+    result: list[dict[str, Any]] = []
+    for _, _, hint in sorted(ranked_hints, key=lambda item: (item[0], item[1]), reverse=True):
+        key = (str(hint.get("account") or ""), str(hint.get("label") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(hint)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _bwa_cost_category_terms(cost_category: str | None) -> list[str]:
+    terms_by_category = {
+        "material": ["material", "waren", "wareneinkauf", "wareneingang", "baustoff"],
+        "subcontractor": ["fremdleistung", "fremdarbeiten", "subunternehmer"],
+        "fuel_vehicle": ["fahrzeug", "kfz", "tanken", "kraftstoff"],
+        "software_subscription": ["software", "wartung", "lizenz", "abo"],
+        "security_subscription": ["ueberwachung", "überwachung", "kamera", "abo"],
+        "general_overhead": ["sonstige", "gemeinkosten", "raumkosten", "versicherung", "beitrag"],
+    }
+    return [_normalize_match_text(term) for term in terms_by_category.get(cost_category or "", [])]
+
+
+def _bwa_hint_score(hint: dict[str, Any], supplier_text: str, cost_terms: list[str]) -> tuple[int, list[str]]:
+    hint_text = _normalize_match_text(" ".join(str(hint.get(key) or "") for key in ("label", "source", "effect")))
+    score = 0
+    reasons: list[str] = []
+
+    supplier_tokens = [token for token in supplier_text.split() if len(token) >= 4]
+    supplier_hits = [token for token in supplier_tokens if token in hint_text]
+    if supplier_hits:
+        score += 3 + min(len(supplier_hits), 2)
+        reasons.append("Lieferant in BWA-Kontozeile gefunden")
+
+    if cost_terms and any(term in hint_text for term in cost_terms):
+        score += 6 if hint.get("account") else 2
+        reasons.append("Kostenart passt zur BWA-Zeile")
+
+    if hint.get("kind") == "account" and hint.get("account"):
+        score += 1
+    return score, reasons
 
 
 def find_accounting_rule(
