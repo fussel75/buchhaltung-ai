@@ -666,6 +666,45 @@ button:disabled {
   background: var(--warning-soft);
 }
 
+.booking-preview-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.booking-preview-summary div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--surface-subtle);
+}
+
+.booking-preview-summary div.is-blocker {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.booking-preview-summary span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.booking-preview-summary strong {
+  font-size: 1rem;
+}
+
+.booking-preview-summary small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .booking-preview-blockers {
   display: grid;
   gap: 8px;

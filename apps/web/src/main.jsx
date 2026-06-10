@@ -4388,6 +4388,7 @@ function BookingExportPreview({ month, rows, invalidDocuments = [], exportIssues
     [rows],
   );
   const warningCount = rows.reduce((sum, row) => sum + exportWarningList(row).length, 0);
+  const warningGroups = useMemo(() => groupedExportWarnings(rows, invalidDocuments, exportIssues), [rows, invalidDocuments, exportIssues]);
 
   return (
     <section className="booking-preview">
@@ -4411,6 +4412,18 @@ function BookingExportPreview({ month, rows, invalidDocuments = [], exportIssues
       {warningCount ? (
         <div className="booking-preview-warning">
           {warningCount} Hinweise vor dem CSV-Export. Bitte Konten, Zuordnung und Zahlungsentscheidung prüfen.
+        </div>
+      ) : null}
+
+      {warningGroups.length ? (
+        <div className="booking-preview-summary" aria-label="Hinweise nach Ursache">
+          {warningGroups.map((group) => (
+            <div key={group.key} className={group.severity === "blocker" ? "is-blocker" : ""}>
+              <span>{group.label}</span>
+              <strong>{group.count}</strong>
+              <small>{group.help}</small>
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -4915,6 +4928,47 @@ function exportWarningList(row) {
     .split(";")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function groupedExportWarnings(rows, invalidDocuments = [], exportIssues = []) {
+  const groups = new Map([
+    ["accounting", { key: "accounting", label: "Kontierung", count: 0, severity: "warning", help: "Kontierungsregel, Aufwandskonto, Gegenkonto oder Mandantenstandard prüfen." }],
+    ["payment", { key: "payment", label: "Zahlung", count: 0, severity: "warning", help: "Zahlungsentscheidung, Skonto oder Zahlungsdifferenz prüfen." }],
+    ["assignment", { key: "assignment", label: "Zuordnung", count: 0, severity: "warning", help: "Bauvorhaben, Standort, Kostenstelle oder sonstige Zuordnung ergänzen." }],
+    ["tax", { key: "tax", label: "Steuer", count: 0, severity: "warning", help: "Steuerschlüssel, Steuersatz und Vorsteueraufteilung prüfen." }],
+    ["export", { key: "export", label: "Export", count: 0, severity: "blocker", help: "CSV-Download ist blockiert, bis die Exportprüfung sauber ist." }],
+  ]);
+
+  rows.forEach((row) => {
+    exportWarningList(row).forEach((warning) => {
+      incrementWarningGroup(groups, warning);
+    });
+  });
+  invalidDocuments.forEach((document) => {
+    (document.errors || []).forEach((error) => incrementWarningGroup(groups, error, true));
+  });
+  exportIssues.forEach((issue) => {
+    (issue.errors || []).forEach((error) => incrementWarningGroup(groups, error, true));
+  });
+
+  return Array.from(groups.values()).filter((group) => group.count > 0);
+}
+
+function incrementWarningGroup(groups, warning, isBlocker = false) {
+  const lower = String(warning || "").toLowerCase();
+  let key = "export";
+  if (lower.includes("kontierung") || lower.includes("konto") || lower.includes("mandantenstandard")) {
+    key = "accounting";
+  } else if (lower.includes("zahlung") || lower.includes("skonto") || lower.includes("differenz")) {
+    key = "payment";
+  } else if (lower.includes("zuordnung") || lower.includes("bauvorhaben") || lower.includes("kostenstelle") || lower.includes("standort")) {
+    key = "assignment";
+  } else if (lower.includes("steuer") || lower.includes("ust") || lower.includes("vorsteuer")) {
+    key = "tax";
+  }
+  const group = groups.get(key) || groups.get("export");
+  group.count += 1;
+  if (isBlocker) group.severity = "blocker";
 }
 
 function uniqueList(values) {
