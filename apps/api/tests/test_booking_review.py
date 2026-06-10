@@ -515,9 +515,29 @@ class BookingSuggestionTests(TestCase):
                 documents_route.export_booking_rows(request, tenant_id="demo-mandant", year=2026, month=5, format="csv")
 
         self.assertTrue(preview["is_blocked"])
+        self.assertEqual(preview["fieldnames"], documents_route.BOOKING_EXPORT_FIELDNAMES)
         self.assertEqual(preview["invalid_documents"][0]["errors"], ["Zeile 1: Kontierungsregel fehlt."])
         self.assertEqual(preview["rows"][0]["export_warnings"], "Zuordnung fehlt; Kontierungsregel fehlt; Aufwandskonto fehlt; Gegenkonto fehlt; Steuerangabe prüfen")
         self.assertEqual(csv_error.exception.status_code, 409)
+
+    def test_booking_export_csv_uses_stable_field_order(self):
+        rows = [
+            {
+                "invoice_number": "R-1",
+                "tenant_id": "demo-mandant",
+                "gross_amount": "119.00",
+                "supplier_name": "Muster Lieferant GmbH",
+                "extra_internal_field": "nicht exportieren",
+            }
+        ]
+
+        safe_rows = documents_route._csv_safe_rows(rows, documents_route.BOOKING_EXPORT_FIELDNAMES)
+
+        self.assertEqual(list(safe_rows[0].keys()), documents_route.BOOKING_EXPORT_FIELDNAMES)
+        self.assertEqual(safe_rows[0]["tenant_id"], "demo-mandant")
+        self.assertEqual(safe_rows[0]["invoice_number"], "R-1")
+        self.assertEqual(safe_rows[0]["document_id"], "")
+        self.assertNotIn("extra_internal_field", safe_rows[0])
 
     def test_booking_export_route_blocks_export_issues_even_when_review_passes(self):
         request = SimpleNamespace(state=SimpleNamespace())

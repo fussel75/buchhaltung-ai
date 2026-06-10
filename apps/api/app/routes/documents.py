@@ -49,6 +49,51 @@ from app.routes.users import require_admin, require_document_access, require_ten
 router = APIRouter()
 
 
+BOOKING_EXPORT_FIELDNAMES = [
+    "tenant_id",
+    "document_id",
+    "original_filename",
+    "normalized_filename",
+    "supplier_name",
+    "invoice_number",
+    "invoice_date",
+    "document_type",
+    "currency",
+    "row_type",
+    "line_no",
+    "booking_type",
+    "description",
+    "cost_category",
+    "assignment_kind",
+    "assignment_code",
+    "net_amount",
+    "tax_amount",
+    "gross_amount",
+    "payment_type",
+    "payment_label",
+    "payment_decision_source",
+    "payment_due_date",
+    "payment_amount",
+    "payable_delta",
+    "discount_base",
+    "discount_percent",
+    "discount_amount",
+    "debit_account",
+    "debit_account_source",
+    "credit_account",
+    "credit_account_source",
+    "tax_key",
+    "tax_rate",
+    "tax_source",
+    "discount_account",
+    "discount_account_source",
+    "accounting_rule",
+    "accounting_rule_status",
+    "accounting_rule_matches",
+    "export_warnings",
+]
+
+
 class DocumentExportRequest(BaseModel):
     document_ids: list[UUID] = Field(min_length=1, max_length=200)
     tenant_id: str | None = None
@@ -350,6 +395,7 @@ def export_booking_rows(
             raise HTTPException(status_code=404, detail="no approved booking rows found for export")
         return {
             "rows": rows,
+            "fieldnames": BOOKING_EXPORT_FIELDNAMES,
             "invalid_documents": invalid_documents,
             "export_issues": export_issues,
             "is_blocked": bool(invalid_documents or export_issues),
@@ -372,16 +418,25 @@ def export_booking_rows(
         raise HTTPException(status_code=404, detail="no approved booking rows found for export")
 
     buffer = StringIO()
-    writer = DictWriter(buffer, fieldnames=list(rows[0].keys()), delimiter=";", lineterminator="\n")
+    writer = DictWriter(buffer, fieldnames=BOOKING_EXPORT_FIELDNAMES, delimiter=";", lineterminator="\n", extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(_csv_safe_rows(rows))
+    writer.writerows(_csv_safe_rows(rows, BOOKING_EXPORT_FIELDNAMES))
     content = ("\ufeff" + buffer.getvalue()).encode("utf-8")
     headers = {"Content-Disposition": f'attachment; filename="buchungsentwurf-{tenant_id}-{year}-{month:02d}.csv"'}
     return StreamingResponse(BytesIO(content), media_type="text/csv; charset=utf-8", headers=headers)
 
 
-def _csv_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{key: _csv_safe_value(key, value) for key, value in row.items()} for row in rows]
+def _csv_safe_rows(rows: list[dict[str, Any]], fieldnames: list[str] | None = None) -> list[dict[str, Any]]:
+    if fieldnames is not None:
+        export_fields = fieldnames
+    elif rows:
+        export_fields = list(rows[0].keys())
+    else:
+        export_fields = []
+    return [
+        {key: _csv_safe_value(key, row.get(key, "")) for key in export_fields}
+        for row in rows
+    ]
 
 
 def _csv_safe_value(fieldname: str, value: Any) -> Any:
