@@ -4525,7 +4525,10 @@ function BookingPreviewLine({ row }) {
           {row.accounting_rule_matches ? <PreviewField label="Passende Regeln" value={row.accounting_rule_matches} /> : null}
           <PreviewField label="Aufwandskonto" value={row.debit_account || "-"} />
           <PreviewField label="Gegenkonto" value={row.credit_account || "-"} />
+          <PreviewField label="Gegenkonto Quelle" value={row.credit_account_source || "-"} />
+          <PreviewField label="Steuer Quelle" value={row.tax_source || "-"} />
           <PreviewField label="Skontokonto" value={row.discount_account || "-"} />
+          <PreviewField label="Skonto Quelle" value={row.discount_account_source || "-"} />
           <PreviewField label="Zahlbetrag" value={formatMoney(row.payment_amount)} numeric />
           <PreviewField label="Skonto-Basis" value={formatMoney(row.discount_base)} numeric />
           <PreviewField label="Skonto %" value={row.discount_percent || "-"} numeric />

@@ -1362,6 +1362,7 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
     raw_result = extraction.get("raw_result") or {}
     suggestions = document.get("booking_suggestions") or []
     supplier_name = extraction.get("supplier_name")
+    tenant_defaults = _tenant_accounting_defaults(document.get("tenant_id"))
 
     def add_error(message: str, code: str = "review_validation", **context: Any) -> None:
         errors.append({"code": code, "message": message, **context})
@@ -1472,7 +1473,10 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 suggested_debit_account_label=suggested_bwa_account.get("label") if suggested_bwa_account else None,
                 suggested_debit_account_source="BWA" if suggested_bwa_account else None,
             )
-        elif accounting_rule and (not accounting_rule.get("debit_account") or not accounting_rule.get("credit_account")):
+        elif accounting_rule and (
+            not accounting_rule.get("debit_account")
+            or not (accounting_rule.get("credit_account") or tenant_defaults.get("default_credit_account"))
+        ):
             context = _accounting_rule_context(supplier_name, cost_category)
             add_error(
                 f"Zeile {line_no}: Kontierungsregel ist unvollständig für {context}. "
@@ -1510,7 +1514,7 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 cost_category=cost_category,
             )
             accounting_rule = accounting_rule_matches[0] if len(accounting_rule_matches) == 1 else None
-            if accounting_rule and not accounting_rule.get("discount_account"):
+            if accounting_rule and not (accounting_rule.get("discount_account") or tenant_defaults.get("default_discount_account")):
                 add_error(
                     f"Zeile {line_no}: Zahlungsdifferenz/Skonto braucht ein Skontokonto in der Kontierungsregel.",
                     code="missing_discount_account",
@@ -1942,6 +1946,15 @@ def _booking_export_warnings(row: dict[str, Any]) -> str:
             warnings.append("Gegenkonto fehlt")
         if not row.get("tax_key") and not row.get("tax_rate"):
             warnings.append("Steuerangabe prüfen")
+    default_sources = []
+    if row.get("credit_account_source") == "Mandantenstandard":
+        default_sources.append("Gegenkonto")
+    if row.get("tax_source") == "Mandantenstandard":
+        default_sources.append("Steuer")
+    if row.get("discount_account_source") == "Mandantenstandard":
+        default_sources.append("Skonto")
+    if default_sources:
+        warnings.append(f"Mandantenstandard genutzt: {', '.join(default_sources)}")
     return "; ".join(warnings)
 
 
@@ -2055,29 +2068,49 @@ def _payment_delta(extraction: dict[str, Any], payment_decision: dict[str, Any] 
 
 def _accounting_export_fields(
     rule: dict[str, Any] | None,
+    tenant_defaults: dict[str, Any] | None = None,
     payment_adjustment: bool = False,
 ) -> dict[str, Any]:
+    tenant_defaults = tenant_defaults or {}
+    default_credit_account = tenant_defaults.get("default_credit_account")
+    default_tax_key = tenant_defaults.get("default_tax_key")
+    default_tax_rate = tenant_defaults.get("default_tax_rate")
+    default_discount_account = tenant_defaults.get("default_discount_account")
     if not rule:
         return {
             "debit_account": None,
-            "credit_account": None,
-            "tax_key": None,
-            "tax_rate": None,
-            "discount_account": None,
+            "credit_account": default_credit_account,
+            "tax_key": default_tax_key,
+            "tax_rate": _money_string(default_tax_rate),
+            "discount_account": default_discount_account,
             "accounting_rule": None,
             "accounting_rule_status": "missing",
             "accounting_rule_matches": None,
+            "debit_account_source": None,
+            "credit_account_source": "Mandantenstandard" if default_credit_account else None,
+            "tax_source": "Mandantenstandard" if default_tax_key or default_tax_rate is not None else None,
+            "discount_account_source": "Mandantenstandard" if default_discount_account else None,
         }
-    debit_account = rule["discount_account"] if payment_adjustment and rule.get("discount_account") else rule["debit_account"]
+    discount_account = rule.get("discount_account") or default_discount_account
+    credit_account = rule.get("credit_account") or default_credit_account
+    tax_key = rule.get("tax_key") or default_tax_key
+    tax_rate = rule.get("tax_rate")
+    if tax_rate in (None, ""):
+        tax_rate = default_tax_rate
+    debit_account = discount_account if payment_adjustment and discount_account else rule.get("debit_account")
     return {
         "debit_account": debit_account,
-        "credit_account": rule["credit_account"],
-        "tax_key": rule["tax_key"],
-        "tax_rate": _money_string(rule["tax_rate"]),
-        "discount_account": rule["discount_account"],
+        "credit_account": credit_account,
+        "tax_key": tax_key,
+        "tax_rate": _money_string(tax_rate),
+        "discount_account": discount_account,
         "accounting_rule": rule["name"],
         "accounting_rule_status": "matched",
         "accounting_rule_matches": None,
+        "debit_account_source": "Kontierungsregel" if debit_account else None,
+        "credit_account_source": "Kontierungsregel" if rule.get("credit_account") else ("Mandantenstandard" if credit_account else None),
+        "tax_source": "Kontierungsregel" if rule.get("tax_key") or rule.get("tax_rate") not in (None, "") else ("Mandantenstandard" if tax_key or tax_rate is not None else None),
+        "discount_account_source": "Kontierungsregel" if rule.get("discount_account") else ("Mandantenstandard" if discount_account else None),
     }
 
 
@@ -2087,15 +2120,30 @@ def _resolve_accounting_rule_export_fields(
     cost_category: str | None,
     payment_adjustment: bool = False,
 ) -> dict[str, Any]:
+    tenant_defaults = _tenant_accounting_defaults(tenant_id)
     matches = find_accounting_rule_matches(tenant_id, supplier_name, cost_category)
     if len(matches) == 1:
-        return _accounting_export_fields(matches[0], payment_adjustment=payment_adjustment)
+        return _accounting_export_fields(matches[0], tenant_defaults, payment_adjustment=payment_adjustment)
     if len(matches) > 1:
-        fields = _accounting_export_fields(None, payment_adjustment=payment_adjustment)
+        fields = _accounting_export_fields(None, tenant_defaults, payment_adjustment=payment_adjustment)
         fields["accounting_rule_status"] = "ambiguous"
         fields["accounting_rule_matches"] = ", ".join(rule["name"] for rule in matches)
         return fields
-    return _accounting_export_fields(None, payment_adjustment=payment_adjustment)
+    return _accounting_export_fields(None, tenant_defaults, payment_adjustment=payment_adjustment)
+
+
+def _tenant_accounting_defaults(tenant_id: str | None) -> dict[str, Any]:
+    if not tenant_id:
+        return {}
+    profile = get_tenant_profile(tenant_id)
+    if not profile:
+        return {}
+    return {
+        "default_credit_account": profile.get("default_credit_account"),
+        "default_tax_key": profile.get("default_tax_key"),
+        "default_tax_rate": profile.get("default_tax_rate"),
+        "default_discount_account": profile.get("default_discount_account"),
+    }
 
 
 def _payment_terms_from_extraction(extraction: dict[str, Any]) -> list[dict[str, Any]]:

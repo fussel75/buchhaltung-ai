@@ -1065,6 +1065,75 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[1]["payment_decision_source"], "gewählt")
         self.assertEqual(validate_booking_export_rows(rows), [])
 
+    def test_booking_export_rows_use_tenant_accounting_defaults(self):
+        document_id = uuid4()
+        tenant_profile = {
+            "default_credit_account": "70000",
+            "default_tax_key": "9",
+            "default_tax_rate": "19.00",
+            "default_discount_account": "3736",
+        }
+        rule = {
+            "name": "Material Foerch",
+            "supplier_match_text": "Foerch",
+            "cost_category": "material",
+            "debit_account": "3400",
+            "credit_account": "",
+            "tax_key": "",
+            "tax_rate": "",
+            "discount_account": "",
+            "is_active": True,
+        }
+
+        with (
+            patch.object(database_service, "list_accounting_rules", return_value=[rule]),
+            patch.object(database_service, "get_tenant_profile", return_value=tenant_profile),
+        ):
+            rows = build_booking_export_rows(
+                [
+                    {
+                        "id": str(document_id),
+                        "tenant_id": "demo-mandant",
+                        "original_filename": "foerch.pdf",
+                        "normalized_filename": "ERg foerch.pdf",
+                        "status": "review_approved",
+                        "extraction": {
+                            "supplier_name": "Theo Foerch GmbH & Co. KG",
+                            "invoice_number": "3161691971",
+                            "invoice_date": "2026-05-21",
+                            "gross_amount": "8.77",
+                            "currency": "EUR",
+                            "raw_result": {"document_type": "incoming_invoice"},
+                        },
+                        "booking_suggestions": [
+                            {
+                                "line_no": 1,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "assignment_kind": "construction_project",
+                                "assignment_code": "Neula51",
+                                "description": "Zargenschaum",
+                                "net_amount": "7.37",
+                                "tax_amount": "1.40",
+                                "gross_amount": "8.77",
+                            }
+                        ],
+                        "payment_decision": {"payment_type": "full_amount", "label": "Ohne Abzug zahlen", "amount": "8.77"},
+                    }
+                ]
+            )
+
+        self.assertEqual(rows[0]["debit_account"], "3400")
+        self.assertEqual(rows[0]["credit_account"], "70000")
+        self.assertEqual(rows[0]["credit_account_source"], "Mandantenstandard")
+        self.assertEqual(rows[0]["tax_key"], "9")
+        self.assertEqual(rows[0]["tax_rate"], "19.00")
+        self.assertEqual(rows[0]["tax_source"], "Mandantenstandard")
+        self.assertEqual(rows[0]["discount_account"], "3736")
+        self.assertEqual(rows[0]["discount_account_source"], "Mandantenstandard")
+        self.assertIn("Mandantenstandard genutzt: Gegenkonto, Steuer, Skonto", rows[0]["export_warnings"])
+        self.assertEqual(validate_booking_export_rows(rows), [])
+
     def test_booking_export_validation_blocks_invalid_numbers_and_missing_tax_fields(self):
         rows = [
             {
@@ -2503,6 +2572,64 @@ class BookingSuggestionTests(TestCase):
         discount = next(detail for detail in details if detail["code"] == "missing_discount_account")
         self.assertEqual(discount["accounting_rule_id"], rule_id)
         self.assertEqual(discount["accounting_rule_name"], "Material Foerch")
+
+    def test_review_validation_allows_discount_account_from_tenant_default(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "foerch.pdf",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "84.03",
+                "tax_amount": "15.97",
+                "gross_amount": "100.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "net_amount": "84.03",
+                    "tax_amount": "15.97",
+                    "gross_amount": "100.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "cash_discount", "amount": "97.00"},
+        }
+        rule = {
+            "id": str(uuid4()),
+            "name": "Material Foerch",
+            "supplier_match_text": "Foerch",
+            "cost_category": "material",
+            "debit_account": "3400",
+            "credit_account": "70000",
+            "tax_key": "9",
+            "tax_rate": "19.00",
+            "discount_account": "",
+            "is_active": True,
+        }
+        tenant_profile = {
+            "default_credit_account": "70000",
+            "default_tax_key": "9",
+            "default_tax_rate": "19.00",
+            "default_discount_account": "3736",
+        }
+
+        with (
+            patch.object(database_service, "list_accounting_rules", return_value=[rule]),
+            patch.object(database_service, "get_tenant_profile", return_value=tenant_profile),
+        ):
+            details = validate_document_review_details(document)
+
+        self.assertFalse(any(detail["code"] == "missing_discount_account" for detail in details))
 
     def test_review_validation_blocks_ambiguous_accounting_rule(self):
         document = {
