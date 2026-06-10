@@ -7,11 +7,12 @@ on:
 
 concurrency:
   group: deploy-vps
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: SSH deploy trigger
         shell: bash
@@ -57,7 +58,9 @@ jobs:
 
           for attempt in 1 2 3 4 5; do
             set +e
-            ssh "${ssh_options[@]}" "root@$SSH_HOST" 2>&1 | tee "$deploy_log"
+            ssh "${ssh_options[@]}" "root@$SSH_HOST" \
+              "cd /docker/buchhaltung-ai && git pull --ff-only && docker compose up -d --build" \
+              2>&1 | tee "$deploy_log"
             status="${PIPESTATUS[0]}"
             set -e
 
