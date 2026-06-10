@@ -95,6 +95,10 @@ class TenantProfileRequest(BaseModel):
     default_assignment_kind: str | None = None
     allow_multiple_assignments: bool | None = None
     accounting_framework: str | None = None
+    default_credit_account: str | None = None
+    default_tax_key: str | None = None
+    default_tax_rate: Decimal | None = None
+    default_discount_account: str | None = None
 
 
 def _normalize_tenant_id(tenant_id: str) -> str:
@@ -184,6 +188,18 @@ def put_profile(
             else template["allow_multiple_assignments"]
         ),
         accounting_framework=payload.accounting_framework or template["accounting_framework"],
+        default_credit_account=payload.default_credit_account
+        if payload.default_credit_account is not None
+        else template["default_credit_account"],
+        default_tax_key=payload.default_tax_key
+        if payload.default_tax_key is not None
+        else template["default_tax_key"],
+        default_tax_rate=payload.default_tax_rate
+        if payload.default_tax_rate is not None
+        else template["default_tax_rate"],
+        default_discount_account=payload.default_discount_account
+        if payload.default_discount_account is not None
+        else template["default_discount_account"],
     )
     return {"tenant_profile": profile}
 

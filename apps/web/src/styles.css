@@ -2181,11 +2181,15 @@ code {
 
 .profile-form > .form-field:nth-child(4),
 .profile-form > .form-field:nth-child(5),
-.profile-form > .form-field:nth-child(6) {
+.profile-form > .form-field:nth-child(6),
+.profile-form > .form-field:nth-child(7),
+.profile-form > .form-field:nth-child(8),
+.profile-form > .form-field:nth-child(9),
+.profile-form > .form-field:nth-child(10) {
   grid-column: span 2;
 }
 
-.profile-form > .form-field:nth-child(7) {
+.profile-form > .form-field:nth-child(11) {
   grid-column: span 1;
 }
 

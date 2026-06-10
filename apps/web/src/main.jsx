@@ -2616,7 +2616,7 @@ function ApprovalDialog({
                     className="secondary-button compact-button"
                     type="button"
                     onClick={() => {
-                      setInlineAccountingForm((current) => applyAccountingSuggestions(current || {}, activeAccountingFramework));
+                      setInlineAccountingForm((current) => applyAccountingSuggestions(current || {}, tenantProfile));
                       setInlineAccountingErrors((current) => ({
                         ...current,
                         debit_account: "",
@@ -3547,6 +3547,18 @@ function MasterdataAdmin({
                 <option value="SKR04">SKR04</option>
               </select>
             </FormField>
+            <FormField label="Standard-Gegenkonto">
+              <input placeholder="70000" value={profileForm.default_credit_account || ""} onChange={(event) => setProfileForm({ ...profileForm, default_credit_account: event.target.value })} />
+            </FormField>
+            <FormField label="Standard-Steuerschlüssel">
+              <input placeholder="optional" value={profileForm.default_tax_key || ""} onChange={(event) => setProfileForm({ ...profileForm, default_tax_key: event.target.value })} />
+            </FormField>
+            <FormField label="Standard-Steuersatz">
+              <input placeholder="19.00" value={profileForm.default_tax_rate || ""} onChange={(event) => setProfileForm({ ...profileForm, default_tax_rate: event.target.value })} />
+            </FormField>
+            <FormField label="Standard-Skontokonto">
+              <input placeholder="3736" value={profileForm.default_discount_account || ""} onChange={(event) => setProfileForm({ ...profileForm, default_discount_account: event.target.value })} />
+            </FormField>
             <FormField label="Begriff einzeln">
               <input placeholder="Bauvorhaben" value={profileForm.assignment_label_singular || ""} onChange={(event) => setProfileForm({ ...profileForm, assignment_label_singular: event.target.value })} required />
             </FormField>
@@ -3875,7 +3887,7 @@ function MasterdataAdmin({
             <FormField label="Skontokonto" error={fieldError(accountingFormErrors, "discount_account")}>
               <input list="accounting-discount-options" placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
             </FormField>
-            <button className="secondary-button" type="button" onClick={() => setAccountingForm((current) => applyAccountingSuggestions(current, activeAccountingFramework))}>
+            <button className="secondary-button" type="button" onClick={() => setAccountingForm((current) => applyAccountingSuggestions(current, tenantProfile))}>
               Leere Konten vorschlagen
             </button>
             <button type="submit">Kontierungsregel anlegen</button>
@@ -3983,7 +3995,7 @@ function MasterdataAdmin({
                         <span>{accountingEditForm.is_active ? "aktiv" : "inaktiv"}</span>
                       </label>
                       <div className="row-actions">
-                        <button className="secondary-button" type="button" onClick={() => setAccountingEditForm((current) => applyAccountingSuggestions(current, activeAccountingFramework))}>
+                        <button className="secondary-button" type="button" onClick={() => setAccountingEditForm((current) => applyAccountingSuggestions(current, tenantProfile))}>
                           Vorschlagen
                         </button>
                         <button type="button" onClick={() => saveAccountingEdit(rule)}>Speichern</button>
@@ -5362,13 +5374,23 @@ function firstAccountSuggestion(framework, role, costCategory) {
   return accountSuggestions(framework, role, costCategory)[0]?.account ?? "";
 }
 
-function applyAccountingSuggestions(form, framework) {
+function accountingSuggestionProfile(source) {
+  if (typeof source === "string") {
+    return { accounting_framework: source };
+  }
+  return source || {};
+}
+
+function applyAccountingSuggestions(form, source) {
+  const profile = accountingSuggestionProfile(source);
+  const framework = accountingFramework(profile.accounting_framework);
   return {
     ...form,
     debit_account: form.debit_account || firstAccountSuggestion(framework, "debit", form.cost_category),
-    credit_account: form.credit_account || firstAccountSuggestion(framework, "credit", form.cost_category),
-    discount_account: form.discount_account || firstAccountSuggestion(framework, "discount", form.cost_category),
-    tax_rate: form.tax_rate || "19.00",
+    credit_account: form.credit_account || profile.default_credit_account || firstAccountSuggestion(framework, "credit", form.cost_category),
+    tax_key: form.tax_key || profile.default_tax_key || "",
+    tax_rate: form.tax_rate || profile.default_tax_rate || "19.00",
+    discount_account: form.discount_account || profile.default_discount_account || firstAccountSuggestion(framework, "discount", form.cost_category),
   };
 }
 
@@ -5420,6 +5442,10 @@ function defaultTenantProfile(industry) {
       default_assignment_kind: "construction_project",
       allow_multiple_assignments: true,
       accounting_framework: "SKR03",
+      default_credit_account: "70000",
+      default_tax_key: "",
+      default_tax_rate: "19.00",
+      default_discount_account: "3736",
     },
     fitness_studio: {
       industry: "fitness_studio",
@@ -5431,6 +5457,10 @@ function defaultTenantProfile(industry) {
       default_assignment_kind: "location",
       allow_multiple_assignments: false,
       accounting_framework: "SKR03",
+      default_credit_account: "70000",
+      default_tax_key: "",
+      default_tax_rate: "19.00",
+      default_discount_account: "3736",
     },
     container_transport: {
       industry: "container_transport",
@@ -5442,6 +5472,10 @@ function defaultTenantProfile(industry) {
       default_assignment_kind: "construction_or_dropoff_site",
       allow_multiple_assignments: true,
       accounting_framework: "SKR03",
+      default_credit_account: "70000",
+      default_tax_key: "",
+      default_tax_rate: "19.00",
+      default_discount_account: "3736",
     },
     general: {
       industry: "general",
@@ -5453,6 +5487,10 @@ function defaultTenantProfile(industry) {
       default_assignment_kind: "cost_object",
       allow_multiple_assignments: true,
       accounting_framework: "SKR03",
+      default_credit_account: "70000",
+      default_tax_key: "",
+      default_tax_rate: "19.00",
+      default_discount_account: "3736",
     },
   };
   return templates[industry] ?? templates.general;

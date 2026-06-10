@@ -91,6 +91,10 @@ class TenantProfileTests(TestCase):
             default_assignment_kind="construction_project",
             allow_multiple_assignments=True,
             accounting_framework="SKR04",
+            default_credit_account="70000",
+            default_tax_key="9",
+            default_tax_rate=Decimal("19.00"),
+            default_discount_account="5736",
         )
         saved_profile = {
             "tenant_id": "demo-mandant",
@@ -103,6 +107,10 @@ class TenantProfileTests(TestCase):
             "default_assignment_kind": "construction_project",
             "allow_multiple_assignments": True,
             "accounting_framework": "SKR04",
+            "default_credit_account": "70000",
+            "default_tax_key": "9",
+            "default_tax_rate": "19.00",
+            "default_discount_account": "5736",
         }
 
         with (
@@ -115,6 +123,10 @@ class TenantProfileTests(TestCase):
         upsert_profile.assert_called_once()
         self.assertEqual(upsert_profile.call_args.kwargs["tenant_id"], "demo-mandant")
         self.assertEqual(upsert_profile.call_args.kwargs["accounting_framework"], "SKR04")
+        self.assertEqual(upsert_profile.call_args.kwargs["default_credit_account"], "70000")
+        self.assertEqual(upsert_profile.call_args.kwargs["default_tax_key"], "9")
+        self.assertEqual(upsert_profile.call_args.kwargs["default_tax_rate"], Decimal("19.00"))
+        self.assertEqual(upsert_profile.call_args.kwargs["default_discount_account"], "5736")
         self.assertEqual(result["tenant_profile"]["accounting_framework"], "SKR04")
 
     def test_upsert_tenant_profile_normalizes_accounting_framework(self):
@@ -130,6 +142,10 @@ class TenantProfileTests(TestCase):
             "default_assignment_kind": "construction_project",
             "allow_multiple_assignments": True,
             "accounting_framework": "SKR04",
+            "default_credit_account": "70000",
+            "default_tax_key": "9",
+            "default_tax_rate": Decimal("19.00"),
+            "default_discount_account": "5736",
             "created_at": now,
             "updated_at": now,
         }
@@ -147,10 +163,22 @@ class TenantProfileTests(TestCase):
                 default_assignment_kind="construction_project",
                 allow_multiple_assignments=True,
                 accounting_framework="skr04",
+                default_credit_account="70000",
+                default_tax_key="9",
+                default_tax_rate=Decimal("19.00"),
+                default_discount_account="5736",
             )
 
         self.assertEqual(profile["accounting_framework"], "SKR04")
+        self.assertEqual(profile["default_credit_account"], "70000")
+        self.assertEqual(profile["default_tax_key"], "9")
+        self.assertEqual(profile["default_tax_rate"], "19.00")
+        self.assertEqual(profile["default_discount_account"], "5736")
         self.assertEqual(cursor.statements[0][1][9], "SKR04")
+        self.assertEqual(cursor.statements[0][1][10], "70000")
+        self.assertEqual(cursor.statements[0][1][11], "9")
+        self.assertEqual(cursor.statements[0][1][12], Decimal("19.00"))
+        self.assertEqual(cursor.statements[0][1][13], "5736")
 
 
 class BwaImportTests(TestCase):
