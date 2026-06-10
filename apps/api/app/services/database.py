@@ -1241,6 +1241,8 @@ def validate_booking_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
     for index, row in enumerate(rows, start=1):
         row_issues = _booking_export_row_issues(row)
         if row_issues:
+            issue_codes = [_booking_export_issue_code(issue) for issue in row_issues]
+            issue_categories = unique_preserving_order([_booking_export_issue_category(code) for code in issue_codes])
             issues.append(
                 {
                     "row_index": index,
@@ -1250,6 +1252,8 @@ def validate_booking_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
                     "line_no": row.get("line_no"),
                     "row_type": row.get("row_type"),
                     "errors": row_issues,
+                    "error_codes": issue_codes,
+                    "error_categories": issue_categories,
                 }
             )
     return issues
@@ -1343,6 +1347,58 @@ def _booking_export_row_issues(row: dict[str, Any]) -> list[str]:
                 issues.append("Netto- und USt-Differenz passen nicht zur Brutto-Differenz")
 
     return unique_preserving_order(issues)
+
+
+def _booking_export_issue_code(issue: str) -> str:
+    normalized = issue.lower()
+    if "kontierungsregel mehrdeutig" in normalized:
+        return "ambiguous_accounting_rule"
+    if "kontierungsregel fehlt" in normalized:
+        return "missing_accounting_rule"
+    if "aufwandskonto fehlt" in normalized:
+        return "missing_debit_account"
+    if "gegenkonto fehlt" in normalized:
+        return "missing_credit_account"
+    if "skontokonto fehlt" in normalized:
+        return "missing_discount_account"
+    if "steuerangabe fehlt" in normalized:
+        return "missing_tax_setting"
+    if "keine gültige zahl" in normalized:
+        return "invalid_number"
+    if "zahlungsdifferenz" in normalized:
+        return "invalid_payment_delta"
+    if "ust-differenz" in normalized or "netto-differenz" in normalized or "brutto-differenz" in normalized:
+        return "missing_payment_delta_amount"
+    if "zuordnung" in normalized:
+        return "missing_assignment"
+    if "belegnummer" in normalized:
+        return "missing_invoice_number"
+    if "belegdatum" in normalized:
+        return "missing_invoice_date"
+    if "lieferant" in normalized:
+        return "missing_supplier"
+    if "kostenart" in normalized:
+        return "missing_cost_category"
+    return "export_validation"
+
+
+def _booking_export_issue_category(code: str) -> str:
+    if code in {
+        "ambiguous_accounting_rule",
+        "missing_accounting_rule",
+        "missing_debit_account",
+        "missing_credit_account",
+        "missing_discount_account",
+        "tenant_accounting_defaults_used",
+    }:
+        return "accounting"
+    if code in {"invalid_payment_delta", "missing_payment_delta_amount", "payment_decision_default"}:
+        return "payment"
+    if code == "missing_assignment":
+        return "assignment"
+    if code in {"missing_tax_setting", "missing_payment_adjustment_tax_split", "invalid_number"}:
+        return "tax"
+    return "export"
 
 
 def unique_preserving_order(values: list[str]) -> list[str]:
@@ -1839,7 +1895,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                 "payable_delta": None,
                 **accounting_rule_fields,
             }
-            row["export_warnings"] = _booking_export_warnings(row)
+            _set_booking_export_warnings(row)
             rows.append(row)
 
         rows.extend(_payment_adjustment_export_rows(document, common, extraction, payment_decision, supplier_name))
@@ -1890,7 +1946,7 @@ def _payment_adjustment_export_rows(
             "payable_delta": _money_string(allocated_delta),
             **accounting_rule_fields,
         }
-        row["export_warnings"] = _booking_export_warnings(row)
+        _set_booking_export_warnings(row)
         rows.append(row)
     return rows
 
@@ -1924,28 +1980,54 @@ def _payment_adjustment_net_tax(
 
 
 def _booking_export_warnings(row: dict[str, Any]) -> str:
-    warnings = []
+    return "; ".join(item["message"] for item in _booking_export_warning_items(row))
+
+
+def _set_booking_export_warnings(row: dict[str, Any]) -> None:
+    warning_items = _booking_export_warning_items(row)
+    row["export_warnings"] = "; ".join(item["message"] for item in warning_items)
+    row["export_warning_codes"] = ";".join(item["code"] for item in warning_items)
+    row["export_warning_categories"] = ";".join(
+        unique_preserving_order([item["category"] for item in warning_items])
+    )
+
+
+def _booking_export_warning_items(row: dict[str, Any]) -> list[dict[str, str]]:
+    warnings: list[dict[str, str]] = []
+
+    def add_warning(code: str, message: str) -> None:
+        warnings.append(
+            {
+                "code": code,
+                "category": _booking_export_issue_category(code),
+                "message": message,
+            }
+        )
+
     if row.get("payment_decision_source") == "Standard":
-        warnings.append("Zahlung nicht manuell gewählt")
+        add_warning("payment_decision_default", "Zahlung nicht manuell gewählt")
     if not row.get("assignment_code"):
-        warnings.append("Zuordnung fehlt")
+        add_warning("missing_assignment", "Zuordnung fehlt")
     if row.get("accounting_rule_status") == "ambiguous":
         matches = row.get("accounting_rule_matches")
-        warnings.append(f"Kontierungsregel mehrdeutig: {matches}" if matches else "Kontierungsregel mehrdeutig")
+        add_warning(
+            "ambiguous_accounting_rule",
+            f"Kontierungsregel mehrdeutig: {matches}" if matches else "Kontierungsregel mehrdeutig",
+        )
     elif not row.get("accounting_rule"):
-        warnings.append("Kontierungsregel fehlt")
+        add_warning("missing_accounting_rule", "Kontierungsregel fehlt")
     if row.get("row_type") == "payment_adjustment":
         if row.get("net_amount") in (None, "") or row.get("tax_amount") in (None, ""):
-            warnings.append("Skonto-/Vorsteueraufteilung fehlt")
+            add_warning("missing_payment_adjustment_tax_split", "Skonto-/Vorsteueraufteilung fehlt")
         if not row.get("discount_account"):
-            warnings.append("Skontokonto fehlt")
+            add_warning("missing_discount_account", "Skontokonto fehlt")
     else:
         if not row.get("debit_account"):
-            warnings.append("Aufwandskonto fehlt")
+            add_warning("missing_debit_account", "Aufwandskonto fehlt")
         if not row.get("credit_account"):
-            warnings.append("Gegenkonto fehlt")
+            add_warning("missing_credit_account", "Gegenkonto fehlt")
         if not row.get("tax_key") and not row.get("tax_rate"):
-            warnings.append("Steuerangabe prüfen")
+            add_warning("missing_tax_setting", "Steuerangabe prüfen")
     default_sources = []
     if row.get("credit_account_source") == "Mandantenstandard":
         default_sources.append("Gegenkonto")
@@ -1954,8 +2036,11 @@ def _booking_export_warnings(row: dict[str, Any]) -> str:
     if row.get("discount_account_source") == "Mandantenstandard":
         default_sources.append("Skonto")
     if default_sources:
-        warnings.append(f"Mandantenstandard genutzt: {', '.join(default_sources)}")
-    return "; ".join(warnings)
+        add_warning(
+            "tenant_accounting_defaults_used",
+            f"Mandantenstandard genutzt: {', '.join(default_sources)}",
+        )
+    return warnings
 
 
 def _allocate_payment_delta(

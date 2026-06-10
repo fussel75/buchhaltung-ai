@@ -518,6 +518,11 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(preview["fieldnames"], documents_route.BOOKING_EXPORT_FIELDNAMES)
         self.assertEqual(preview["invalid_documents"][0]["errors"], ["Zeile 1: Kontierungsregel fehlt."])
         self.assertEqual(preview["rows"][0]["export_warnings"], "Zuordnung fehlt; Kontierungsregel fehlt; Aufwandskonto fehlt; Gegenkonto fehlt; Steuerangabe prüfen")
+        self.assertEqual(
+            preview["rows"][0]["export_warning_codes"],
+            "missing_assignment;missing_accounting_rule;missing_debit_account;missing_credit_account;missing_tax_setting",
+        )
+        self.assertEqual(preview["rows"][0]["export_warning_categories"], "assignment;accounting;tax")
         self.assertEqual(csv_error.exception.status_code, 409)
 
     def test_booking_export_csv_uses_stable_field_order(self):
@@ -583,6 +588,8 @@ class BookingSuggestionTests(TestCase):
         self.assertTrue(preview["is_blocked"])
         self.assertEqual(preview["invalid_documents"], [])
         self.assertIn("Kontierungsregel fehlt", preview["export_issues"][0]["errors"])
+        self.assertIn("missing_accounting_rule", preview["export_issues"][0]["error_codes"])
+        self.assertIn("accounting", preview["export_issues"][0]["error_categories"])
         self.assertEqual(csv_error.exception.status_code, 409)
         self.assertEqual(csv_error.exception.detail["documents"][0]["errors"], preview["export_issues"][0]["errors"])
 
@@ -1152,6 +1159,8 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[0]["discount_account"], "3736")
         self.assertEqual(rows[0]["discount_account_source"], "Mandantenstandard")
         self.assertIn("Mandantenstandard genutzt: Gegenkonto, Steuer, Skonto", rows[0]["export_warnings"])
+        self.assertIn("tenant_accounting_defaults_used", rows[0]["export_warning_codes"])
+        self.assertIn("accounting", rows[0]["export_warning_categories"])
         self.assertEqual(validate_booking_export_rows(rows), [])
 
     def test_booking_export_validation_blocks_invalid_numbers_and_missing_tax_fields(self):
@@ -1181,6 +1190,8 @@ class BookingSuggestionTests(TestCase):
         issues = validate_booking_export_rows(rows)
 
         self.assertEqual(issues[0]["errors"], ["Netto ist keine gültige Zahl", "Steuerangabe fehlt"])
+        self.assertEqual(issues[0]["error_codes"], ["invalid_number", "missing_tax_setting"])
+        self.assertEqual(issues[0]["error_categories"], ["tax"])
 
     def test_booking_export_validation_blocks_payment_adjustment_without_tax_split(self):
         rows = [

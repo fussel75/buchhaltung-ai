@@ -4940,18 +4940,50 @@ function groupedExportWarnings(rows, invalidDocuments = [], exportIssues = []) {
   ]);
 
   rows.forEach((row) => {
-    exportWarningList(row).forEach((warning) => {
-      incrementWarningGroup(groups, warning);
-    });
+    const categories = parseDelimitedList(row.export_warning_categories)
+      .map(normalizeWarningCategory)
+      .filter(Boolean);
+    if (categories.length) {
+      categories.forEach((category) => incrementWarningCategory(groups, category));
+      return;
+    }
+    exportWarningList(row).forEach((warning) => incrementWarningGroup(groups, warning));
   });
   invalidDocuments.forEach((document) => {
     (document.errors || []).forEach((error) => incrementWarningGroup(groups, error, true));
   });
   exportIssues.forEach((issue) => {
+    const categories = Array.isArray(issue.error_categories)
+      ? issue.error_categories.map(normalizeWarningCategory).filter(Boolean)
+      : parseDelimitedList(issue.error_categories).map(normalizeWarningCategory).filter(Boolean);
+    if (categories.length) {
+      categories.forEach((category) => incrementWarningCategory(groups, category, true));
+      return;
+    }
     (issue.errors || []).forEach((error) => incrementWarningGroup(groups, error, true));
   });
 
   return Array.from(groups.values()).filter((group) => group.count > 0);
+}
+
+function parseDelimitedList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean);
+  return String(value)
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizeWarningCategory(category) {
+  const key = String(category || "").trim().toLowerCase();
+  return ["accounting", "payment", "assignment", "tax", "export"].includes(key) ? key : "";
+}
+
+function incrementWarningCategory(groups, category, isBlocker = false) {
+  const group = groups.get(category) || groups.get("export");
+  group.count += 1;
+  if (isBlocker) group.severity = "blocker";
 }
 
 function incrementWarningGroup(groups, warning, isBlocker = false) {

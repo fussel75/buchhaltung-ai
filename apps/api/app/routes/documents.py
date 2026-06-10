@@ -91,6 +91,8 @@ BOOKING_EXPORT_FIELDNAMES = [
     "accounting_rule_status",
     "accounting_rule_matches",
     "export_warnings",
+    "export_warning_codes",
+    "export_warning_categories",
 ]
 
 
