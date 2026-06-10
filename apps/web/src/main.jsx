@@ -2443,6 +2443,7 @@ function ApprovalDialog({
     ["missing_accounting_rule", "ambiguous_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
   );
   const exportValidationIssues = (issues || []).filter((issue) => issue.code === "export_validation");
+  const approvalIssueGroups = groupedApprovalIssues(issues || []);
   const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
   const ambiguousAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "ambiguous_accounting_rule");
   const editableAccountingRuleIssues = accountingRuleIssues.filter((issue) =>
@@ -2520,6 +2521,17 @@ function ApprovalDialog({
           </p>
         ) : null}
         {isValidating ? <p className="approval-note">Freigabeprüfung läuft. Bitte kurz warten.</p> : null}
+        {approvalIssueGroups.length ? (
+          <div className="approval-issue-summary" aria-label="Freigabe-Ursachen">
+            {approvalIssueGroups.map((group) => (
+              <div className={`approval-issue-chip ${group.severity}`} key={group.key}>
+                <strong>{group.label}</strong>
+                <span>{group.count}</span>
+                <small>{group.help}</small>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {showGenericApprovalError ? <p className="approval-blocker">{error}</p> : null}
 
         {accountingRuleIssues.length ? (
@@ -5301,6 +5313,29 @@ function formatApprovalError(detail, status) {
 
 function extractApprovalIssues(detail) {
   return Array.isArray(detail?.details) ? detail.details : [];
+}
+
+function groupedApprovalIssues(issues) {
+  const groups = new Map([
+    ["accounting", { key: "accounting", label: "Kontierung", count: 0, severity: "blocker", help: "Regeln, Konten oder Skonto-Konten prüfen." }],
+    ["payment", { key: "payment", label: "Zahlung", count: 0, severity: "blocker", help: "Zahlungsentscheidung oder Skonto auswählen." }],
+    ["booking", { key: "booking", label: "Buchungszeilen", count: 0, severity: "blocker", help: "Kostenart, Betrag oder Split prüfen." }],
+    ["extraction", { key: "extraction", label: "Extraktion", count: 0, severity: "blocker", help: "Belegdaten und Warnungen prüfen." }],
+    ["export", { key: "export", label: "Export", count: 0, severity: "blocker", help: "Blocker für den Buchungsentwurf lösen." }],
+    ["status", { key: "status", label: "Status", count: 0, severity: "blocker", help: "Beleg zuerst in den passenden Review-Status bringen." }],
+    ["review", { key: "review", label: "Prüfung", count: 0, severity: "blocker", help: "Freigabehinweise prüfen." }],
+  ]);
+
+  issues.forEach((issue) => {
+    const key = groups.has(issue?.category) ? issue.category : "review";
+    const group = groups.get(key);
+    group.count += 1;
+    if (issue?.severity === "warning" && group.severity !== "blocker") {
+      group.severity = "warning";
+    }
+  });
+
+  return Array.from(groups.values()).filter((group) => group.count > 0);
 }
 
 function focusReviewDocumentCard(documentId, options = {}) {

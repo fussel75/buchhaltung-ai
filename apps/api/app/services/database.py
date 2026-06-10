@@ -1214,17 +1214,19 @@ def validate_document_review_export_details(document: dict[str, Any]) -> list[di
         row_type = issue.get("row_type")
         row_type_label = _booking_export_row_type_label(row_type)
         details.append(
-            {
-                "code": "export_validation",
-                "message": f"{line_label} ({row_type_label}): Exportprüfung blockiert: {', '.join(errors)}.",
-                "line_no": line_no,
-                "row_index": issue.get("row_index"),
-                "row_type": row_type,
-                "row_type_label": row_type_label,
-                "invoice_number": issue.get("invoice_number"),
-                "filename": issue.get("filename"),
-                "export_errors": errors,
-            }
+            enrich_review_validation_detail(
+                {
+                    "code": "export_validation",
+                    "message": f"{line_label} ({row_type_label}): Exportprüfung blockiert: {', '.join(errors)}.",
+                    "line_no": line_no,
+                    "row_index": issue.get("row_index"),
+                    "row_type": row_type,
+                    "row_type_label": row_type_label,
+                    "invoice_number": issue.get("invoice_number"),
+                    "filename": issue.get("filename"),
+                    "export_errors": errors,
+                }
+            )
         )
     return details
 
@@ -1401,6 +1403,69 @@ def _booking_export_issue_category(code: str) -> str:
     return "export"
 
 
+def enrich_review_validation_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    code = detail.get("code") or "review_validation"
+    field = detail.get("field")
+    metadata = _review_validation_metadata(code, field=field, line_no=detail.get("line_no"))
+    return {**metadata, **detail}
+
+
+def _review_validation_metadata(code: str, field: str | None = None, line_no: Any = None) -> dict[str, Any]:
+    category = "review"
+    action = "review_document"
+    target = "review"
+    severity = "blocker"
+
+    if code in {
+        "missing_accounting_rule",
+        "ambiguous_accounting_rule",
+        "incomplete_accounting_rule",
+        "missing_discount_account",
+    }:
+        category = "accounting"
+        target = "accounting_rules"
+        action = "create_accounting_rule" if code == "missing_accounting_rule" else "edit_accounting_rule"
+    elif code == "missing_payment_decision":
+        category = "payment"
+        target = "payment_terms"
+        action = "choose_payment_decision"
+    elif code in {"missing_booking_suggestions", "split_total_mismatch", "invalid_cost_category"}:
+        category = "booking"
+        target = "booking_lines"
+        action = "edit_booking_lines"
+    elif code in {"low_confidence", "open_warnings", "structured_validation_failed"}:
+        category = "extraction"
+        target = "extraction"
+        action = "review_extraction"
+    elif code == "export_validation":
+        category = "export"
+        target = "booking_export"
+        action = "fix_export_blocker"
+    elif code == "invalid_review_status":
+        category = "status"
+        target = "review_status"
+        action = "open_review"
+    elif field in {"supplier_name", "invoice_number", "invoice_date", "document_type", "currency"}:
+        category = "extraction"
+        target = "extraction"
+        action = "edit_extraction_field"
+    elif field in {"net_amount", "tax_amount", "gross_amount"} and line_no is None:
+        category = "extraction"
+        target = "extraction"
+        action = "edit_extraction_field"
+    elif field in {"booking_type", "cost_category", "description", "net_amount", "tax_amount", "gross_amount"}:
+        category = "booking"
+        target = "booking_lines"
+        action = "edit_booking_line"
+
+    return {
+        "category": category,
+        "severity": severity,
+        "action": action,
+        "target": target,
+    }
+
+
 def unique_preserving_order(values: list[str]) -> list[str]:
     seen = set()
     unique_values = []
@@ -1421,7 +1486,7 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
     tenant_defaults = _tenant_accounting_defaults(document.get("tenant_id"))
 
     def add_error(message: str, code: str = "review_validation", **context: Any) -> None:
-        errors.append({"code": code, "message": message, **context})
+        errors.append(enrich_review_validation_detail({"code": code, "message": message, **context}))
 
     required_extraction_fields = {
         "supplier_name": "Lieferant",

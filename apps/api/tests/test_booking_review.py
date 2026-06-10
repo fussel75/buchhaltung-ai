@@ -886,6 +886,9 @@ class BookingSuggestionTests(TestCase):
 
         self.assertFalse(result["is_ready"])
         self.assertEqual(result["details"][0]["code"], "invalid_review_status")
+        self.assertEqual(result["details"][0]["category"], "status")
+        self.assertEqual(result["details"][0]["action"], "open_review")
+        self.assertEqual(result["details"][0]["target"], "review_status")
         self.assertIn("Status Vorschlag", result["errors"][0])
 
     def test_payment_terms_for_incoming_invoice_discount(self):
@@ -2310,6 +2313,9 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(missing_rule["cost_category"], "material")
         self.assertEqual(missing_rule["cost_category_label"], "Material")
         self.assertEqual(missing_rule["suggested_name"], "Material Lüchau Baustoffe GmbH")
+        self.assertEqual(missing_rule["category"], "accounting")
+        self.assertEqual(missing_rule["action"], "create_accounting_rule")
+        self.assertEqual(missing_rule["target"], "accounting_rules")
 
     def test_review_validation_adds_bwa_hints_for_missing_accounting_rule(self):
         document = {
@@ -2542,6 +2548,8 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(export_detail["line_no"], 1)
         self.assertEqual(export_detail["row_type"], "cost")
         self.assertEqual(export_detail["export_errors"], ["Steuerangabe fehlt"])
+        self.assertEqual(export_detail["category"], "export")
+        self.assertEqual(export_detail["action"], "fix_export_blocker")
         self.assertEqual(errors, [export_detail["message"]])
 
     def test_review_validation_details_link_existing_accounting_rule_errors(self):
@@ -2595,6 +2603,8 @@ class BookingSuggestionTests(TestCase):
         incomplete = next(detail for detail in details if detail["code"] == "incomplete_accounting_rule")
         self.assertEqual(incomplete["accounting_rule_id"], rule_id)
         self.assertEqual(incomplete["accounting_rule_name"], "Material Foerch")
+        self.assertEqual(incomplete["category"], "accounting")
+        self.assertEqual(incomplete["action"], "edit_accounting_rule")
 
         no_discount_rule = {**incomplete_rule, "debit_account": "3400", "discount_account": ""}
         with patch.object(database_service, "list_accounting_rules", return_value=[no_discount_rule]):

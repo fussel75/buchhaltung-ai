@@ -1649,6 +1649,46 @@ code {
   line-height: 1.35;
 }
 
+.approval-issue-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approval-issue-chip {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 8px;
+  align-items: center;
+  min-width: 126px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: #f8fafc;
+}
+
+.approval-issue-chip strong,
+.approval-issue-chip span {
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.approval-issue-chip span {
+  justify-self: end;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: #111;
+  color: #fff;
+  font-weight: 800;
+}
+
+.approval-issue-chip small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
 .approval-fix-panel {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;

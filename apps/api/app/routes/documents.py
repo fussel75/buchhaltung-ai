@@ -33,6 +33,7 @@ from app.services.database import (
     validate_booking_export_rows,
     validate_document_review,
     validate_document_review_details,
+    enrich_review_validation_detail,
 )
 from app.services.bulk_jobs import run_document_bulk_job
 from app.services.extraction import run_mock_extraction
@@ -659,11 +660,13 @@ def get_review_validation(document_id: UUID, request: Request) -> dict[str, Any]
     details = []
     if document.get("status") != "review_ready":
         details.append(
-            {
-                "code": "invalid_review_status",
-                "message": "Finale Freigabe ist nur im Status Vorschlag möglich.",
-                "field": "status",
-            }
+            enrich_review_validation_detail(
+                {
+                    "code": "invalid_review_status",
+                    "message": "Finale Freigabe ist nur im Status Vorschlag möglich.",
+                    "field": "status",
+                }
+            )
         )
     details.extend(validate_document_review_details(document))
     return {
