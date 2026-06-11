@@ -1790,6 +1790,40 @@ code {
   min-height: 32px;
 }
 
+.approval-rule-action-cluster,
+.return-to-review-note {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fff;
+}
+
+.approval-rule-action-cluster > span,
+.return-to-review-note span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.approval-rule-action-cluster > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.approval-rule-action-cluster button {
+  min-height: 32px;
+  padding: 0 11px;
+}
+
+.return-to-review-note {
+  margin: 8px 0 12px;
+  border-color: #f3d0b6;
+  background: #fff8f2;
+}
+
 .approval-fix-details {
   grid-column: 1 / -1;
   border-top: 1px solid rgba(20, 26, 34, 0.08);

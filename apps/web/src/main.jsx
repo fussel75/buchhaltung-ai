@@ -874,13 +874,14 @@ function UploadApp() {
       id: `${Date.now()}-${issue?.cost_category || ""}-${issue?.supplier_name || ""}`,
       return_document_id: approvalDocument?.id || "",
       form: accountingRuleFormFromApprovalIssue(issue, approvalDocument),
+      focus_field: issue?.suggested_debit_account ? "credit_account" : "debit_account",
     });
     approvalValidationRequestRef.current += 1;
     setApprovalDocumentId(null);
     setApprovalError("");
     setApprovalIssues([]);
     setActiveView("masterdata");
-    setNotice("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
+    setNotice("Kontierungsregel in Stammdaten vorbereitet. Bitte Konten fachlich ergänzen und speichern.");
   }
 
   async function createAccountingRuleFromApproval(form, returnDocumentId) {
@@ -2631,17 +2632,32 @@ function ApprovalDialog({
             ) : null}
             {canPrepareAccountingRule && hasAccountingRuleActions ? (
               <div className="approval-fix-actions">
-                {dedupeAccountingRuleIssues(missingAccountingRuleIssues).map((issue) => (
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    key={`${issue.supplier_name || "-"}-${issue.cost_category || ""}-${issue.code}`}
-                    onClick={() => startInlineAccountingRule(issue)}
-                    disabled={issue.field === "cost_category" && !issue.cost_category}
-                  >
-                    {accountingRuleActionLabel(issue)}
-                  </button>
-                ))}
+                {dedupeAccountingRuleIssues(missingAccountingRuleIssues).map((issue) => {
+                  const isBlockedByMissingCostCategory = issue.field === "cost_category" && !issue.cost_category;
+                  return (
+                    <div className="approval-rule-action-cluster" key={`${issue.supplier_name || "-"}-${issue.cost_category || ""}-${issue.code}`}>
+                      <span>{accountingRuleIssueContext(issue) || "Kontierungsregel fehlt."}</span>
+                      <div>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => startInlineAccountingRule(issue)}
+                          disabled={isBlockedByMissingCostCategory}
+                        >
+                          Direkt anlegen
+                        </button>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => onPrepareAccountingRule(issue)}
+                          disabled={isBlockedByMissingCostCategory}
+                        >
+                          In Stammdaten öffnen
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
                 {dedupeAccountingRuleIssues(editableAccountingRuleIssues).map((issue) => (
                   <button
                     className="secondary-button"
@@ -3146,10 +3162,11 @@ function MasterdataAdmin({
     }));
     setAccountingReturnDocumentId(accountingRuleDraft.return_document_id || "");
     setMessageTone("notice");
-    setMessage("Kontierungsregel vorbereitet. Bitte Aufwandskonto und Gegenkonto ergänzen und speichern.");
+    setMessage("Kontierungsregel aus der Freigabe vorbereitet. Nach dem Speichern läuft die Freigabeprüfung erneut.");
     window.setTimeout(() => {
       accountingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      accountingSectionRef.current?.querySelector("input")?.focus();
+      const focusSelector = `[data-accounting-field="${accountingRuleDraft.focus_field || "debit_account"}"]`;
+      accountingSectionRef.current?.querySelector(focusSelector)?.focus();
     }, 0);
     onAccountingRuleDraftConsumed?.();
   }, [accountingRuleDraft, onAccountingRuleDraftConsumed]);
@@ -3914,15 +3931,21 @@ function MasterdataAdmin({
             </div>
             <StatusPill value={`${accountingRules.length} Regeln`} />
           </div>
+          {accountingReturnDocumentId ? (
+            <div className="return-to-review-note">
+              <strong>Freigabeprüfung wartet</strong>
+              <span>Diese Kontierungsregel wurde aus einer blockierten Freigabe geöffnet. Nach dem Speichern springt die App zurück und prüft den Beleg erneut.</span>
+            </div>
+          ) : null}
           <form className="form-grid accounting-form" onSubmit={createAccountingRule}>
             <FormField label="Name" error={fieldError(accountingFormErrors, "name")}>
-              <input placeholder="Material 19%" value={accountingForm.name} onChange={(event) => setAccountingForm({ ...accountingForm, name: event.target.value })} required />
+              <input data-accounting-field="name" placeholder="Material 19%" value={accountingForm.name} onChange={(event) => setAccountingForm({ ...accountingForm, name: event.target.value })} required />
             </FormField>
             <FormField label="Lieferant enthält" error={fieldError(accountingFormErrors, "supplier_match_text")}>
-              <input placeholder="optional, z.B. Lüchau" value={accountingForm.supplier_match_text} onChange={(event) => setAccountingForm({ ...accountingForm, supplier_match_text: event.target.value })} />
+              <input data-accounting-field="supplier_match_text" placeholder="optional, z.B. Lüchau" value={accountingForm.supplier_match_text} onChange={(event) => setAccountingForm({ ...accountingForm, supplier_match_text: event.target.value })} />
             </FormField>
             <FormField label="Kostenart" error={fieldError(accountingFormErrors, "cost_category")}>
-              <select value={accountingForm.cost_category} onChange={(event) => setAccountingForm({ ...accountingForm, cost_category: event.target.value })}>
+              <select data-accounting-field="cost_category" value={accountingForm.cost_category} onChange={(event) => setAccountingForm({ ...accountingForm, cost_category: event.target.value })}>
                 <option value="">Alle Kostenarten</option>
                 <option value="material">Material</option>
                 <option value="subcontractor">Fremdleistung</option>
@@ -3933,19 +3956,19 @@ function MasterdataAdmin({
               </select>
             </FormField>
             <FormField label="Aufwandskonto" error={fieldError(accountingFormErrors, "debit_account")}>
-              <input list="accounting-debit-options" placeholder="z.B. 3400" value={accountingForm.debit_account} onChange={(event) => setAccountingForm({ ...accountingForm, debit_account: event.target.value })} required />
+              <input data-accounting-field="debit_account" list="accounting-debit-options" placeholder="z.B. 3400" value={accountingForm.debit_account} onChange={(event) => setAccountingForm({ ...accountingForm, debit_account: event.target.value })} required />
             </FormField>
             <FormField label="Gegenkonto" error={fieldError(accountingFormErrors, "credit_account")}>
-              <input list="accounting-credit-options" placeholder="z.B. Kreditor/Sammelkonto" value={accountingForm.credit_account} onChange={(event) => setAccountingForm({ ...accountingForm, credit_account: event.target.value })} required />
+              <input data-accounting-field="credit_account" list="accounting-credit-options" placeholder="z.B. Kreditor/Sammelkonto" value={accountingForm.credit_account} onChange={(event) => setAccountingForm({ ...accountingForm, credit_account: event.target.value })} required />
             </FormField>
             <FormField label="Steuerschlüssel" error={fieldError(accountingFormErrors, "tax_key")}>
-              <input placeholder="optional" value={accountingForm.tax_key} onChange={(event) => setAccountingForm({ ...accountingForm, tax_key: event.target.value })} />
+              <input data-accounting-field="tax_key" placeholder="optional" value={accountingForm.tax_key} onChange={(event) => setAccountingForm({ ...accountingForm, tax_key: event.target.value })} />
             </FormField>
             <FormField label="Steuersatz" error={fieldError(accountingFormErrors, "tax_rate")}>
-              <input placeholder="19.00" value={accountingForm.tax_rate} onChange={(event) => setAccountingForm({ ...accountingForm, tax_rate: event.target.value })} />
+              <input data-accounting-field="tax_rate" placeholder="19.00" value={accountingForm.tax_rate} onChange={(event) => setAccountingForm({ ...accountingForm, tax_rate: event.target.value })} />
             </FormField>
             <FormField label="Skontokonto" error={fieldError(accountingFormErrors, "discount_account")}>
-              <input list="accounting-discount-options" placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
+              <input data-accounting-field="discount_account" list="accounting-discount-options" placeholder="optional" value={accountingForm.discount_account} onChange={(event) => setAccountingForm({ ...accountingForm, discount_account: event.target.value })} />
             </FormField>
             <button className="secondary-button" type="button" onClick={() => setAccountingForm((current) => applyAccountingSuggestions(current, tenantProfile))}>
               Leere Konten vorschlagen
@@ -5474,12 +5497,6 @@ function accountingRuleMatchLabel(rule) {
     rule?.cost_category_label || (rule?.cost_category ? formatCostCategory(rule.cost_category) : null),
   ].filter(Boolean);
   return details.length ? `${ruleName} (${details.join(", ")})` : ruleName;
-}
-
-function accountingRuleActionLabel(issue) {
-  return issue?.suggested_debit_account
-    ? `Regel anlegen (${issue.suggested_debit_account} aus BWA)`
-    : "Regel anlegen";
 }
 
 function findAccountingRuleForTarget(rules, target) {
