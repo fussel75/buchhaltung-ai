@@ -230,6 +230,7 @@ function UploadApp() {
   const [approvalError, setApprovalError] = useState("");
   const [approvalIssues, setApprovalIssues] = useState([]);
   const [highlightedBookingTarget, setHighlightedBookingTarget] = useState(null);
+  const [reviewFocusTarget, setReviewFocusTarget] = useState(null);
   const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
   const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
@@ -917,13 +918,16 @@ function UploadApp() {
   function focusBookingSuggestionFromApproval(issue) {
     if (!approvalDocument) return;
     const lineNo = issue?.line_no ? String(issue.line_no) : "";
+    const target = issue?.target === "booking_export"
+      ? "booking_lines"
+      : issue?.target || (lineNo ? "booking_lines" : "review");
     approvalValidationRequestRef.current += 1;
     setApprovalDocumentId(null);
     setApprovalError("");
     setApprovalIssues([]);
     setActiveView("review");
     setReviewFilter("all");
-    setFocusedReviewDocumentId(null);
+    setFocusedReviewDocumentId(approvalDocument.id);
     setExpandedDocumentIds((current) => (
       current.includes(approvalDocument.id) ? current : [...current, approvalDocument.id]
     ));
@@ -932,20 +936,14 @@ function UploadApp() {
       lineNo,
       rowType: issue?.row_type || "",
     });
-    setNotice(
-      lineNo
-        ? `Bitte Buchungszeile ${lineNo} prüfen und speichern. Danach die Freigabe erneut starten.`
-        : "Bitte Buchungsvorschlag prüfen und speichern. Danach die Freigabe erneut starten.",
-    );
-
-    window.setTimeout(() => {
-      const selector = lineNo
-        ? `[data-document-id="${approvalDocument.id}"] [data-booking-line="${lineNo}"]`
-        : `[data-document-id="${approvalDocument.id}"] .booking-suggestions`;
-      const element = window.document.querySelector(selector);
-      element?.scrollIntoView({ behavior: "smooth", block: "center" });
-      element?.querySelector?.("input, select, button")?.focus?.({ preventScroll: true });
-    }, 80);
+    setReviewFocusTarget({
+      documentId: approvalDocument.id,
+      target,
+      field: issue?.field || "",
+      lineNo,
+      action: issue?.action || "",
+    });
+    setNotice(reviewCorrectionNotice(issue));
   }
 
   const reopenReview = useCallback(
@@ -1660,7 +1658,7 @@ function UploadApp() {
         onOpenAccountingRules={openAccountingRulesFromApproval}
         onPrepareAccountingRule={prepareAccountingRuleFromApproval}
         onCreateAccountingRule={createAccountingRuleFromApproval}
-        onFixBookingSuggestion={focusBookingSuggestionFromApproval}
+        onFixReviewIssue={focusBookingSuggestionFromApproval}
       />
 
       <ReviewFocusDialog
@@ -1674,7 +1672,11 @@ function UploadApp() {
         positionLabel={focusedReviewPositionLabel}
         savingPaymentIds={savingPaymentIds}
         savingSuggestionIds={savingSuggestionIds}
-        onClose={() => setFocusedReviewDocumentId(null)}
+        focusTarget={reviewFocusTarget?.documentId === focusedReviewDocumentId ? reviewFocusTarget : null}
+        onClose={() => {
+          setFocusedReviewDocumentId(null);
+          setReviewFocusTarget(null);
+        }}
         onPrevious={() => moveFocusedReview(-1)}
         onNext={() => moveFocusedReview(1)}
         onSaveExtraction={saveExtraction}
@@ -1799,25 +1801,25 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, 
       ) : null}
       <div className="form-grid extraction-edit-grid">
         <FormField label="Lieferant">
-          <input value={form.supplier_name} onChange={(event) => updateField("supplier_name", event.target.value)} disabled={isApproved} />
+          <input name="supplier_name" value={form.supplier_name} onChange={(event) => updateField("supplier_name", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Rechnung">
-          <input value={form.invoice_number} onChange={(event) => updateField("invoice_number", event.target.value)} disabled={isApproved} />
+          <input name="invoice_number" value={form.invoice_number} onChange={(event) => updateField("invoice_number", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Datum">
-          <input type="date" value={form.invoice_date} onChange={(event) => updateField("invoice_date", event.target.value)} disabled={isApproved} />
+          <input name="invoice_date" type="date" value={form.invoice_date} onChange={(event) => updateField("invoice_date", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Kunden-Nr.">
-          <input value={form.customer_number} onChange={(event) => updateField("customer_number", event.target.value)} disabled={isApproved} />
+          <input name="customer_number" value={form.customer_number} onChange={(event) => updateField("customer_number", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Belegart">
-          <select value={form.document_type} onChange={(event) => updateField("document_type", event.target.value)} disabled={isApproved}>
+          <select name="document_type" value={form.document_type} onChange={(event) => updateField("document_type", event.target.value)} disabled={isApproved}>
             <option value="incoming_invoice">Eingangsrechnung</option>
             <option value="credit_note">Gutschrift</option>
           </select>
         </FormField>
         <FormField label="Kostenart">
-          <select value={form.cost_category} onChange={(event) => updateField("cost_category", event.target.value)} disabled={isApproved}>
+          <select name="cost_category" value={form.cost_category} onChange={(event) => updateField("cost_category", event.target.value)} disabled={isApproved}>
             <option value="">-</option>
             {COST_CATEGORY_OPTIONS.map(([category, label]) => (
               <option key={category} value={category}>{label}</option>
@@ -1825,43 +1827,43 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, 
           </select>
         </FormField>
         <FormField label={tenantProfile.assignment_code_label}>
-          <input placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
+          <input name="assignment_code" placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Zuordnungsart">
-          <select value={form.assignment_kind} onChange={(event) => updateField("assignment_kind", event.target.value)} disabled={isApproved}>
+          <select name="assignment_kind" value={form.assignment_kind} onChange={(event) => updateField("assignment_kind", event.target.value)} disabled={isApproved}>
             <option value="">-</option>
             <AssignmentKindOptions />
           </select>
         </FormField>
         <FormField label="Netto">
-          <input inputMode="decimal" value={form.net_amount} onChange={(event) => updateField("net_amount", event.target.value)} disabled={isApproved} />
+          <input name="net_amount" inputMode="decimal" value={form.net_amount} onChange={(event) => updateField("net_amount", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="USt">
-          <input inputMode="decimal" value={form.tax_amount} onChange={(event) => updateField("tax_amount", event.target.value)} disabled={isApproved} />
+          <input name="tax_amount" inputMode="decimal" value={form.tax_amount} onChange={(event) => updateField("tax_amount", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Brutto">
-          <input inputMode="decimal" value={form.gross_amount} onChange={(event) => updateField("gross_amount", event.target.value)} disabled={isApproved} />
+          <input name="gross_amount" inputMode="decimal" value={form.gross_amount} onChange={(event) => updateField("gross_amount", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Währung">
-          <input value={form.currency} onChange={(event) => updateField("currency", event.target.value.toUpperCase())} maxLength={3} disabled={isApproved} />
+          <input name="currency" value={form.currency} onChange={(event) => updateField("currency", event.target.value.toUpperCase())} maxLength={3} disabled={isApproved} />
         </FormField>
         <FormField label="Zahlbar bis">
-          <input type="date" value={form.due_date} onChange={(event) => updateField("due_date", event.target.value)} disabled={isApproved} />
+          <input name="due_date" type="date" value={form.due_date} onChange={(event) => updateField("due_date", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Skonto bis">
-          <input type="date" value={form.discount_due_date} onChange={(event) => updateField("discount_due_date", event.target.value)} disabled={isApproved} />
+          <input name="discount_due_date" type="date" value={form.discount_due_date} onChange={(event) => updateField("discount_due_date", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Skonto-Basis">
-          <input inputMode="decimal" value={form.discount_base} onChange={(event) => updateField("discount_base", event.target.value)} disabled={isApproved} />
+          <input name="discount_base" inputMode="decimal" value={form.discount_base} onChange={(event) => updateField("discount_base", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Skonto">
-          <input inputMode="decimal" value={form.discount_amount} onChange={(event) => updateField("discount_amount", event.target.value)} disabled={isApproved} />
+          <input name="discount_amount" inputMode="decimal" value={form.discount_amount} onChange={(event) => updateField("discount_amount", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Zahlbetrag Skonto">
-          <input inputMode="decimal" value={form.discounted_payable_amount} onChange={(event) => updateField("discounted_payable_amount", event.target.value)} disabled={isApproved} />
+          <input name="discounted_payable_amount" inputMode="decimal" value={form.discounted_payable_amount} onChange={(event) => updateField("discounted_payable_amount", event.target.value)} disabled={isApproved} />
         </FormField>
         <FormField label="Artikel / Leistung">
-          <input value={form.item_summary} onChange={(event) => updateField("item_summary", event.target.value)} disabled={isApproved} />
+          <input name="item_summary" value={form.item_summary} onChange={(event) => updateField("item_summary", event.target.value)} disabled={isApproved} />
         </FormField>
       </div>
       <div className="form-actions">
@@ -2190,6 +2192,7 @@ function ReviewFocusDialog({
   positionLabel,
   savingPaymentIds,
   savingSuggestionIds,
+  focusTarget,
   onClose,
   onPrevious,
   onNext,
@@ -2206,6 +2209,24 @@ function ReviewFocusDialog({
     setHasUnsavedExtractionChanges(false);
     setNavigationWarning("");
   }, [document?.id]);
+
+  useEffect(() => {
+    if (!document || !focusTarget) return undefined;
+    const timer = window.setTimeout(() => {
+      const sectionSelector = focusTarget.lineNo
+        ? `[data-booking-line="${focusTarget.lineNo}"]`
+        : `[data-review-section="${focusTarget.target}"]`;
+      const section = dialogRef.current?.querySelector(sectionSelector);
+      section?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const fieldSelector = focusTarget.field
+        ? `[name="${focusTarget.field}"], [data-field="${focusTarget.field}"]`
+        : "input:not([disabled]), select:not([disabled]), button:not([disabled])";
+      const focusable = section?.querySelector?.(fieldSelector)
+        || section?.querySelector?.("input:not([disabled]), select:not([disabled]), button:not([disabled])");
+      focusable?.focus?.({ preventScroll: true });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [document?.id, focusTarget]);
 
   function canLeaveCurrentDocument() {
     if (!hasUnsavedExtractionChanges) return true;
@@ -2322,16 +2343,18 @@ function ReviewFocusDialog({
         <div className="review-focus-body">
           <DocumentPreview document={document} />
           <div className="review-focus-data">
-            <ExtractionEditForm
-              document={document}
-              tenantProfile={tenantProfile}
-              isSaving={isSavingExtraction}
-              onDirtyChange={(isDirty) => {
-                setHasUnsavedExtractionChanges(isDirty);
-                if (!isDirty) setNavigationWarning("");
-              }}
-              onSave={onSaveExtraction}
-            />
+            <div data-review-section="extraction">
+              <ExtractionEditForm
+                document={document}
+                tenantProfile={tenantProfile}
+                isSaving={isSavingExtraction}
+                onDirtyChange={(isDirty) => {
+                  setHasUnsavedExtractionChanges(isDirty);
+                  if (!isDirty) setNavigationWarning("");
+                }}
+                onSave={onSaveExtraction}
+              />
+            </div>
             {document.extraction?.warnings?.length ? (
               <ul className="warnings">
                 {document.extraction.warnings.map((warning, index) => (
@@ -2354,6 +2377,7 @@ function ReviewFocusDialog({
             document={document}
             suggestions={document.booking_suggestions}
             tenantProfile={tenantProfile}
+            highlightedLineNo={focusTarget?.lineNo || ""}
             onSave={onSaveSuggestion}
             savingIds={savingSuggestionIds}
           />
@@ -2376,7 +2400,7 @@ function ApprovalDialog({
   onOpenAccountingRules,
   onPrepareAccountingRule,
   onCreateAccountingRule,
-  onFixBookingSuggestion,
+  onFixReviewIssue,
 }) {
   const dialogRef = useRef(null);
   const [inlineAccountingIssue, setInlineAccountingIssue] = useState(null);
@@ -2444,6 +2468,9 @@ function ApprovalDialog({
   );
   const exportValidationIssues = (issues || []).filter((issue) => issue.code === "export_validation");
   const approvalIssueGroups = groupedApprovalIssues(issues || []);
+  const correctionIssues = dedupeReviewCorrectionIssues((issues || []).filter((issue) =>
+    !accountingRuleIssues.includes(issue) && issue.code !== "export_validation" && issue.category !== "status",
+  ));
   const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
   const ambiguousAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "ambiguous_accounting_rule");
   const editableAccountingRuleIssues = accountingRuleIssues.filter((issue) =>
@@ -2533,6 +2560,27 @@ function ApprovalDialog({
           </div>
         ) : null}
         {showGenericApprovalError ? <p className="approval-blocker">{error}</p> : null}
+
+        {correctionIssues.length ? (
+          <div className="approval-correction-panel">
+            <div>
+              <strong>Direkt korrigieren</strong>
+              <span>Zum passenden Bereich im großen Prüffenster springen.</span>
+            </div>
+            <div className="approval-correction-actions">
+              {correctionIssues.map((issue, index) => (
+                <button
+                  className="secondary-button compact-button"
+                  type="button"
+                  key={`${issue.code || "issue"}-${issue.line_no || ""}-${issue.field || ""}-${index}`}
+                  onClick={() => onFixReviewIssue(issue)}
+                >
+                  {reviewCorrectionButtonLabel(issue)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {accountingRuleIssues.length ? (
           <div className="approval-fix-panel">
@@ -2778,7 +2826,7 @@ function ApprovalDialog({
                   <button
                     className="secondary-button compact-button"
                     type="button"
-                    onClick={() => onFixBookingSuggestion(issue)}
+                    onClick={() => onFixReviewIssue(issue)}
                   >
                     Zur Korrektur
                   </button>
@@ -4214,7 +4262,7 @@ function PaymentTerms({ document, rawResult, onSelect, isSaving }) {
   const isLocked = document.status === "review_approved";
 
   return (
-    <div className="payment-terms">
+    <div className="payment-terms" data-review-section="payment_terms">
       <h3>Zahlung und Skonto</h3>
       <div className="payment-table">
         <div className="payment-row payment-head">
@@ -4275,7 +4323,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, highlightedL
   }
 
   return (
-    <div className="booking-suggestions">
+    <div className="booking-suggestions" data-review-section="booking_lines">
       <div className="card-header">
         <div>
           <p className="eyebrow">Freigabe</p>
@@ -4813,6 +4861,7 @@ function apiFieldErrors(detail) {
 }
 
 function apiErrorFieldName(loc) {
+  if (typeof loc === "string") return loc;
   if (!Array.isArray(loc)) return "";
   const field = [...loc].reverse().find((part) => typeof part === "string" && part !== "body");
   return field || "";
@@ -4823,7 +4872,20 @@ function apiErrorFieldLabel(loc) {
   const labels = {
     match_text: "Erkennungstext",
     supplier_name: "Lieferant",
+    invoice_number: "Rechnung",
+    invoice_date: "Datum",
     customer_number: "Unsere Kunden-Nr.",
+    document_type: "Belegart",
+    net_amount: "Netto",
+    tax_amount: "USt",
+    gross_amount: "Brutto",
+    currency: "Währung",
+    due_date: "Zahlbar bis",
+    discount_due_date: "Skonto bis",
+    discount_base: "Skonto-Basis",
+    discount_amount: "Skonto",
+    discounted_payable_amount: "Zahlbetrag Skonto",
+    item_summary: "Artikel / Leistung",
     default_cost_category: "Kostenart",
     default_assignment_code: "Zuordnung",
     name: "Name",
@@ -5336,6 +5398,38 @@ function groupedApprovalIssues(issues) {
   });
 
   return Array.from(groups.values()).filter((group) => group.count > 0);
+}
+
+function dedupeReviewCorrectionIssues(issues) {
+  const seen = new Set();
+  return issues.filter((issue) => {
+    const key = `${issue.target || issue.category || ""}|${issue.line_no || ""}|${issue.field || ""}|${issue.code || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function reviewCorrectionButtonLabel(issue) {
+  if (issue?.target === "payment_terms" || issue?.category === "payment") return "Zahlung wählen";
+  if (issue?.target === "extraction" || issue?.category === "extraction") return issue?.field ? `Extraktion: ${apiErrorFieldLabel(issue.field)}` : "Extraktion prüfen";
+  if (issue?.target === "booking_lines" || issue?.category === "booking") return issue?.line_no ? `Zeile ${issue.line_no} prüfen` : "Buchungszeilen prüfen";
+  if (issue?.target === "booking_export" || issue?.category === "export") return "Exportblocker prüfen";
+  return "Zur Korrektur";
+}
+
+function reviewCorrectionNotice(issue) {
+  if (issue?.target === "payment_terms" || issue?.category === "payment") {
+    return "Bitte Zahlungsoption wählen. Danach die Freigabe erneut starten.";
+  }
+  if (issue?.target === "extraction" || issue?.category === "extraction") {
+    return "Bitte Extraktionsdaten prüfen und speichern. Danach die Freigabe erneut starten.";
+  }
+  const lineNo = issue?.line_no ? String(issue.line_no) : "";
+  if (lineNo) {
+    return `Bitte Buchungszeile ${lineNo} prüfen und speichern. Danach die Freigabe erneut starten.`;
+  }
+  return "Bitte Buchungsvorschlag prüfen und speichern. Danach die Freigabe erneut starten.";
 }
 
 function focusReviewDocumentCard(documentId, options = {}) {
