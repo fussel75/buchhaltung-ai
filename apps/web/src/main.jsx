@@ -233,6 +233,7 @@ function UploadApp() {
   const [reviewFocusTarget, setReviewFocusTarget] = useState(null);
   const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
   const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
+  const [assignmentUnitDraft, setAssignmentUnitDraft] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
   const approvalValidationRequestRef = useRef(0);
 
@@ -288,6 +289,7 @@ function UploadApp() {
     : "";
   const clearAccountingRuleDraft = useCallback(() => setAccountingRuleDraft(null), []);
   const clearAccountingRuleEditTarget = useCallback(() => setAccountingRuleEditTarget(null), []);
+  const clearAssignmentUnitDraft = useCallback(() => setAssignmentUnitDraft(null), []);
 
   const loadDocuments = useCallback(async () => {
     if (!activeTenantId) {
@@ -914,6 +916,25 @@ function UploadApp() {
     setApprovalIssues([]);
     setActiveView("masterdata");
     setNotice("Bitte die Kontierungsregeln prüfen und eindeutiger machen.");
+  }
+
+  function prepareAssignmentUnitFromApproval(issue) {
+    if (user?.role !== "admin") {
+      setNotice("Zuordnung braucht Stammdatenpflege. Bitte einen Admin bitten, die Zuordnung unter Stammdaten zu prüfen.");
+      return;
+    }
+    setAssignmentUnitDraft({
+      id: `${Date.now()}-${issue?.assignment_code || issue?.line_no || ""}`,
+      return_document_id: approvalDocument?.id || "",
+      form: assignmentUnitFormFromApprovalIssue(issue, approvalDocument, tenantProfile),
+      focus_field: issue?.assignment_code ? "label" : "code",
+    });
+    approvalValidationRequestRef.current += 1;
+    setApprovalDocumentId(null);
+    setApprovalError("");
+    setApprovalIssues([]);
+    setActiveView("masterdata");
+    setNotice(`${tenantProfile.assignment_label_singular} in Stammdaten vorbereitet. Bitte Angaben ergänzen und speichern.`);
   }
 
   function focusBookingSuggestionFromApproval(issue) {
@@ -1659,6 +1680,7 @@ function UploadApp() {
         onOpenAccountingRules={openAccountingRulesFromApproval}
         onPrepareAccountingRule={prepareAccountingRuleFromApproval}
         onCreateAccountingRule={createAccountingRuleFromApproval}
+        onPrepareAssignmentUnit={prepareAssignmentUnitFromApproval}
         onFixReviewIssue={focusBookingSuggestionFromApproval}
       />
 
@@ -1692,9 +1714,12 @@ function UploadApp() {
           tenantProfile={tenantProfile}
           accountingRuleDraft={accountingRuleDraft}
           accountingRuleEditTarget={accountingRuleEditTarget}
+          assignmentUnitDraft={assignmentUnitDraft}
           onAccountingRuleDraftConsumed={clearAccountingRuleDraft}
           onAccountingRuleEditTargetConsumed={clearAccountingRuleEditTarget}
           onAccountingRuleSaved={returnToApprovalAfterAccountingRule}
+          onAssignmentUnitDraftConsumed={clearAssignmentUnitDraft}
+          onAssignmentUnitSaved={returnToApprovalAfterAccountingRule}
           onProfileSaved={setTenantProfile}
         />
       ) : null}
@@ -2401,6 +2426,7 @@ function ApprovalDialog({
   onOpenAccountingRules,
   onPrepareAccountingRule,
   onCreateAccountingRule,
+  onPrepareAssignmentUnit,
   onFixReviewIssue,
 }) {
   const dialogRef = useRef(null);
@@ -2467,10 +2493,11 @@ function ApprovalDialog({
   const accountingRuleIssues = (issues || []).filter((issue) =>
     ["missing_accounting_rule", "ambiguous_accounting_rule", "incomplete_accounting_rule", "missing_discount_account"].includes(issue.code),
   );
+  const assignmentIssues = dedupeReviewCorrectionIssues((issues || []).filter((issue) => isAssignmentIssue(issue)));
   const exportValidationIssues = (issues || []).filter((issue) => issue.code === "export_validation");
   const approvalIssueGroups = groupedApprovalIssues(issues || []);
   const correctionIssues = dedupeReviewCorrectionIssues((issues || []).filter((issue) =>
-    !accountingRuleIssues.includes(issue) && issue.code !== "export_validation" && issue.category !== "status",
+    !accountingRuleIssues.includes(issue) && !assignmentIssues.includes(issue) && issue.code !== "export_validation" && issue.category !== "status",
   ));
   const missingAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "missing_accounting_rule");
   const ambiguousAccountingRuleIssues = accountingRuleIssues.filter((issue) => issue.code === "ambiguous_accounting_rule");
@@ -2578,6 +2605,40 @@ function ApprovalDialog({
                 >
                   {reviewCorrectionButtonLabel(issue)}
                 </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {assignmentIssues.length ? (
+          <div className="approval-assignment-panel">
+            <div>
+              <strong>Zuordnung prüfen</strong>
+              <span>Fehlende Zuordnung wird in der Buchungszeile ergänzt. Unbekannte Codes werden in Stammdaten angelegt.</span>
+            </div>
+            <div className="approval-assignment-actions">
+              {assignmentIssues.map((issue, index) => (
+                <div className="approval-rule-action-cluster" key={`${issue.code || "assignment"}-${issue.line_no || ""}-${issue.assignment_code || ""}-${index}`}>
+                  <span>{assignmentIssueContext(issue, tenantProfile)}</span>
+                  <div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => onFixReviewIssue({ ...issue, target: "booking_lines", action: "edit_booking_line" })}
+                    >
+                      Buchungszeile öffnen
+                    </button>
+                    {issue.code === "unknown_assignment" || issue.target === "assignment_units" ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => onPrepareAssignmentUnit(issue)}
+                      >
+                        In Stammdaten anlegen
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -3058,9 +3119,12 @@ function MasterdataAdmin({
   tenantProfile,
   accountingRuleDraft,
   accountingRuleEditTarget,
+  assignmentUnitDraft,
   onAccountingRuleDraftConsumed,
   onAccountingRuleEditTargetConsumed,
   onAccountingRuleSaved,
+  onAssignmentUnitDraftConsumed,
+  onAssignmentUnitSaved,
   onProfileSaved,
 }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
@@ -3074,6 +3138,7 @@ function MasterdataAdmin({
   const [accountingEditId, setAccountingEditId] = useState(null);
   const [accountingEditForm, setAccountingEditForm] = useState(null);
   const [accountingReturnDocumentId, setAccountingReturnDocumentId] = useState("");
+  const [assignmentReturnDocumentId, setAssignmentReturnDocumentId] = useState("");
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -3108,6 +3173,7 @@ function MasterdataAdmin({
   const [supplierEditErrors, setSupplierEditErrors] = useState({});
   const [accountingEditErrors, setAccountingEditErrors] = useState({});
   const accountingSectionRef = useRef(null);
+  const assignmentSectionRef = useRef(null);
   const savedAccountingFramework = accountingFramework(tenantProfile.accounting_framework);
   const profileAccountingFramework = accountingFramework(profileForm.accounting_framework);
   const hasUnsavedAccountingFramework = profileAccountingFramework !== savedAccountingFramework;
@@ -3172,6 +3238,23 @@ function MasterdataAdmin({
   }, [accountingRuleDraft, onAccountingRuleDraftConsumed]);
 
   useEffect(() => {
+    if (!assignmentUnitDraft?.form) return;
+    setAssignmentForm((current) => ({
+      ...current,
+      ...assignmentUnitDraft.form,
+    }));
+    setAssignmentReturnDocumentId(assignmentUnitDraft.return_document_id || "");
+    setMessageTone("notice");
+    setMessage(`${tenantProfile.assignment_label_singular} aus der Freigabe vorbereitet. Nach dem Speichern läuft die Freigabeprüfung erneut.`);
+    window.setTimeout(() => {
+      assignmentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusSelector = `[data-assignment-field="${assignmentUnitDraft.focus_field || "code"}"]`;
+      assignmentSectionRef.current?.querySelector(focusSelector)?.focus();
+    }, 0);
+    onAssignmentUnitDraftConsumed?.();
+  }, [assignmentUnitDraft, onAssignmentUnitDraftConsumed, tenantProfile.assignment_label_singular]);
+
+  useEffect(() => {
     if (!accountingRuleEditTarget || !accountingRules.length) return;
     const rule = findAccountingRuleForTarget(accountingRules, accountingRuleEditTarget);
     if (!rule) {
@@ -3222,8 +3305,16 @@ function MasterdataAdmin({
       aliases: "",
     });
     await loadMasterdata();
-    setMessageTone("notice");
-    setMessage("Zuordnung angelegt.");
+    if (assignmentReturnDocumentId) {
+      const returnDocumentId = assignmentReturnDocumentId;
+      setAssignmentReturnDocumentId("");
+      setMessageTone("notice");
+      setMessage("Zuordnung angelegt. Zurück zur Freigabeprüfung.");
+      onAssignmentUnitSaved?.(returnDocumentId);
+    } else {
+      setMessageTone("notice");
+      setMessage("Zuordnung angelegt.");
+    }
   }
 
   async function updateAssignment(assignment, payload) {
@@ -3656,7 +3747,7 @@ function MasterdataAdmin({
           </form>
         </section>
 
-        <section className="admin-card">
+        <section className="admin-card" ref={assignmentSectionRef}>
           <div className="card-header">
             <div>
               <p className="eyebrow">Kosten- und Umsatzzuordnung</p>
@@ -3664,15 +3755,21 @@ function MasterdataAdmin({
             </div>
             <StatusPill value={`${assignmentUnits.length} Einträge`} />
           </div>
+          {assignmentReturnDocumentId ? (
+            <div className="return-to-review-note">
+              <strong>Freigabeprüfung wartet</strong>
+              <span>Diese Zuordnung wurde aus einer blockierten Freigabe geöffnet. Nach dem Speichern springt die App zurück und prüft den Beleg erneut.</span>
+            </div>
+          ) : null}
           <form className="form-grid assignment-form" onSubmit={createAssignment}>
             <FormField label="Code">
-              <input placeholder="Wewe20" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
+              <input data-assignment-field="code" placeholder="Wewe20" value={assignmentForm.code} onChange={(event) => setAssignmentForm({ ...assignmentForm, code: event.target.value })} required />
             </FormField>
             <FormField label="Name">
-              <input placeholder="Weseler Weg 20" value={assignmentForm.label} onChange={(event) => setAssignmentForm({ ...assignmentForm, label: event.target.value })} required />
+              <input data-assignment-field="label" placeholder="Weseler Weg 20" value={assignmentForm.label} onChange={(event) => setAssignmentForm({ ...assignmentForm, label: event.target.value })} required />
             </FormField>
             <FormField label="Art">
-              <select value={assignmentForm.kind} onChange={(event) => setAssignmentForm({ ...assignmentForm, kind: event.target.value })}>
+              <select data-assignment-field="kind" value={assignmentForm.kind} onChange={(event) => setAssignmentForm({ ...assignmentForm, kind: event.target.value })}>
                 <option value="construction_project">Bauvorhaben</option>
                 <option value="location">Standort</option>
                 <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
@@ -3684,11 +3781,11 @@ function MasterdataAdmin({
             </FormField>
             {usesProjectNumber(assignmentForm.kind) ? (
               <FormField label="Projektnummer">
-                <input placeholder="25-00008" value={assignmentForm.project_number || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, project_number: event.target.value })} />
+                <input data-assignment-field="project_number" placeholder="25-00008" value={assignmentForm.project_number || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, project_number: event.target.value })} />
               </FormField>
             ) : null}
             <FormField label="Aliase">
-              <input placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
+              <input data-assignment-field="aliases" placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
             </FormField>
             <label className="toggle-field">
               <input type="checkbox" checked={assignmentForm.revenue_relevant} onChange={(event) => setAssignmentForm({ ...assignmentForm, revenue_relevant: event.target.checked })} />
@@ -5435,6 +5532,7 @@ function dedupeReviewCorrectionIssues(issues) {
 
 function reviewCorrectionButtonLabel(issue) {
   if (issue?.target === "payment_terms" || issue?.category === "payment") return "Zahlung wählen";
+  if (isAssignmentIssue(issue)) return issue?.code === "unknown_assignment" ? "Zuordnung anlegen" : "Zuordnung prüfen";
   if (issue?.target === "extraction" || issue?.category === "extraction") return issue?.field ? `Extraktion: ${apiErrorFieldLabel(issue.field)}` : "Extraktion prüfen";
   if (issue?.target === "booking_lines" || issue?.category === "booking") return issue?.line_no ? `Zeile ${issue.line_no} prüfen` : "Buchungszeilen prüfen";
   if (issue?.target === "booking_export" || issue?.category === "export") return "Exportblocker prüfen";
@@ -5448,11 +5546,48 @@ function reviewCorrectionNotice(issue) {
   if (issue?.target === "extraction" || issue?.category === "extraction") {
     return "Bitte Extraktionsdaten prüfen und speichern. Danach die Freigabe erneut starten.";
   }
+  if (isAssignmentIssue(issue)) {
+    return "Bitte Zuordnung prüfen und speichern. Danach die Freigabe erneut starten.";
+  }
   const lineNo = issue?.line_no ? String(issue.line_no) : "";
   if (lineNo) {
     return `Bitte Buchungszeile ${lineNo} prüfen und speichern. Danach die Freigabe erneut starten.`;
   }
   return "Bitte Buchungsvorschlag prüfen und speichern. Danach die Freigabe erneut starten.";
+}
+
+function isAssignmentIssue(issue) {
+  const errorCodes = Array.isArray(issue?.error_codes) ? issue.error_codes : [];
+  return issue?.code === "missing_assignment"
+    || issue?.code === "unknown_assignment"
+    || issue?.category === "assignment"
+    || issue?.target === "assignment_units"
+    || errorCodes.includes("missing_assignment")
+    || errorCodes.includes("unknown_assignment");
+}
+
+function assignmentIssueContext(issue, tenantProfile) {
+  const linePrefix = issue?.line_no ? `Zeile ${issue.line_no}: ` : "";
+  const assignmentLabel = tenantProfile?.assignment_label_singular || "Zuordnung";
+  if (issue?.assignment_code) {
+    return `${linePrefix}${assignmentLabel} ${issue.assignment_code} fehlt in den Stammdaten.`;
+  }
+  return `${linePrefix}${assignmentLabel} fehlt in der Buchungszeile.`;
+}
+
+function assignmentUnitFormFromApprovalIssue(issue, document, tenantProfile) {
+  const rawResult = document?.extraction?.raw_result || {};
+  const code = issue?.assignment_code || rawResult.assignment_code || rawResult.project_code || "";
+  const label = rawResult.delivery_address || rawResult.customer_reference || "";
+  const kind = issue?.assignment_kind || rawResult.assignment_kind || tenantProfile?.default_assignment_kind || "cost_object";
+  return {
+    code,
+    label: label && label !== code ? label : "",
+    kind,
+    project_number: "",
+    revenue_relevant: false,
+    aliases: "",
+  };
 }
 
 function focusReviewDocumentCard(documentId, options = {}) {

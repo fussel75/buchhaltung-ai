@@ -2552,6 +2552,69 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(export_detail["action"], "fix_export_blocker")
         self.assertEqual(errors, [export_detail["message"]])
 
+    def test_review_validation_blocks_unknown_assignment_code(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "normalized_filename": "ERg rechnung.pdf",
+            "status": "review_ready",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "7.37",
+                "tax_amount": "1.40",
+                "gross_amount": "8.77",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice", "assignment_kind": "construction_project"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "assignment_code": "Neula51",
+                    "assignment_kind": "construction_project",
+                    "net_amount": "7.37",
+                    "tax_amount": "1.40",
+                    "gross_amount": "8.77",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "8.77"},
+        }
+        rules = [
+            {
+                "name": "Material",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with (
+            patch.object(database_service, "list_accounting_rules", return_value=rules),
+            patch.object(database_service, "get_assignment_unit_by_code", return_value=None),
+        ):
+            details = validate_document_review_details(document)
+
+        assignment_detail = next(detail for detail in details if detail["code"] == "unknown_assignment")
+        self.assertEqual(assignment_detail["message"], "Zeile 1: Zuordnung Neula51 ist nicht in den Stammdaten angelegt.")
+        self.assertEqual(assignment_detail["category"], "assignment")
+        self.assertEqual(assignment_detail["target"], "assignment_units")
+        self.assertEqual(assignment_detail["action"], "create_assignment_unit")
+        self.assertEqual(assignment_detail["assignment_code"], "Neula51")
+        self.assertEqual(assignment_detail["assignment_kind"], "construction_project")
+
     def test_review_validation_details_link_existing_accounting_rule_errors(self):
         rule_id = str(uuid4())
         document = {

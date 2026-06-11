@@ -1396,7 +1396,7 @@ def _booking_export_issue_category(code: str) -> str:
         return "accounting"
     if code in {"invalid_payment_delta", "missing_payment_delta_amount", "payment_decision_default"}:
         return "payment"
-    if code == "missing_assignment":
+    if code in {"missing_assignment", "unknown_assignment"}:
         return "assignment"
     if code in {"missing_tax_setting", "missing_payment_adjustment_tax_split", "invalid_number"}:
         return "tax"
@@ -1433,6 +1433,14 @@ def _review_validation_metadata(code: str, field: str | None = None, line_no: An
         category = "booking"
         target = "booking_lines"
         action = "edit_booking_lines"
+    elif code == "missing_assignment":
+        category = "assignment"
+        target = "booking_lines"
+        action = "edit_booking_line"
+    elif code == "unknown_assignment":
+        category = "assignment"
+        target = "assignment_units"
+        action = "create_assignment_unit"
     elif code in {"low_confidence", "open_warnings", "structured_validation_failed"}:
         category = "extraction"
         target = "extraction"
@@ -1544,6 +1552,16 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 cost_category_label=_cost_category_label(cost_category),
             )
             continue
+        assignment_code = suggestion.get("assignment_code")
+        if assignment_code and not get_assignment_unit_by_code(document.get("tenant_id"), assignment_code):
+            add_error(
+                f"Zeile {line_no}: Zuordnung {assignment_code} ist nicht in den Stammdaten angelegt.",
+                code="unknown_assignment",
+                line_no=line_no,
+                field="assignment_code",
+                assignment_code=assignment_code,
+                assignment_kind=suggestion.get("assignment_kind") or raw_result.get("assignment_kind"),
+            )
         if cost_category:
             accounting_rule_matches = find_accounting_rule_matches(
                 tenant_id=document.get("tenant_id"),
