@@ -68,6 +68,7 @@ BOOKING_EXPORT_FIELDNAMES = [
     "cost_category",
     "assignment_kind",
     "assignment_code",
+    "assignment_project_number",
     "net_amount",
     "tax_amount",
     "gross_amount",

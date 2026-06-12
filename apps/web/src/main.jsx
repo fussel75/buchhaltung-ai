@@ -4751,6 +4751,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, highlightedL
                   <option value="subscription">Abo/Vertrag</option>
                   <option value="department">Bereich</option>
                 </select>
+                <small>Projektnr. {suggestion.assignment_project_number || "-"}</small>
               </div>
               <select
                 value={draft.cost_category}
@@ -4953,6 +4954,7 @@ function BookingPreviewLine({ row }) {
       </div>
       <div className="booking-preview-line-fields">
         <PreviewField label="Zuordnung" value={[formatAssignmentKind(row.assignment_kind), row.assignment_code].filter(Boolean).join(" ") || "-"} />
+        <PreviewField label="Projektnr." value={row.assignment_project_number || "-"} />
         <PreviewField label="Kostenart" value={formatCostCategory(row.cost_category)} />
         <PreviewField label="Konten" value={formatAccountPair(row)} />
         <PreviewField label="Steuer" value={[row.tax_key, row.tax_rate ? `${row.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"} />

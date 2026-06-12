@@ -1060,6 +1060,7 @@ class BookingSuggestionTests(TestCase):
                                 "cost_category": "material",
                                 "assignment_kind": "construction_project",
                                 "assignment_code": "Wewe20",
+                                "assignment_project_number": "25-00008",
                                 "description": "PE-Folie",
                                 "net_amount": "278.92",
                                 "tax_amount": "52.99",
@@ -1085,7 +1086,9 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[0]["debit_account"], "3400")
         self.assertEqual(rows[0]["credit_account"], "70000")
         self.assertEqual(rows[0]["tax_key"], "9")
+        self.assertEqual(rows[0]["assignment_project_number"], "25-00008")
         self.assertEqual(rows[1]["row_type"], "payment_adjustment")
+        self.assertEqual(rows[1]["assignment_project_number"], "25-00008")
         self.assertEqual(rows[1]["net_amount"], "-6.12")
         self.assertEqual(rows[1]["tax_amount"], "-1.16")
         self.assertEqual(rows[1]["gross_amount"], "-7.28")

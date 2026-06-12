@@ -106,6 +106,7 @@ def init_database() -> None:
                     booking_type text not null,
                     cost_category text,
                     assignment_code text,
+                    assignment_project_number text,
                     assignment_kind text,
                     description text,
                     net_amount numeric(12, 2),
@@ -304,6 +305,7 @@ def init_database() -> None:
                     on tenant_accounting_rules (tenant_id, is_active, cost_category)
                 """
             )
+            cursor.execute("alter table document_booking_suggestions add column if not exists assignment_project_number text")
             cursor.execute(
                 """
                 create table if not exists tenant_bwa_imports (
@@ -1830,14 +1832,15 @@ def prepare_document_review(document_id: UUID, actor: str = "system") -> dict[st
         with connection.cursor() as cursor:
             cursor.execute("delete from document_booking_suggestions where document_id = %s", (document_id,))
             for line_no, suggestion in enumerate(suggestions, start=1):
+                project_number = _assignment_project_number(document["tenant_id"], suggestion.get("assignment_code"))
                 cursor.execute(
                     """
                     insert into document_booking_suggestions (
                         id, document_id, tenant_id, line_no, booking_type, cost_category,
-                        assignment_code, assignment_kind, description, net_amount, tax_amount,
-                        gross_amount, currency, status, created_at, updated_at
+                        assignment_code, assignment_project_number, assignment_kind, description,
+                        net_amount, tax_amount, gross_amount, currency, status, created_at, updated_at
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'suggested', %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'suggested', %s, %s)
                     """,
                     (
                         uuid4(),
@@ -1847,6 +1850,7 @@ def prepare_document_review(document_id: UUID, actor: str = "system") -> dict[st
                         suggestion["booking_type"],
                         suggestion.get("cost_category"),
                         suggestion.get("assignment_code"),
+                        project_number,
                         suggestion.get("assignment_kind"),
                         suggestion.get("description"),
                         suggestion.get("net_amount"),
@@ -1889,6 +1893,7 @@ def update_booking_suggestion(
         raise ValueError("approved document cannot be edited")
 
     now = datetime.now(UTC)
+    assignment_project_number = _assignment_project_number(document["tenant_id"], values.get("assignment_code"))
     with _connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -1898,6 +1903,7 @@ def update_booking_suggestion(
                     booking_type = %s,
                     cost_category = %s,
                     assignment_code = %s,
+                    assignment_project_number = %s,
                     assignment_kind = %s,
                     description = %s,
                     net_amount = %s,
@@ -1913,6 +1919,7 @@ def update_booking_suggestion(
                     values.get("booking_type"),
                     values.get("cost_category"),
                     values.get("assignment_code"),
+                    assignment_project_number,
                     values.get("assignment_kind"),
                     values.get("description"),
                     values.get("net_amount"),
@@ -2062,6 +2069,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                 "cost_category": suggestion.get("cost_category"),
                 "assignment_kind": suggestion.get("assignment_kind"),
                 "assignment_code": suggestion.get("assignment_code"),
+                "assignment_project_number": _suggestion_project_number(document.get("tenant_id"), suggestion),
                 "description": suggestion.get("description"),
                 "net_amount": _money_string(suggestion.get("net_amount")),
                 "tax_amount": _money_string(suggestion.get("tax_amount")),
@@ -2113,6 +2121,7 @@ def _payment_adjustment_export_rows(
             "cost_category": cost_category or "payment_discount",
             "assignment_kind": suggestion.get("assignment_kind") if suggestion else None,
             "assignment_code": suggestion.get("assignment_code") if suggestion else None,
+            "assignment_project_number": _suggestion_project_number(document.get("tenant_id"), suggestion) if suggestion else None,
             "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
             "net_amount": _money_string(adjustment_net),
             "tax_amount": _money_string(adjustment_tax),
@@ -2123,6 +2132,19 @@ def _payment_adjustment_export_rows(
         _set_booking_export_warnings(row)
         rows.append(row)
     return rows
+
+
+def _assignment_project_number(tenant_id: str | None, assignment_code: str | None) -> str | None:
+    if not tenant_id or not assignment_code:
+        return None
+    assignment = get_assignment_unit_by_code(tenant_id, assignment_code)
+    return assignment.get("project_number") if assignment else None
+
+
+def _suggestion_project_number(tenant_id: str | None, suggestion: dict[str, Any] | None) -> str | None:
+    if not suggestion:
+        return None
+    return suggestion.get("assignment_project_number") or _assignment_project_number(tenant_id, suggestion.get("assignment_code"))
 
 
 def _payment_adjustment_net_tax(
@@ -3762,6 +3784,7 @@ def _serialize_booking_suggestion(row: dict[str, Any]) -> dict[str, Any]:
         "booking_type": row["booking_type"],
         "cost_category": row["cost_category"],
         "assignment_code": row["assignment_code"],
+        "assignment_project_number": row.get("assignment_project_number"),
         "assignment_kind": row["assignment_kind"],
         "description": row["description"],
         "net_amount": str(row["net_amount"]) if row["net_amount"] is not None else None,
