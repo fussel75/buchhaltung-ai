@@ -60,6 +60,11 @@ def _is_importable_attachment(filename: str, content_type: str) -> bool:
     return suffix in ALLOWED_UPLOAD_SUFFIXES and clean_content_type in ALLOWED_UPLOAD_CONTENT_TYPES
 
 
+def _normalized_search_criterion(value: str | None) -> str:
+    normalized = (value or "UNSEEN").strip().upper()
+    return normalized if normalized in {"UNSEEN", "ALL"} else "UNSEEN"
+
+
 def extract_importable_attachments(message: Message) -> list[ImportableEmailAttachment]:
     attachments: list[ImportableEmailAttachment] = []
     for part in message.walk():
@@ -97,7 +102,7 @@ async def import_email_attachments(tenant_id: str, limit: int | None = None) -> 
             "E-Mail-Import ist noch nicht konfiguriert. Bitte IMAP-Host, Benutzer und Passwort setzen."
         )
 
-    max_messages = max(1, min(limit or settings.email_import_limit, 100))
+    max_messages = max(1, min(limit or settings.email_import_limit, 500))
     imported: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
@@ -170,7 +175,7 @@ def _fetch_unseen_messages(max_messages: int) -> tuple[list[FetchedEmailMessage]
         if status != "OK":
             raise EmailImportConfigurationError(f"Postfach konnte nicht geöffnet werden: {settings.email_import_mailbox}")
 
-        status, payload = client.uid("search", None, "UNSEEN")
+        status, payload = client.uid("search", None, _normalized_search_criterion(settings.email_import_search))
         if status != "OK":
             raise EmailImportConfigurationError("Postfach konnte nicht durchsucht werden.")
 

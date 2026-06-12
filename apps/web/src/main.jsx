@@ -671,12 +671,15 @@ function UploadApp() {
       }
       await loadDocuments();
       const parts = [
+        `${result.scanned_messages ?? 0} Mails geprüft`,
         `${result.imported?.length ?? 0} importiert`,
         `${result.duplicates?.length ?? 0} Dubletten`,
         `${result.failed?.length ?? 0} fehlgeschlagen`,
       ];
       setNotice(`E-Mail-Import abgeschlossen: ${parts.join(", ")}.`);
-      if (result.skipped_attachments) {
+      if (!result.scanned_messages) {
+        setError("Keine ungelesenen Mails gefunden. Zum Testen eine neue ungelesene Mail senden oder EMAIL_IMPORT_SEARCH auf ALL setzen.");
+      } else if (result.skipped_attachments) {
         setError(`${result.skipped_attachments} Anhänge wurden übersprungen, weil Dateityp oder Inhalt nicht zum Belegimport passt.`);
       }
     } catch (importError) {

@@ -1,7 +1,7 @@
 from email.message import EmailMessage
 from unittest import TestCase
 
-from app.services.email_import import extract_importable_attachments
+from app.services.email_import import _normalized_search_criterion, extract_importable_attachments
 
 
 def build_message_with_attachments() -> EmailMessage:
@@ -38,6 +38,11 @@ def build_message_with_attachments() -> EmailMessage:
 
 
 class EmailImportTests(TestCase):
+    def test_normalizes_supported_search_criteria(self):
+        self.assertEqual(_normalized_search_criterion("ALL"), "ALL")
+        self.assertEqual(_normalized_search_criterion(" unseen "), "UNSEEN")
+        self.assertEqual(_normalized_search_criterion("DELETED"), "UNSEEN")
+
     def test_extract_importable_invoice_attachments(self):
         attachments = extract_importable_attachments(build_message_with_attachments())
 

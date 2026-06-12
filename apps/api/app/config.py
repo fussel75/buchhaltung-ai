@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     email_import_mark_seen: bool = True
     email_import_limit: int = 20
     email_import_max_message_bytes: int = 30 * 1024 * 1024
+    email_import_search: str = "ALL"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
