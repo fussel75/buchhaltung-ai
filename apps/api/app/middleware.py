@@ -28,4 +28,4 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 def _is_public_api_path(path: str) -> bool:
-    return path in {"/api/auth/login", "/api/auth/logout", "/api/health"}
+    return path in {"/api/auth/login", "/api/auth/logout", "/api/health", "/api/masterdata/assignment-units/sync"}

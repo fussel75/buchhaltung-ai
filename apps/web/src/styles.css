@@ -2392,23 +2392,13 @@ code {
   grid-column: span 2;
 }
 
-.assignment-form > .form-field:nth-child(1),
-.assignment-form > .form-field:nth-child(4) {
-  grid-column: span 2;
-}
-
-.assignment-form > .form-field:nth-child(2) {
-  grid-column: span 3;
-}
-
-.assignment-form > .form-field:nth-child(3),
-.assignment-form > .form-field:nth-child(5) {
+.assignment-form > .form-field {
   grid-column: span 2;
 }
 
 .assignment-form > .toggle-field,
 .assignment-form > button {
-  grid-column: span 1;
+  grid-column: span 2;
 }
 
 .accounting-form > button {
@@ -2527,7 +2517,12 @@ code {
 }
 
 .assignment-table .data-row {
-  grid-template-columns: minmax(120px, 0.9fr) minmax(125px, 0.8fr) minmax(170px, 1.15fr) minmax(140px, 0.9fr) minmax(140px, 0.9fr) minmax(120px, 0.75fr) minmax(95px, 0.65fr) minmax(125px, 0.75fr);
+  grid-template-columns: minmax(105px, 0.75fr) minmax(115px, 0.7fr) minmax(150px, 0.95fr) minmax(180px, 1.15fr) minmax(125px, 0.75fr) minmax(110px, 0.65fr) minmax(95px, 0.55fr) minmax(85px, 0.45fr) minmax(115px, 0.65fr);
+}
+
+.stacked-inputs {
+  display: grid;
+  gap: 6px;
 }
 
 .supplier-table .data-row {

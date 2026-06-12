@@ -2209,6 +2209,10 @@ class BookingSuggestionTests(TestCase):
             "label": "Weseler Weg 20",
             "kind": "construction_project",
             "project_number": None,
+            "address_line": None,
+            "postal_code": None,
+            "city": None,
+            "external_id": None,
             "revenue_relevant": True,
             "aliases": [],
             "is_active": True,
@@ -2224,6 +2228,10 @@ class BookingSuggestionTests(TestCase):
                 label="Weseler Weg 20",
                 kind="construction_project",
                 project_number="",
+                address_line="",
+                postal_code="",
+                city="",
+                external_id="",
                 revenue_relevant=True,
                 aliases=["Weseler Weg 20", ""],
                 is_active=True,
@@ -2232,7 +2240,45 @@ class BookingSuggestionTests(TestCase):
         params = cursor.statements[0][1]
         self.assertEqual(params[0], "Wewe20")
         self.assertIsNone(params[3])
+        self.assertIsNone(params[4])
         self.assertIsNone(assignment["project_number"])
+
+    def test_assignment_sync_token_allows_partner_api_without_session(self):
+        request = SimpleNamespace(headers={"authorization": "Bearer sync-token"}, state=SimpleNamespace())
+
+        with patch.object(masterdata_route, "get_settings", return_value=SimpleNamespace(partner_sync_tokens="demo-mandant:sync-token")):
+            tenant_id = masterdata_route._require_admin_or_sync_token(request, "anderer-mandant")
+
+        self.assertEqual(tenant_id, "demo-mandant")
+
+    def test_assignment_sync_without_token_requires_login(self):
+        request = SimpleNamespace(headers={}, state=SimpleNamespace())
+
+        with patch.object(masterdata_route, "get_settings", return_value=SimpleNamespace(partner_sync_tokens="demo-mandant:sync-token")):
+            with self.assertRaises(HTTPException) as context:
+                masterdata_route._require_admin_or_sync_token(request, "demo-mandant")
+
+        self.assertEqual(context.exception.status_code, 401)
+
+    def test_assignment_lookup_does_not_match_city_or_postal_code_only(self):
+        assignment = {
+            "code": "Wewe20",
+            "label": "Weseler Weg 20",
+            "project_number": "25-00008",
+            "address_line": "Weseler Weg 20",
+            "postal_code": "22045",
+            "city": "Hamburg",
+            "external_id": None,
+            "aliases": [],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            self.assertIsNone(database_service.find_assignment_unit_by_text("demo-mandant", "Rechnung aus Hamburg 22045"))
+            self.assertEqual(
+                database_service.find_assignment_unit_by_text("demo-mandant", "Lieferanschrift Weseler Weg 20"),
+                assignment,
+            )
 
     def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
         document = {

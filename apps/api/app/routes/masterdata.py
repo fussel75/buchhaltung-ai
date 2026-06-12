@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, field_validator
 
+from app.config import get_settings
 from app.routes.users import require_admin, require_tenant_access
 from app.services.cost_categories import CostCategory, invalid_cost_category_values
 from app.services.database import (
@@ -34,6 +35,10 @@ class AssignmentUnitRequest(BaseModel):
     label: str
     kind: str = "cost_object"
     project_number: str | None = None
+    address_line: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    external_id: str | None = None
     revenue_relevant: bool = False
     aliases: list[str] = []
     is_active: bool = True
@@ -44,9 +49,17 @@ class AssignmentUnitUpdateRequest(BaseModel):
     label: str
     kind: str = "cost_object"
     project_number: str | None = None
+    address_line: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    external_id: str | None = None
     revenue_relevant: bool = False
     aliases: list[str] = []
     is_active: bool = True
+
+
+class AssignmentUnitSyncRequest(BaseModel):
+    assignment_units: list[AssignmentUnitRequest]
 
 
 class SupplierRuleRequest(BaseModel):
@@ -106,6 +119,28 @@ def _normalize_tenant_id(tenant_id: str) -> str:
     if not normalized:
         raise HTTPException(status_code=400, detail="tenant_id is required")
     return normalized
+
+
+def _require_admin_or_sync_token(request: Request, tenant_id: str) -> str:
+    settings = get_settings()
+    auth_header = request.headers.get("authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+    token_tenant_id = _tenant_id_for_sync_token(settings.partner_sync_tokens, token)
+    if token_tenant_id:
+        return token_tenant_id
+    require_admin(request)
+    require_tenant_access(request, tenant_id)
+    return tenant_id
+
+
+def _tenant_id_for_sync_token(token_mapping: str | None, token: str) -> str | None:
+    if not token_mapping or not token:
+        return None
+    for entry in token_mapping.split(","):
+        tenant_id, separator, expected_token = entry.partition(":")
+        if separator and tenant_id.strip() and expected_token.strip() and token == expected_token.strip():
+            return _normalize_tenant_id(tenant_id)
+    return None
 
 
 @router.get("/bwa-imports")
@@ -226,6 +261,10 @@ def post_assignment_unit(
         label=payload.label,
         kind=payload.kind,
         project_number=payload.project_number,
+        address_line=payload.address_line,
+        postal_code=payload.postal_code,
+        city=payload.city,
+        external_id=payload.external_id,
         revenue_relevant=payload.revenue_relevant,
         aliases=payload.aliases,
         is_active=payload.is_active,
@@ -246,6 +285,10 @@ def patch_assignment_unit(
         label=payload.label,
         kind=payload.kind,
         project_number=payload.project_number,
+        address_line=payload.address_line,
+        postal_code=payload.postal_code,
+        city=payload.city,
+        external_id=payload.external_id,
         revenue_relevant=payload.revenue_relevant,
         aliases=payload.aliases,
         is_active=payload.is_active,
@@ -253,6 +296,33 @@ def patch_assignment_unit(
     if not assignment:
         raise HTTPException(status_code=404, detail="assignment unit not found")
     return {"assignment_unit": assignment}
+
+
+@router.post("/assignment-units/sync")
+def sync_assignment_units(
+    payload: AssignmentUnitSyncRequest,
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    normalized_tenant_id = _require_admin_or_sync_token(request, _normalize_tenant_id(tenant_id))
+    synced = [
+        create_assignment_unit(
+            tenant_id=normalized_tenant_id,
+            code=assignment.code,
+            label=assignment.label,
+            kind=assignment.kind,
+            project_number=assignment.project_number,
+            address_line=assignment.address_line,
+            postal_code=assignment.postal_code,
+            city=assignment.city,
+            external_id=assignment.external_id,
+            revenue_relevant=assignment.revenue_relevant,
+            aliases=assignment.aliases,
+            is_active=assignment.is_active,
+        )
+        for assignment in payload.assignment_units
+    ]
+    return {"assignment_units": synced, "synced_count": len(synced)}
 
 
 @router.get("/supplier-rules")

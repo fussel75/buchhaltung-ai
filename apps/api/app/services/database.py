@@ -233,6 +233,10 @@ def init_database() -> None:
                     label text not null,
                     kind text not null,
                     project_number text,
+                    address_line text,
+                    postal_code text,
+                    city text,
+                    external_id text,
                     revenue_relevant boolean not null default false,
                     aliases jsonb not null default '[]'::jsonb,
                     is_active boolean not null default true,
@@ -243,6 +247,10 @@ def init_database() -> None:
                 """
             )
             cursor.execute("alter table tenant_assignment_units add column if not exists project_number text")
+            cursor.execute("alter table tenant_assignment_units add column if not exists address_line text")
+            cursor.execute("alter table tenant_assignment_units add column if not exists postal_code text")
+            cursor.execute("alter table tenant_assignment_units add column if not exists city text")
+            cursor.execute("alter table tenant_assignment_units add column if not exists external_id text")
             cursor.execute(
                 """
                 create index if not exists tenant_assignment_units_tenant_idx
@@ -2618,23 +2626,33 @@ def delete_expired_sessions() -> None:
 def seed_demo_masterdata() -> None:
     ensure_tenant_profile("demo-mandant")
     existing = list_assignment_units("demo-mandant")
-    if not get_assignment_unit_by_code("demo-mandant", "Wewe20"):
+    wewe20 = get_assignment_unit_by_code("demo-mandant", "Wewe20")
+    if not wewe20 or not wewe20.get("address_line"):
         create_assignment_unit(
             tenant_id="demo-mandant",
             code="Wewe20",
             label="Weseler Weg 20",
             kind="construction_project",
             project_number="25-00008",
+            address_line="Weseler Weg 20",
+            postal_code="22045",
+            city="Hamburg",
+            external_id=None,
             revenue_relevant=True,
             aliases=["Weseler Weg 20", "Weseler Weg 20, 22045 Hamburg"],
         )
-    if not get_assignment_unit_by_code("demo-mandant", "Neula51"):
+    neula51 = get_assignment_unit_by_code("demo-mandant", "Neula51")
+    if not neula51 or not neula51.get("address_line"):
         create_assignment_unit(
             tenant_id="demo-mandant",
             code="Neula51",
             label="Neusurenland 51",
             kind="construction_project",
             project_number=None,
+            address_line="Neusurenland 51",
+            postal_code=None,
+            city=None,
+            external_id=None,
             revenue_relevant=True,
             aliases=["Neusurenland 51", "Kundenreferenz Neusurenland 51"],
         )
@@ -2911,6 +2929,10 @@ def create_assignment_unit(
     label: str,
     kind: str,
     project_number: str | None,
+    address_line: str | None,
+    postal_code: str | None,
+    city: str | None,
+    external_id: str | None,
     revenue_relevant: bool,
     aliases: list[str],
     is_active: bool = True,
@@ -2921,14 +2943,18 @@ def create_assignment_unit(
             cursor.execute(
                 """
                 insert into tenant_assignment_units (
-                    id, tenant_id, code, label, kind, project_number, revenue_relevant,
-                    aliases, is_active, created_at, updated_at
+                    id, tenant_id, code, label, kind, project_number, address_line, postal_code,
+                    city, external_id, revenue_relevant, aliases, is_active, created_at, updated_at
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (tenant_id, code) do update set
                     label = excluded.label,
                     kind = excluded.kind,
                     project_number = excluded.project_number,
+                    address_line = excluded.address_line,
+                    postal_code = excluded.postal_code,
+                    city = excluded.city,
+                    external_id = excluded.external_id,
                     revenue_relevant = excluded.revenue_relevant,
                     aliases = excluded.aliases,
                     is_active = excluded.is_active,
@@ -2942,6 +2968,10 @@ def create_assignment_unit(
                     label.strip(),
                     kind,
                     project_number.strip() if project_number else None,
+                    address_line.strip() if address_line else None,
+                    postal_code.strip() if postal_code else None,
+                    city.strip() if city else None,
+                    external_id.strip() if external_id else None,
                     revenue_relevant,
                     Jsonb([alias.strip() for alias in aliases if alias.strip()]),
                     is_active,
@@ -2958,6 +2988,10 @@ def update_assignment_unit(
     label: str,
     kind: str,
     project_number: str | None,
+    address_line: str | None,
+    postal_code: str | None,
+    city: str | None,
+    external_id: str | None,
     revenue_relevant: bool,
     aliases: list[str],
     is_active: bool,
@@ -2972,6 +3006,10 @@ def update_assignment_unit(
                     label = %s,
                     kind = %s,
                     project_number = %s,
+                    address_line = %s,
+                    postal_code = %s,
+                    city = %s,
+                    external_id = %s,
                     revenue_relevant = %s,
                     aliases = %s,
                     is_active = %s,
@@ -2984,6 +3022,10 @@ def update_assignment_unit(
                     label.strip(),
                     kind,
                     project_number.strip() if project_number else None,
+                    address_line.strip() if address_line else None,
+                    postal_code.strip() if postal_code else None,
+                    city.strip() if city else None,
+                    external_id.strip() if external_id else None,
                     revenue_relevant,
                     Jsonb([alias.strip() for alias in aliases if alias.strip()]),
                     is_active,
@@ -3002,7 +3044,15 @@ def find_assignment_unit_by_text(tenant_id: str, text: str | None) -> dict[str, 
     for assignment in list_assignment_units(tenant_id):
         if not assignment["is_active"]:
             continue
-        candidates = [assignment["code"], assignment["label"], assignment.get("project_number"), *assignment["aliases"]]
+        candidates = [
+            assignment["code"],
+            assignment["label"],
+            assignment.get("project_number"),
+            assignment.get("address_line"),
+            assignment.get("external_id"),
+            _assignment_address_text(assignment),
+            *assignment["aliases"],
+        ]
         if any(_normalize_match_text(candidate) in normalized_text for candidate in candidates if candidate):
             return assignment
     return None
@@ -3516,12 +3566,26 @@ def _serialize_assignment_unit(row: dict[str, Any]) -> dict[str, Any]:
         "label": row["label"],
         "kind": row["kind"],
         "project_number": row.get("project_number"),
+        "address_line": row.get("address_line"),
+        "postal_code": row.get("postal_code"),
+        "city": row.get("city"),
+        "external_id": row.get("external_id"),
+        "address": _assignment_address_text(row),
         "revenue_relevant": row["revenue_relevant"],
         "aliases": row["aliases"] or [],
         "is_active": row["is_active"],
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
     }
+
+
+def _assignment_address_text(row: dict[str, Any]) -> str | None:
+    line = row.get("address_line")
+    postal_code = row.get("postal_code")
+    city = row.get("city")
+    city_line = " ".join(part for part in [postal_code, city] if part)
+    parts = [part for part in [line, city_line] if part]
+    return ", ".join(parts) if parts else None
 
 
 def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     email_import_limit: int = 20
     email_import_max_message_bytes: int = 30 * 1024 * 1024
     email_import_search: str = "ALL"
+    partner_sync_tokens: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

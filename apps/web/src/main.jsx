@@ -3252,6 +3252,10 @@ function MasterdataAdmin({
     label: "",
     kind: "cost_object",
     project_number: "",
+    address_line: "",
+    postal_code: "",
+    city: "",
+    external_id: "",
     revenue_relevant: false,
     aliases: "",
   });
@@ -3412,6 +3416,10 @@ function MasterdataAdmin({
       label: "",
       kind: tenantProfile.default_assignment_kind || "cost_object",
       project_number: "",
+      address_line: "",
+      postal_code: "",
+      city: "",
+      external_id: "",
       revenue_relevant: false,
       aliases: "",
     });
@@ -3446,6 +3454,10 @@ function MasterdataAdmin({
         label: assignment.label,
         kind: assignment.kind,
         project_number: assignment.project_number,
+        address_line: assignment.address_line,
+        postal_code: assignment.postal_code,
+        city: assignment.city,
+        external_id: assignment.external_id,
         revenue_relevant: assignment.revenue_relevant,
         aliases: assignment.aliases ?? [],
         is_active: assignment.is_active,
@@ -3471,6 +3483,10 @@ function MasterdataAdmin({
       label: assignment.label || "",
       kind: assignment.kind || tenantProfile.default_assignment_kind || "cost_object",
       project_number: assignment.project_number || "",
+      address_line: assignment.address_line || "",
+      postal_code: assignment.postal_code || "",
+      city: assignment.city || "",
+      external_id: assignment.external_id || "",
       revenue_relevant: assignment.revenue_relevant,
       aliases: (assignment.aliases || []).join(", "),
       is_active: assignment.is_active,
@@ -3904,6 +3920,18 @@ function MasterdataAdmin({
                 <input data-assignment-field="project_number" placeholder="25-00008" value={assignmentForm.project_number || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, project_number: event.target.value })} />
               </FormField>
             ) : null}
+            <FormField label="Adresse">
+              <input data-assignment-field="address_line" placeholder="Weseler Weg 20" value={assignmentForm.address_line || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, address_line: event.target.value })} />
+            </FormField>
+            <FormField label="PLZ">
+              <input data-assignment-field="postal_code" placeholder="22045" value={assignmentForm.postal_code || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, postal_code: event.target.value })} />
+            </FormField>
+            <FormField label="Ort">
+              <input data-assignment-field="city" placeholder="Hamburg" value={assignmentForm.city || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, city: event.target.value })} />
+            </FormField>
+            <FormField label="Externe ID">
+              <input data-assignment-field="external_id" placeholder="Partner-ID optional" value={assignmentForm.external_id || ""} onChange={(event) => setAssignmentForm({ ...assignmentForm, external_id: event.target.value })} />
+            </FormField>
             <FormField label="Aliase">
               <input data-assignment-field="aliases" placeholder="Aliase, komma-getrennt" value={assignmentForm.aliases} onChange={(event) => setAssignmentForm({ ...assignmentForm, aliases: event.target.value })} />
             </FormField>
@@ -3918,6 +3946,7 @@ function MasterdataAdmin({
               <span>Code</span>
               <span>Projektnummer</span>
               <span>Name</span>
+              <span>Adresse</span>
               <span>Art</span>
               <span>Aliase</span>
               <span>Status</span>
@@ -3953,6 +3982,34 @@ function MasterdataAdmin({
                           onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, label: event.target.value })}
                           required
                         />
+                      </InlineEditField>
+                      <InlineEditField error={fieldError(assignmentEditErrors, "address_line")}>
+                        <div className="stacked-inputs">
+                          <input
+                            aria-label="Adresse"
+                            placeholder="Straße und Hausnummer"
+                            value={assignmentEditForm.address_line}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, address_line: event.target.value })}
+                          />
+                          <input
+                            aria-label="PLZ"
+                            placeholder="PLZ"
+                            value={assignmentEditForm.postal_code}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, postal_code: event.target.value })}
+                          />
+                          <input
+                            aria-label="Ort"
+                            placeholder="Ort"
+                            value={assignmentEditForm.city}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, city: event.target.value })}
+                          />
+                          <input
+                            aria-label="Externe ID"
+                            placeholder="Externe ID"
+                            value={assignmentEditForm.external_id}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, external_id: event.target.value })}
+                          />
+                        </div>
                       </InlineEditField>
                       <InlineEditField error={fieldError(assignmentEditErrors, "kind")}>
                         <select
@@ -4003,6 +4060,7 @@ function MasterdataAdmin({
                       <strong>{formatAssignmentCode(assignment.code, assignment.kind, tenantProfile)}</strong>
                       <span>{usesProjectNumber(assignment.kind) ? assignment.project_number || "-" : "-"}</span>
                       <span>{assignment.label}</span>
+                      <span>{formatAssignmentAddress(assignment)}</span>
                       <span>{formatAssignmentKind(assignment.kind, tenantProfile)}</span>
                       <span>{assignment.aliases?.length ? assignment.aliases.join(", ") : "-"}</span>
                       <StatusPill value={assignment.revenue_relevant ? "umsatzrelevant" : "intern"} tone={assignment.revenue_relevant ? "green" : "gray"} />
@@ -5364,6 +5422,11 @@ function formatAssignmentKind(value, tenantProfile = defaultTenantProfile("gener
 
 function usesProjectNumber(kind) {
   return ["construction_project", "construction_or_dropoff_site"].includes(kind);
+}
+
+function formatAssignmentAddress(assignment) {
+  const cityLine = [assignment?.postal_code, assignment?.city].filter(Boolean).join(" ");
+  return [assignment?.address_line, cityLine].filter(Boolean).join(", ") || "-";
 }
 
 function projectSummaryLines(rawResult, tenantProfile = defaultTenantProfile("general")) {
