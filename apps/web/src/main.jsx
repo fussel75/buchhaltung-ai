@@ -217,6 +217,7 @@ function UploadApp() {
   const [savingExtractionIds, setSavingExtractionIds] = useState([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
   const [exporting, setExporting] = useState("");
+  const [emailImporting, setEmailImporting] = useState(false);
   const [bookingPreview, setBookingPreview] = useState(null);
   const [exportMonth, setExportMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [uploadBatch, setUploadBatch] = useState(null);
@@ -653,6 +654,37 @@ function UploadApp() {
       setApprovingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
   }, [activeTenantId, apiFetch, isBulkPreparingReview, loadBulkJobs, loadDocuments, rememberBulkJob, reviewableDocuments]);
+
+  const runEmailImport = useCallback(async () => {
+    if (!activeTenantId || emailImporting) return;
+
+    setError("");
+    setNotice("");
+    setEmailImporting(true);
+    try {
+      const response = await apiFetch(`/email-import/run?tenant_id=${encodeURIComponent(activeTenantId)}`, {
+        method: "POST",
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(formatApiError(result.detail, `E-Mail-Import fehlgeschlagen: ${response.status}`));
+      }
+      await loadDocuments();
+      const parts = [
+        `${result.imported?.length ?? 0} importiert`,
+        `${result.duplicates?.length ?? 0} Dubletten`,
+        `${result.failed?.length ?? 0} fehlgeschlagen`,
+      ];
+      setNotice(`E-Mail-Import abgeschlossen: ${parts.join(", ")}.`);
+      if (result.skipped_attachments) {
+        setError(`${result.skipped_attachments} Anhänge wurden übersprungen, weil Dateityp oder Inhalt nicht zum Belegimport passt.`);
+      }
+    } catch (importError) {
+      setError(importError.message);
+    } finally {
+      setEmailImporting(false);
+    }
+  }, [activeTenantId, apiFetch, emailImporting, loadDocuments]);
 
   const deleteDocument = useCallback(
     async (document) => {
@@ -1424,6 +1456,16 @@ function UploadApp() {
           </div>
           <div className="queue-tools">
             <div className="queue-primary-actions">
+              {user?.role === "admin" ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={runEmailImport}
+                  disabled={!activeTenantId || emailImporting}
+                >
+                  {emailImporting ? "Emails werden abgerufen..." : "Emails abrufen"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={startBulkExtraction}

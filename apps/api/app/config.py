@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
     session_days: int = 30
     max_upload_size_bytes: int = 25 * 1024 * 1024
+    email_import_host: str | None = None
+    email_import_port: int = 993
+    email_import_username: str | None = None
+    email_import_password: str | None = None
+    email_import_mailbox: str = "INBOX"
+    email_import_use_ssl: bool = True
+    email_import_mark_seen: bool = True
+    email_import_limit: int = 20
+    email_import_max_message_bytes: int = 30 * 1024 * 1024
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
