@@ -2026,6 +2026,24 @@ def select_payment_decision(
 
 def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    project_number_maps: dict[str, dict[str, str | None]] = {}
+
+    def project_number_for(tenant_id: str | None, suggestion: dict[str, Any] | None) -> str | None:
+        if not tenant_id or not suggestion:
+            return None
+        if suggestion.get("assignment_project_number"):
+            return suggestion.get("assignment_project_number")
+        assignment_code = _normalize_assignment_code_key(suggestion.get("assignment_code"))
+        if not assignment_code:
+            return None
+        if tenant_id not in project_number_maps:
+            project_number_maps[tenant_id] = {
+                _normalize_assignment_code_key(unit["code"]): unit.get("project_number")
+                for unit in list_assignment_units(tenant_id)
+                if _normalize_assignment_code_key(unit["code"])
+            }
+        return project_number_maps[tenant_id].get(assignment_code)
+
     for document in documents:
         if document.get("status") != "review_approved":
             continue
@@ -2069,7 +2087,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
                 "cost_category": suggestion.get("cost_category"),
                 "assignment_kind": suggestion.get("assignment_kind"),
                 "assignment_code": suggestion.get("assignment_code"),
-                "assignment_project_number": _suggestion_project_number(document.get("tenant_id"), suggestion),
+                "assignment_project_number": project_number_for(document.get("tenant_id"), suggestion),
                 "description": suggestion.get("description"),
                 "net_amount": _money_string(suggestion.get("net_amount")),
                 "tax_amount": _money_string(suggestion.get("tax_amount")),
@@ -2080,7 +2098,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
             _set_booking_export_warnings(row)
             rows.append(row)
 
-        rows.extend(_payment_adjustment_export_rows(document, common, extraction, payment_decision, supplier_name))
+        rows.extend(_payment_adjustment_export_rows(document, common, extraction, payment_decision, supplier_name, project_number_for))
     return rows
 
 
@@ -2090,6 +2108,7 @@ def _payment_adjustment_export_rows(
     extraction: dict[str, Any],
     payment_decision: dict[str, Any] | None,
     supplier_name: str | None,
+    project_number_for,
 ) -> list[dict[str, Any]]:
     payment_delta = _payment_delta(extraction, payment_decision)
     if payment_delta is None or payment_delta == Decimal("0.00"):
@@ -2121,7 +2140,7 @@ def _payment_adjustment_export_rows(
             "cost_category": cost_category or "payment_discount",
             "assignment_kind": suggestion.get("assignment_kind") if suggestion else None,
             "assignment_code": suggestion.get("assignment_code") if suggestion else None,
-            "assignment_project_number": _suggestion_project_number(document.get("tenant_id"), suggestion) if suggestion else None,
+            "assignment_project_number": project_number_for(document.get("tenant_id"), suggestion),
             "description": payment_decision.get("label") if payment_decision else "Zahlungsdifferenz",
             "net_amount": _money_string(adjustment_net),
             "tax_amount": _money_string(adjustment_tax),
@@ -2141,10 +2160,11 @@ def _assignment_project_number(tenant_id: str | None, assignment_code: str | Non
     return assignment.get("project_number") if assignment else None
 
 
-def _suggestion_project_number(tenant_id: str | None, suggestion: dict[str, Any] | None) -> str | None:
-    if not suggestion:
+def _normalize_assignment_code_key(code: str | None) -> str | None:
+    if not code:
         return None
-    return suggestion.get("assignment_project_number") or _assignment_project_number(tenant_id, suggestion.get("assignment_code"))
+    normalized = code.strip().casefold()
+    return normalized or None
 
 
 def _payment_adjustment_net_tax(

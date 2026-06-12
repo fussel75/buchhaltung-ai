@@ -539,6 +539,10 @@ class BookingSuggestionTests(TestCase):
         safe_rows = documents_route._csv_safe_rows(rows, documents_route.BOOKING_EXPORT_FIELDNAMES)
 
         self.assertEqual(list(safe_rows[0].keys()), documents_route.BOOKING_EXPORT_FIELDNAMES)
+        self.assertEqual(
+            documents_route.BOOKING_EXPORT_FIELDNAMES.index("assignment_project_number"),
+            documents_route.BOOKING_EXPORT_FIELDNAMES.index("assignment_code") + 1,
+        )
         self.assertEqual(safe_rows[0]["tenant_id"], "demo-mandant")
         self.assertEqual(safe_rows[0]["invoice_number"], "R-1")
         self.assertEqual(safe_rows[0]["document_id"], "")
@@ -1032,6 +1036,10 @@ class BookingSuggestionTests(TestCase):
                     "is_active": True,
                 }
             ],
+        ), patch.object(
+            database_service,
+            "list_assignment_units",
+            return_value=[{"code": "Wewe20", "project_number": "25-00008"}],
         ):
             rows = build_booking_export_rows(
                 [
@@ -1059,8 +1067,7 @@ class BookingSuggestionTests(TestCase):
                                 "booking_type": "incoming_invoice",
                                 "cost_category": "material",
                                 "assignment_kind": "construction_project",
-                                "assignment_code": "Wewe20",
-                                "assignment_project_number": "25-00008",
+                                "assignment_code": " wewe20 ",
                                 "description": "PE-Folie",
                                 "net_amount": "278.92",
                                 "tax_amount": "52.99",
