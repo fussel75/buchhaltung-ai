@@ -356,25 +356,21 @@ def init_database() -> None:
                 """
                 do $$
                 declare
-                    action_constraint_name text;
+                    action_constraint record;
                 begin
-                    select conname into action_constraint_name
-                    from pg_constraint
-                    where conrelid = 'document_bulk_jobs'::regclass
-                        and contype = 'c'
-                        and pg_get_constraintdef(oid) like '%action%'
-                        and pg_get_constraintdef(oid) like '%prepare_review%';
-
-                    if action_constraint_name is not null then
-                        execute format('alter table document_bulk_jobs drop constraint %I', action_constraint_name);
-                    end if;
+                    for action_constraint in
+                        select conname
+                        from pg_constraint
+                        where conrelid = 'document_bulk_jobs'::regclass
+                            and contype = 'c'
+                            and pg_get_constraintdef(oid) like '%action%'
+                    loop
+                        execute format('alter table document_bulk_jobs drop constraint %I', action_constraint.conname);
+                    end loop;
 
                     alter table document_bulk_jobs
                         add constraint document_bulk_jobs_action_check
                         check (action in ('extract', 'reextract', 'prepare_review'));
-                exception
-                    when duplicate_object then
-                        null;
                 end $$;
                 """
             )
