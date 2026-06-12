@@ -2628,7 +2628,7 @@ function ApprovalDialog({
                     >
                       Buchungszeile öffnen
                     </button>
-                    {issue.code === "unknown_assignment" || issue.target === "assignment_units" ? (
+                    {issue.code === "unknown_assignment" || issue.assignment_hint || issue.target === "assignment_units" ? (
                       <button
                         className="secondary-button"
                         type="button"
@@ -5572,13 +5572,16 @@ function assignmentIssueContext(issue, tenantProfile) {
   if (issue?.assignment_code) {
     return `${linePrefix}${assignmentLabel} ${issue.assignment_code} fehlt in den Stammdaten.`;
   }
+  if (issue?.assignment_hint) {
+    return `${linePrefix}${assignmentLabel} zu "${issue.assignment_hint}" ist noch nicht eindeutig zugeordnet.`;
+  }
   return `${linePrefix}${assignmentLabel} fehlt in der Buchungszeile.`;
 }
 
 function assignmentUnitFormFromApprovalIssue(issue, document, tenantProfile) {
   const rawResult = document?.extraction?.raw_result || {};
   const code = issue?.assignment_code || rawResult.assignment_code || rawResult.project_code || "";
-  const label = rawResult.delivery_address || rawResult.customer_reference || "";
+  const label = issue?.assignment_hint || rawResult.customer_reference || rawResult.delivery_address || "";
   const kind = issue?.assignment_kind || rawResult.assignment_kind || tenantProfile?.default_assignment_kind || "cost_object";
   return {
     code,

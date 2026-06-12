@@ -1485,6 +1485,26 @@ def unique_preserving_order(values: list[str]) -> list[str]:
     return unique_values
 
 
+ASSIGNMENT_RELEVANT_COST_CATEGORIES = {"material", "subcontractor"}
+
+
+def _assignment_resolution_hint(raw_result: dict[str, Any]) -> str | None:
+    return (
+        raw_result.get("customer_reference")
+        or raw_result.get("delivery_address")
+        or raw_result.get("project_name")
+    )
+
+
+def _requires_assignment_resolution(suggestion: dict[str, Any], raw_result: dict[str, Any]) -> bool:
+    if raw_result.get("assignment_type") != "assignment_unresolved":
+        return False
+    cost_category = suggestion.get("cost_category") or raw_result.get("cost_category")
+    if cost_category not in ASSIGNMENT_RELEVANT_COST_CATEGORIES:
+        return False
+    return bool(_assignment_resolution_hint(raw_result))
+
+
 def validate_document_review_details(document: dict[str, Any]) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
     extraction = document.get("extraction") or {}
@@ -1560,6 +1580,16 @@ def validate_document_review_details(document: dict[str, Any]) -> list[dict[str,
                 line_no=line_no,
                 field="assignment_code",
                 assignment_code=assignment_code,
+                assignment_kind=suggestion.get("assignment_kind") or raw_result.get("assignment_kind"),
+            )
+        elif not assignment_code and _requires_assignment_resolution(suggestion, raw_result):
+            assignment_hint = _assignment_resolution_hint(raw_result)
+            add_error(
+                f"Zeile {line_no}: Zuordnung fehlt, obwohl der Beleg einen Projekt-/Zuordnungshinweis enthält.",
+                code="missing_assignment",
+                line_no=line_no,
+                field="assignment_code",
+                assignment_hint=assignment_hint,
                 assignment_kind=suggestion.get("assignment_kind") or raw_result.get("assignment_kind"),
             )
         if cost_category:

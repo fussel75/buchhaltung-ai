@@ -2615,6 +2615,126 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(assignment_detail["assignment_code"], "Neula51")
         self.assertEqual(assignment_detail["assignment_kind"], "construction_project")
 
+    def test_review_validation_blocks_unresolved_project_assignment(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "normalized_filename": "ERg rechnung.pdf",
+            "status": "review_ready",
+            "extraction": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "net_amount": "7.37",
+                "tax_amount": "1.40",
+                "gross_amount": "8.77",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {
+                    "document_type": "incoming_invoice",
+                    "assignment_type": "assignment_unresolved",
+                    "assignment_kind": "construction_project",
+                    "customer_reference": "Neusurenland 51",
+                },
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "description": "Zargenschaum",
+                    "assignment_code": None,
+                    "assignment_kind": "construction_project",
+                    "net_amount": "7.37",
+                    "tax_amount": "1.40",
+                    "gross_amount": "8.77",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "8.77"},
+        }
+        rules = [
+            {
+                "name": "Material",
+                "supplier_match_text": None,
+                "cost_category": "material",
+                "debit_account": "3400",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            details = validate_document_review_details(document)
+
+        assignment_detail = next(detail for detail in details if detail["code"] == "missing_assignment")
+        self.assertEqual(
+            assignment_detail["message"],
+            "Zeile 1: Zuordnung fehlt, obwohl der Beleg einen Projekt-/Zuordnungshinweis enthält.",
+        )
+        self.assertEqual(assignment_detail["category"], "assignment")
+        self.assertEqual(assignment_detail["target"], "booking_lines")
+        self.assertEqual(assignment_detail["action"], "edit_booking_line")
+        self.assertEqual(assignment_detail["assignment_hint"], "Neusurenland 51")
+
+    def test_review_validation_allows_general_cost_without_assignment(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "software.pdf",
+            "normalized_filename": "ERg software.pdf",
+            "status": "review_ready",
+            "extraction": {
+                "supplier_name": "Software GmbH",
+                "invoice_number": "S-1",
+                "invoice_date": "2026-05-21",
+                "net_amount": "100.00",
+                "tax_amount": "19.00",
+                "gross_amount": "119.00",
+                "currency": "EUR",
+                "confidence": Decimal("0.90"),
+                "warnings": [],
+                "raw_result": {"document_type": "incoming_invoice", "assignment_type": "general_cost"},
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "software_subscription",
+                    "description": "Software-Abo",
+                    "assignment_code": None,
+                    "net_amount": "100.00",
+                    "tax_amount": "19.00",
+                    "gross_amount": "119.00",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "119.00"},
+        }
+        rules = [
+            {
+                "name": "Software",
+                "supplier_match_text": None,
+                "cost_category": "software_subscription",
+                "debit_account": "4964",
+                "credit_account": "70000",
+                "tax_key": "9",
+                "tax_rate": "19.00",
+                "discount_account": "3736",
+                "is_active": True,
+            }
+        ]
+
+        with patch.object(database_service, "list_accounting_rules", return_value=rules):
+            details = validate_document_review_details(document)
+
+        self.assertFalse(any(detail["code"] == "missing_assignment" for detail in details))
+
     def test_review_validation_details_link_existing_accounting_rule_errors(self):
         rule_id = str(uuid4())
         document = {
