@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: deploy-vps
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -48,15 +48,15 @@ jobs:
             -i ~/.ssh/id_ed25519
             -o BatchMode=yes
             -o IdentitiesOnly=yes
-            -o ConnectTimeout=20
+            -o ConnectTimeout=30
             -o ServerAliveInterval=15
-            -o ServerAliveCountMax=2
+            -o ServerAliveCountMax=3
             -o StrictHostKeyChecking=yes
           )
 
           deploy_log="$(mktemp)"
 
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
             set +e
             ssh "${ssh_options[@]}" "root@$SSH_HOST" \
               "cd /docker/buchhaltung-ai && git pull --ff-only && docker compose up -d --build" \
@@ -75,13 +75,13 @@ jobs:
               exit "$status"
             fi
 
-            if [ "$attempt" -eq 5 ]; then
+            if [ "$attempt" -eq 10 ]; then
               tail_summary="$(tail -n 20 "$deploy_log" | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r/%0D/g')"
               echo "::error title=SSH connection failed::${tail_summary}"
-              echo "SSH connection failed after 5 attempts."
+              echo "SSH connection failed after 10 attempts."
               exit 255
             fi
 
-            echo "SSH connection failed. Retrying in 10s (${attempt}/5)..."
-            sleep 10
+            echo "SSH connection failed. Retrying in 20s (${attempt}/10)..."
+            sleep 20
           done
