@@ -22,7 +22,7 @@ from app.services.database import (
 )
 
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
-REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready", "review_approved"}
+REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready"}
 
 
 def run_mock_extraction(

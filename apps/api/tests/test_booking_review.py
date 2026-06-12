@@ -1864,6 +1864,29 @@ class BookingSuggestionTests(TestCase):
         save_extraction.assert_not_called()
         insert_audit_event.assert_not_called()
 
+    def test_force_reextract_blocks_finally_approved_documents(self):
+        document_id = uuid4()
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "status": "review_approved",
+            "original_filename": "rechnung.pdf",
+            "processing_job_id": None,
+            "extraction": {"id": str(uuid4())},
+        }
+
+        with (
+            patch.object(extraction_service, "get_document", return_value=document),
+            patch.object(extraction_service, "save_document_extraction") as save_extraction,
+            patch.object(extraction_service, "insert_audit_event") as insert_audit_event,
+        ):
+            with self.assertRaises(HTTPException) as context:
+                run_mock_extraction(document_id, force=True)
+
+        self.assertEqual(context.exception.status_code, 409)
+        save_extraction.assert_not_called()
+        insert_audit_event.assert_not_called()
+
     def test_reextract_route_requires_explicit_confirmation(self):
         request = SimpleNamespace(
             state=SimpleNamespace(user={"role": "admin", "email": "admin@example.com", "allowed_tenant_ids": ["*"]})
@@ -2071,6 +2094,77 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(context.exception.status_code, 409)
         self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht offen für Extraktion.")
+
+    def test_bulk_reextraction_validation_accepts_extracted_work_items(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkJobRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+        )
+
+        with patch.object(
+            documents_route,
+            "require_document_access",
+            return_value={
+                "id": str(document_id),
+                "tenant_id": "demo-mandant",
+                "status": "review_ready",
+                "extraction": {"id": str(uuid4())},
+                "booking_suggestions": [{"line_no": 1}],
+            },
+        ):
+            tenant_id, document_ids = documents_route._validated_bulk_documents(request, payload, "reextract")
+
+        self.assertEqual(tenant_id, "demo-mandant")
+        self.assertEqual(document_ids, [document_id])
+
+    def test_bulk_reextraction_validation_rejects_finally_approved_documents(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkJobRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+        )
+
+        with patch.object(
+            documents_route,
+            "require_document_access",
+            return_value={
+                "id": str(document_id),
+                "tenant_id": "demo-mandant",
+                "status": "review_approved",
+                "extraction": {"id": str(uuid4())},
+                "booking_suggestions": [{"line_no": 1}],
+            },
+        ):
+            with self.assertRaises(HTTPException) as context:
+                documents_route._validated_bulk_documents(request, payload, "reextract")
+
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht bereit für Neu-Extraktion.")
+
+    def test_bulk_reextraction_route_requires_admin_and_confirmation(self):
+        user_request = SimpleNamespace(state=SimpleNamespace(user={"role": "user", "allowed_tenant_ids": ["demo-mandant"]}))
+        admin_request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload_without_confirmation = documents_route.DocumentBulkAllRequest(
+            tenant_id="demo-mandant",
+            confirm=False,
+        )
+        payload_confirmed = documents_route.DocumentBulkAllRequest(
+            tenant_id="demo-mandant",
+            confirm=True,
+        )
+        background_tasks = SimpleNamespace(add_task=lambda *args, **kwargs: None)
+
+        with self.assertRaises(HTTPException) as user_context:
+            documents_route.start_bulk_reextraction_for_all(payload_confirmed, user_request, background_tasks)
+
+        with self.assertRaises(HTTPException) as confirm_context:
+            documents_route.start_bulk_reextraction_for_all(payload_without_confirmation, admin_request, background_tasks)
+
+        self.assertEqual(user_context.exception.status_code, 403)
+        self.assertEqual(confirm_context.exception.status_code, 400)
 
     def test_list_bulk_jobs_route_requires_tenant_access(self):
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))

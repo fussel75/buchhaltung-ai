@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     email_import_max_message_bytes: int = 30 * 1024 * 1024
     email_import_search: str = "ALL"
     partner_sync_tokens: str | None = None
+    partner_app_api_base_url: str | None = None
+    buha_api_key: str | None = None
+    hapak_api_base_url: str | None = None
+    hapak_api_key: str | None = None
+    synology_hapak_base_url: str | None = None
+    synology_hapak_username: str | None = None
+    synology_hapak_password: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

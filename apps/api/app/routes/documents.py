@@ -22,6 +22,7 @@ from app.services.database import (
     delete_document,
     get_document_bulk_job,
     list_document_bulk_jobs,
+    list_document_ids_for_bulk_action,
     list_documents,
     list_documents_for_month,
     prepare_document_review,
@@ -104,7 +105,13 @@ class DocumentExportRequest(BaseModel):
 
 class DocumentBulkJobRequest(BaseModel):
     tenant_id: str
-    document_ids: list[UUID] = Field(min_length=1, max_length=500)
+    document_ids: list[UUID] = Field(min_length=1, max_length=1000)
+
+
+class DocumentBulkAllRequest(BaseModel):
+    tenant_id: str
+    limit: int = Field(default=500, ge=1, le=1000)
+    confirm: bool = False
 
 
 class DocumentReextractRequest(BaseModel):
@@ -257,7 +264,7 @@ def _ensure_not_processing(document: dict[str, Any]) -> None:
 def _validated_bulk_documents(
     request: Request,
     payload: DocumentBulkJobRequest,
-    action: Literal["extract", "prepare_review"],
+    action: Literal["extract", "reextract", "prepare_review"],
 ) -> tuple[str, list[UUID]]:
     tenant_id = _normalize_tenant_id(payload.tenant_id)
     require_tenant_access(request, tenant_id)
@@ -272,6 +279,9 @@ def _validated_bulk_documents(
         if action == "extract":
             if document["status"] != "review_pending" or document.get("extraction"):
                 invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht offen für Extraktion."})
+        elif action == "reextract":
+            if document["status"] not in {"extracted", "review_ready"} or not document.get("extraction"):
+                invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit für Neu-Extraktion."})
         elif document["status"] != "extracted" or not document.get("extraction") or document.get("booking_suggestions"):
             invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit für Vorschläge."})
 
@@ -287,7 +297,7 @@ def _start_bulk_job(
     request: Request,
     background_tasks: BackgroundTasks,
     payload: DocumentBulkJobRequest,
-    action: Literal["extract", "prepare_review"],
+    action: Literal["extract", "reextract", "prepare_review"],
 ) -> dict[str, Any]:
     tenant_id, document_ids = _validated_bulk_documents(request, payload, action)
     actor = _actor(request)
@@ -303,6 +313,25 @@ def _start_bulk_job(
 
     background_tasks.add_task(run_document_bulk_job, UUID(job["id"]), actor)
     return {"job": job}
+
+
+def _start_bulk_job_for_all(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: DocumentBulkAllRequest,
+    action: Literal["extract", "reextract", "prepare_review"],
+) -> dict[str, Any]:
+    tenant_id = _normalize_tenant_id(payload.tenant_id)
+    require_tenant_access(request, tenant_id)
+    document_ids = list_document_ids_for_bulk_action(tenant_id=tenant_id, action=action, limit=payload.limit)
+    if not document_ids:
+        return {"job": None, "queued_count": 0}
+    return _start_bulk_job(
+        request,
+        background_tasks,
+        DocumentBulkJobRequest(tenant_id=tenant_id, document_ids=document_ids),
+        action,
+    ) | {"queued_count": len(document_ids)}
 
 
 @router.post("/upload")
@@ -332,10 +361,11 @@ async def upload_document(
 def get_documents(
     request: Request,
     tenant_id: str = Query("demo-mandant", min_length=1),
+    limit: int = Query(500, ge=1, le=1000),
 ) -> dict[str, list[dict[str, Any]]]:
     tenant_id = _normalize_tenant_id(tenant_id)
     require_tenant_access(request, tenant_id)
-    return {"documents": list_documents(tenant_id=tenant_id)}
+    return {"documents": list_documents(tenant_id=tenant_id, limit=limit)}
 
 
 @router.post("/export")
@@ -471,6 +501,27 @@ def start_bulk_extraction(
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
     return _start_bulk_job(request, background_tasks, payload, "extract")
+
+
+@router.post("/bulk/extract-all", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_extraction_for_all(
+    payload: DocumentBulkAllRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    return _start_bulk_job_for_all(request, background_tasks, payload, "extract")
+
+
+@router.post("/bulk/reextract-all", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_reextraction_for_all(
+    payload: DocumentBulkAllRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    require_admin(request)
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Bulk-Neu-Extraktion erfordert explizite Bestätigung.")
+    return _start_bulk_job_for_all(request, background_tasks, payload, "reextract")
 
 
 @router.post("/bulk/review", status_code=status.HTTP_202_ACCEPTED)

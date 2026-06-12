@@ -44,6 +44,9 @@ def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id
     if action == "extract":
         run_mock_extraction(document_id, processing_job_id=job_id)
         return
+    if action == "reextract":
+        run_mock_extraction(document_id, processing_job_id=job_id, force=True, actor=actor)
+        return
     if action == "prepare_review":
         document = prepare_document_review(document_id, actor=actor)
         if document is None:
@@ -52,9 +55,11 @@ def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id
     raise ValueError("unsupported bulk action")
 
 
-def _expected_status(action: str) -> str:
+def _expected_status(action: str) -> str | list[str]:
     if action == "extract":
         return "review_pending"
+    if action == "reextract":
+        return ["extracted", "review_ready"]
     if action == "prepare_review":
         return "extracted"
     raise ValueError("unsupported bulk action")

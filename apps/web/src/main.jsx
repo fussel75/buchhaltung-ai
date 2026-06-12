@@ -261,9 +261,17 @@ function UploadApp() {
     () => filteredDocuments.filter((document) => !document.extraction && document.status === "review_pending"),
     [filteredDocuments],
   );
+  const extractableAllDocuments = useMemo(
+    () => documents.filter((document) => !document.extraction && document.status === "review_pending"),
+    [documents],
+  );
   const reviewableDocuments = useMemo(
     () => filteredDocuments.filter((document) => document.status === "extracted" && document.extraction && !document.booking_suggestions?.length),
     [filteredDocuments],
+  );
+  const reextractableDocuments = useMemo(
+    () => documents.filter((document) => ["extracted", "review_ready"].includes(document.status) && document.extraction),
+    [documents],
   );
   const focusableReviewDocuments = useMemo(
     () => documents.filter((document) => document.extraction),
@@ -298,7 +306,7 @@ function UploadApp() {
       return [];
     }
 
-    const response = await apiFetch(`/documents?tenant_id=${encodeURIComponent(activeTenantId)}`);
+    const response = await apiFetch(`/documents?tenant_id=${encodeURIComponent(activeTenantId)}&limit=500`);
 
     if (!response.ok) {
       throw new Error(`Review-Queue konnte nicht geladen werden: ${response.status}`);
@@ -564,7 +572,7 @@ function UploadApp() {
   );
 
   const startBulkExtraction = useCallback(async () => {
-    const targets = extractableDocuments;
+    const targets = extractableAllDocuments;
     if (!targets.length || isBulkExtracting) return;
 
     setError("");
@@ -579,12 +587,12 @@ function UploadApp() {
     setExtractingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
 
     try {
-      const response = await apiFetch("/documents/bulk/extract", {
+      const response = await apiFetch("/documents/bulk/extract-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tenant_id: activeTenantId,
-          document_ids: targets.map((document) => document.id),
+          limit: 500,
         }),
       });
       if (!response.ok) {
@@ -592,6 +600,11 @@ function UploadApp() {
         throw new Error(formatApiError(result.detail, `Bulk-Extraktion fehlgeschlagen: ${response.status}`));
       }
       const result = await response.json();
+      if (!result.job) {
+        setExtractionBatch(null);
+        setNotice("Keine offenen Belege für Extraktion gefunden.");
+        return;
+      }
       rememberBulkJob(result.job);
       setExtractionBatch(batchStateFromJob(result.job));
       const job = await waitForBulkJob(apiFetch, result.job.id, setExtractionBatch);
@@ -607,7 +620,59 @@ function UploadApp() {
     } finally {
       setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
-  }, [activeTenantId, apiFetch, extractableDocuments, isBulkExtracting, loadBulkJobs, loadDocuments, rememberBulkJob]);
+  }, [activeTenantId, apiFetch, extractableAllDocuments, isBulkExtracting, loadBulkJobs, loadDocuments, rememberBulkJob]);
+
+  const startBulkReextraction = useCallback(async () => {
+    const targets = reextractableDocuments;
+    if (!targets.length || isBulkExtracting) return;
+
+    setError("");
+    setNotice("");
+    setExtractionBatch({
+      state: "running",
+      total: targets.length,
+      done: 0,
+      current: targets[0]?.original_filename || "",
+      failed: 0,
+    });
+    setExtractingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
+
+    try {
+      const response = await apiFetch("/documents/bulk/reextract-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: activeTenantId,
+          limit: 500,
+          confirm: true,
+        }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result.detail, `Neu-Extraktion fehlgeschlagen: ${response.status}`));
+      }
+      const result = await response.json();
+      if (!result.job) {
+        setExtractionBatch(null);
+        setNotice("Keine Belege für Neu-Extraktion gefunden.");
+        return;
+      }
+      rememberBulkJob(result.job);
+      setExtractionBatch(batchStateFromJob(result.job));
+      const job = await waitForBulkJob(apiFetch, result.job.id, setExtractionBatch);
+      rememberBulkJob(job);
+      await loadBulkJobs();
+      await loadDocuments();
+      setNotice(`Neu-Extraktion abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.`);
+      if (job.failed_count) {
+        setError(formatBulkJobFailures(job, "Nicht neu extrahiert"));
+      }
+    } catch (extractError) {
+      setError(extractError.message);
+    } finally {
+      setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
+    }
+  }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, reextractableDocuments, rememberBulkJob]);
 
   const startBulkReviewPreparation = useCallback(async () => {
     const targets = reviewableDocuments;
@@ -1472,9 +1537,17 @@ function UploadApp() {
               <button
                 type="button"
                 onClick={startBulkExtraction}
-                disabled={!extractableDocuments.length || isBulkExtracting}
+                disabled={!extractableAllDocuments.length || isBulkExtracting}
               >
-                {isBulkExtracting ? "Extrahiert..." : `Offene extrahieren (${extractableDocuments.length})`}
+                {isBulkExtracting ? "Extrahiert..." : `Alle offenen extrahieren (${extractableAllDocuments.length})`}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={startBulkReextraction}
+                disabled={!reextractableDocuments.length || isBulkExtracting}
+              >
+                {isBulkExtracting ? "Läuft..." : `Alle neu extrahieren (${reextractableDocuments.length})`}
               </button>
               <button
                 type="button"

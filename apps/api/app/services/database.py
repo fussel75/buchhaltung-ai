@@ -14,7 +14,7 @@ from app.services.cost_categories import COST_CATEGORY_LABELS, VALID_COST_CATEGO
 from app.services.storage import StoredDocument, rename_stored_document
 
 VALID_ACCOUNTING_FRAMEWORKS = {"SKR03", "SKR04"}
-BULK_JOB_ACTIONS = {"extract", "prepare_review"}
+BULK_JOB_ACTIONS = {"extract", "reextract", "prepare_review"}
 BULK_JOB_ACTIVE_STATUSES = {"queued", "running"}
 
 
@@ -347,9 +347,35 @@ def init_database() -> None:
                     updated_at timestamptz not null,
                     started_at timestamptz,
                     finished_at timestamptz,
-                    check (action in ('extract', 'prepare_review')),
+                    check (action in ('extract', 'reextract', 'prepare_review')),
                     check (status in ('queued', 'running', 'completed', 'failed'))
                 )
+                """
+            )
+            cursor.execute(
+                """
+                do $$
+                declare
+                    action_constraint_name text;
+                begin
+                    select conname into action_constraint_name
+                    from pg_constraint
+                    where conrelid = 'document_bulk_jobs'::regclass
+                        and contype = 'c'
+                        and pg_get_constraintdef(oid) like '%action%'
+                        and pg_get_constraintdef(oid) like '%prepare_review%';
+
+                    if action_constraint_name is not null then
+                        execute format('alter table document_bulk_jobs drop constraint %I', action_constraint_name);
+                    end if;
+
+                    alter table document_bulk_jobs
+                        add constraint document_bulk_jobs_action_check
+                        check (action in ('extract', 'reextract', 'prepare_review'));
+                exception
+                    when duplicate_object then
+                        null;
+                end $$;
                 """
             )
             cursor.execute(
@@ -454,7 +480,8 @@ def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict
     return document, is_duplicate
 
 
-def list_documents(tenant_id: str) -> list[dict[str, Any]]:
+def list_documents(tenant_id: str, limit: int = 500) -> list[dict[str, Any]]:
+    capped_limit = max(1, min(limit, 1000))
     with _connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -476,11 +503,40 @@ def list_documents(tenant_id: str) -> list[dict[str, Any]]:
                 left join document_payment_decisions pd on pd.document_id = d.id
                 where d.tenant_id = %s
                 order by d.created_at desc
-                limit 100
+                limit %s
                 """,
-                (tenant_id,),
+                (tenant_id, capped_limit),
             )
             return [_serialize_document(row) for row in cursor.fetchall()]
+
+
+def list_document_ids_for_bulk_action(tenant_id: str, action: str, limit: int = 500) -> list[UUID]:
+    if action not in BULK_JOB_ACTIONS:
+        raise ValueError("unsupported bulk action")
+    capped_limit = max(1, min(limit, 1000))
+    if action == "extract":
+        where_clause = "d.status = 'review_pending' and e.document_id is null"
+    elif action == "reextract":
+        where_clause = "d.status in ('extracted', 'review_ready') and e.document_id is not null"
+    else:
+        where_clause = "d.status = 'extracted' and e.document_id is not null and not exists (select 1 from document_booking_suggestions s where s.document_id = d.id)"
+
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                select d.id
+                from documents d
+                left join document_extractions e on e.document_id = d.id
+                where d.tenant_id = %s
+                    and {where_clause}
+                    and d.processing_job_id is null
+                order by d.created_at desc
+                limit %s
+                """,
+                (tenant_id, capped_limit),
+            )
+            return [row["id"] for row in cursor.fetchall()]
 
 
 def list_documents_for_month(tenant_id: str, year: int, month: int) -> list[dict[str, Any]]:
@@ -723,18 +779,19 @@ def mark_document_bulk_job_item(
             )
 
 
-def claim_document_for_bulk_job(document_id: UUID, job_id: UUID, expected_status: str) -> dict[str, Any] | None:
+def claim_document_for_bulk_job(document_id: UUID, job_id: UUID, expected_status: str | list[str]) -> dict[str, Any] | None:
     now = datetime.now(UTC)
+    expected_statuses = [expected_status] if isinstance(expected_status, str) else expected_status
     with _connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 update documents
                 set processing_job_id = %s, processing_started_at = %s, updated_at = %s
-                where id = %s and status = %s and processing_job_id is null
+                where id = %s and status = any(%s) and processing_job_id is null
                 returning *
                 """,
-                (job_id, now, now, document_id, expected_status),
+                (job_id, now, now, document_id, expected_statuses),
             )
             row = cursor.fetchone()
     return _serialize_document(row) if row else None
