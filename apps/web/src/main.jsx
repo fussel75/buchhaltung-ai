@@ -796,7 +796,7 @@ function UploadApp() {
   );
 
   const returnToApprovalAfterAccountingRule = useCallback(
-    async (documentId) => {
+    async (documentId, successMessage = "Kontierungsregel gespeichert. Freigabeprüfung läuft erneut.") => {
       if (!documentId) return;
 
       setActiveView("review");
@@ -810,7 +810,7 @@ function UploadApp() {
       setApprovalError("");
       setApprovalIssues([]);
       setError("");
-      setNotice("Kontierungsregel gespeichert. Freigabeprüfung läuft erneut.");
+      setNotice(successMessage);
 
       const requestId = approvalValidationRequestRef.current + 1;
       approvalValidationRequestRef.current = requestId;
@@ -839,6 +839,56 @@ function UploadApp() {
       }
     },
     [apiFetch, loadDocuments],
+  );
+
+  const returnToApprovalAfterAssignmentUnit = useCallback(
+    async (payload) => {
+      const documentId = typeof payload === "string" ? payload : payload?.documentId;
+      if (!documentId) return;
+
+      const assignmentUnit = payload?.assignmentUnit || null;
+      const lineNo = payload?.lineNo ? String(payload.lineNo) : "";
+      const suggestionId = payload?.suggestionId || "";
+      const document = documents.find((item) => item.id === documentId);
+      const suggestion = (document?.booking_suggestions || []).find((item) => (
+        (suggestionId && item.id === suggestionId) || (lineNo && String(item.line_no) === lineNo)
+      ));
+
+      if (assignmentUnit?.code && suggestion) {
+        setError("");
+        setNotice("Zuordnung angelegt. Buchungszeile wird aktualisiert.");
+        setSavingSuggestionIds((current) => [...current, suggestion.id]);
+        try {
+          const response = await apiFetch(`/documents/${documentId}/booking-suggestions/${suggestion.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(normalizeBookingSuggestion({
+              ...suggestion,
+              assignment_code: assignmentUnit.code,
+              assignment_kind: assignmentUnit.kind || suggestion.assignment_kind,
+            })),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Buchungszeile konnte nicht auf die neue Zuordnung gesetzt werden: ${response.status}`);
+          }
+        } catch (saveError) {
+          setError(saveError.message);
+          setActiveView("review");
+          setExpandedDocumentIds((current) => (
+            current.includes(documentId) ? current : [...current, documentId]
+          ));
+          setFocusedReviewDocumentId(documentId);
+          setHighlightedBookingTarget({ documentId, lineNo, rowType: "" });
+          return;
+        } finally {
+          setSavingSuggestionIds((current) => current.filter((id) => id !== suggestion.id));
+        }
+      }
+
+      await returnToApprovalAfterAccountingRule(documentId, "Zuordnung gespeichert. Freigabeprüfung läuft erneut.");
+    },
+    [apiFetch, documents, returnToApprovalAfterAccountingRule],
   );
 
   function prepareAccountingRuleFromApproval(issue) {
@@ -923,9 +973,15 @@ function UploadApp() {
       setNotice("Zuordnung braucht Stammdatenpflege. Bitte einen Admin bitten, die Zuordnung unter Stammdaten zu prüfen.");
       return;
     }
+    const lineNo = issue?.line_no ? String(issue.line_no) : "";
+    const suggestion = (approvalDocument?.booking_suggestions || []).find((item) => (
+      lineNo && String(item.line_no) === lineNo
+    ));
     setAssignmentUnitDraft({
       id: `${Date.now()}-${issue?.assignment_code || issue?.line_no || ""}`,
       return_document_id: approvalDocument?.id || "",
+      return_line_no: lineNo,
+      return_suggestion_id: suggestion?.id || "",
       form: assignmentUnitFormFromApprovalIssue(issue, approvalDocument, tenantProfile),
       focus_field: issue?.assignment_code ? "label" : "code",
     });
@@ -1719,7 +1775,7 @@ function UploadApp() {
           onAccountingRuleEditTargetConsumed={clearAccountingRuleEditTarget}
           onAccountingRuleSaved={returnToApprovalAfterAccountingRule}
           onAssignmentUnitDraftConsumed={clearAssignmentUnitDraft}
-          onAssignmentUnitSaved={returnToApprovalAfterAccountingRule}
+          onAssignmentUnitSaved={returnToApprovalAfterAssignmentUnit}
           onProfileSaved={setTenantProfile}
         />
       ) : null}
@@ -3143,6 +3199,8 @@ function MasterdataAdmin({
   const [accountingEditForm, setAccountingEditForm] = useState(null);
   const [accountingReturnDocumentId, setAccountingReturnDocumentId] = useState("");
   const [assignmentReturnDocumentId, setAssignmentReturnDocumentId] = useState("");
+  const [assignmentReturnLineNo, setAssignmentReturnLineNo] = useState("");
+  const [assignmentReturnSuggestionId, setAssignmentReturnSuggestionId] = useState("");
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -3248,6 +3306,8 @@ function MasterdataAdmin({
       ...assignmentUnitDraft.form,
     }));
     setAssignmentReturnDocumentId(assignmentUnitDraft.return_document_id || "");
+    setAssignmentReturnLineNo(assignmentUnitDraft.return_line_no || "");
+    setAssignmentReturnSuggestionId(assignmentUnitDraft.return_suggestion_id || "");
     setMessageTone("notice");
     setMessage(`${tenantProfile.assignment_label_singular} aus der Freigabe vorbereitet. Nach dem Speichern läuft die Freigabeprüfung erneut.`);
     window.setTimeout(() => {
@@ -3300,6 +3360,8 @@ function MasterdataAdmin({
       setMessage(apiError.message);
       return;
     }
+    const result = await response.json();
+    const assignmentUnit = result.assignment_unit;
     setAssignmentForm({
       code: "",
       label: "",
@@ -3311,10 +3373,19 @@ function MasterdataAdmin({
     await loadMasterdata();
     if (assignmentReturnDocumentId) {
       const returnDocumentId = assignmentReturnDocumentId;
+      const returnLineNo = assignmentReturnLineNo;
+      const returnSuggestionId = assignmentReturnSuggestionId;
       setAssignmentReturnDocumentId("");
+      setAssignmentReturnLineNo("");
+      setAssignmentReturnSuggestionId("");
       setMessageTone("notice");
       setMessage("Zuordnung angelegt. Zurück zur Freigabeprüfung.");
-      onAssignmentUnitSaved?.(returnDocumentId);
+      onAssignmentUnitSaved?.({
+        documentId: returnDocumentId,
+        lineNo: returnLineNo,
+        suggestionId: returnSuggestionId,
+        assignmentUnit,
+      });
     } else {
       setMessageTone("notice");
       setMessage("Zuordnung angelegt.");
