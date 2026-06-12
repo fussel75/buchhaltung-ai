@@ -2505,7 +2505,11 @@ function ApprovalDialog({
     !["missing_accounting_rule", "ambiguous_accounting_rule"].includes(issue.code),
   );
   const hasAccountingRuleActions = Boolean(missingAccountingRuleIssues.length || editableAccountingRuleIssues.length);
-  const showGenericApprovalError = Boolean(error) && !accountingRuleIssues.length && !exportValidationIssues.length;
+  const showGenericApprovalError = Boolean(error)
+    && !accountingRuleIssues.length
+    && !assignmentIssues.length
+    && !exportValidationIssues.length
+    && !correctionIssues.length;
   const totalNet = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.net_amount), 0);
   const totalTax = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.tax_amount), 0);
   const totalGross = suggestions.reduce((sum, suggestion) => sum + numberOrZero(suggestion.gross_amount), 0);
