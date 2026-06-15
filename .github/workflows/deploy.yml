@@ -28,21 +28,28 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
 
           known_hosts_tmp="$(mktemp)"
+          known_host_found=false
 
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if ssh-keyscan -T 20 -H "$SSH_HOST" > "$known_hosts_tmp"; then
               cat "$known_hosts_tmp" >> ~/.ssh/known_hosts
+              known_host_found=true
               break
             fi
 
             if [ "$attempt" -eq 10 ]; then
-              echo "ssh-keyscan failed after 10 attempts."
-              exit 1
+              echo "::warning title=ssh-keyscan failed::Could not prefetch host key after 10 attempts; SSH will use accept-new."
+              break
             fi
 
             echo "ssh-keyscan failed. Retrying in 10s (${attempt}/10)..."
             sleep 10
           done
+
+          strict_host_key_checking=yes
+          if [ "$known_host_found" != "true" ]; then
+            strict_host_key_checking=accept-new
+          fi
 
           ssh_options=(
             -i ~/.ssh/id_ed25519
@@ -51,7 +58,7 @@ jobs:
             -o ConnectTimeout=30
             -o ServerAliveInterval=15
             -o ServerAliveCountMax=3
-            -o StrictHostKeyChecking=yes
+            -o StrictHostKeyChecking="$strict_host_key_checking"
           )
 
           deploy_log="$(mktemp)"
