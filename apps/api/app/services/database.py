@@ -238,6 +238,7 @@ def init_database() -> None:
                     customer_number text,
                     description text,
                     client_name text,
+                    source_status text,
                     address_line text,
                     postal_code text,
                     city text,
@@ -256,6 +257,7 @@ def init_database() -> None:
             cursor.execute("alter table tenant_assignment_units add column if not exists customer_number text")
             cursor.execute("alter table tenant_assignment_units add column if not exists description text")
             cursor.execute("alter table tenant_assignment_units add column if not exists client_name text")
+            cursor.execute("alter table tenant_assignment_units add column if not exists source_status text")
             cursor.execute("alter table tenant_assignment_units add column if not exists address_line text")
             cursor.execute("alter table tenant_assignment_units add column if not exists postal_code text")
             cursor.execute("alter table tenant_assignment_units add column if not exists city text")
@@ -3043,6 +3045,7 @@ def create_assignment_unit(
     customer_number: str | None = None,
     description: str | None = None,
     client_name: str | None = None,
+    source_status: str | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     normalized_external_id = external_id.strip() if external_id else None
@@ -3061,6 +3064,7 @@ def create_assignment_unit(
                         customer_number = %s,
                         description = %s,
                         client_name = %s,
+                        source_status = %s,
                         address_line = %s,
                         postal_code = %s,
                         city = %s,
@@ -3080,6 +3084,7 @@ def create_assignment_unit(
                         customer_number.strip() if customer_number else None,
                         description.strip() if description else None,
                         client_name.strip() if client_name else None,
+                        source_status.strip() if source_status else None,
                         address_line.strip() if address_line else None,
                         postal_code.strip() if postal_code else None,
                         city.strip() if city else None,
@@ -3099,10 +3104,10 @@ def create_assignment_unit(
                 """
                 insert into tenant_assignment_units (
                     id, tenant_id, code, label, kind, project_number, order_number, customer_number,
-                    description, client_name, address_line, postal_code, city, external_id,
+                    description, client_name, source_status, address_line, postal_code, city, external_id,
                     revenue_relevant, aliases, is_active, created_at, updated_at
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (tenant_id, code) do update set
                     label = excluded.label,
                     kind = excluded.kind,
@@ -3111,6 +3116,7 @@ def create_assignment_unit(
                     customer_number = excluded.customer_number,
                     description = excluded.description,
                     client_name = excluded.client_name,
+                    source_status = excluded.source_status,
                     address_line = excluded.address_line,
                     postal_code = excluded.postal_code,
                     city = excluded.city,
@@ -3132,6 +3138,7 @@ def create_assignment_unit(
                     customer_number.strip() if customer_number else None,
                     description.strip() if description else None,
                     client_name.strip() if client_name else None,
+                    source_status.strip() if source_status else None,
                     address_line.strip() if address_line else None,
                     postal_code.strip() if postal_code else None,
                     city.strip() if city else None,
@@ -3163,6 +3170,7 @@ def update_assignment_unit(
     customer_number: str | None = None,
     description: str | None = None,
     client_name: str | None = None,
+    source_status: str | None = None,
 ) -> dict[str, Any] | None:
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -3178,6 +3186,7 @@ def update_assignment_unit(
                     customer_number = %s,
                     description = %s,
                     client_name = %s,
+                    source_status = %s,
                     address_line = %s,
                     postal_code = %s,
                     city = %s,
@@ -3198,6 +3207,7 @@ def update_assignment_unit(
                     customer_number.strip() if customer_number else None,
                     description.strip() if description else None,
                     client_name.strip() if client_name else None,
+                    source_status.strip() if source_status else None,
                     address_line.strip() if address_line else None,
                     postal_code.strip() if postal_code else None,
                     city.strip() if city else None,
@@ -3746,6 +3756,7 @@ def _serialize_assignment_unit(row: dict[str, Any]) -> dict[str, Any]:
         "customer_number": row.get("customer_number"),
         "description": row.get("description"),
         "client_name": row.get("client_name"),
+        "source_status": row.get("source_status"),
         "address_line": row.get("address_line"),
         "postal_code": row.get("postal_code"),
         "city": row.get("city"),

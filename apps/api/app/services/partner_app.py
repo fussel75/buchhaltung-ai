@@ -129,7 +129,7 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
             *_list_texts(project.get("aliases")),
         ]
     )
-    status = (_first_text(project, "status") or "").casefold()
+    source_status = _first_text(project, "status")
     return {
         "code": code,
         "label": label,
@@ -139,13 +139,14 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
         "customer_number": customer_number,
         "description": description,
         "client_name": client_name,
+        "source_status": source_status,
         "address_line": address_line,
         "postal_code": postal_code,
         "city": city,
         "external_id": _first_text(project, "id", "externalId", "external_id"),
         "revenue_relevant": _bool_value(project.get("revenueRelevant"), default=True),
         "aliases": aliases,
-        "is_active": status not in {"archived", "archive", "deleted", "cancelled", "canceled", "inactive"},
+        "is_active": _project_is_active(source_status),
     }
 
 
@@ -193,6 +194,36 @@ def _unique_texts(values: list[str | None]) -> list[str]:
         seen.add(key)
         result.append(value)
     return result
+
+
+def _project_is_active(status: str | None) -> bool:
+    normalized = _normalize_status(status)
+    if not normalized:
+        return True
+    inactive_statuses = {
+        "archived",
+        "archive",
+        "deleted",
+        "cancelled",
+        "canceled",
+        "inactive",
+        "closed",
+        "complete",
+        "completed",
+        "done",
+        "finished",
+        "abgeschlossen",
+        "beendet",
+        "fertig",
+        "erledigt",
+    }
+    return normalized not in inactive_statuses
+
+
+def _normalize_status(status: str | None) -> str:
+    if not status:
+        return ""
+    return " ".join(status.strip().casefold().split())
 
 
 def _bool_value(value: Any, default: bool) -> bool:

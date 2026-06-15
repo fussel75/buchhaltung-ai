@@ -2431,11 +2431,29 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(mapped["project_number"], "25-00008")
         self.assertEqual(mapped["order_number"], "A-42")
         self.assertEqual(mapped["customer_number"], "K-7")
+        self.assertEqual(mapped["source_status"], "active")
         self.assertEqual(mapped["address_line"], "Weseler Weg 20")
         self.assertEqual(mapped["kind"], "construction_project")
         self.assertTrue(mapped["revenue_relevant"])
         self.assertIn("A-42", mapped["aliases"])
         self.assertIn("K-7", mapped["aliases"])
+
+    def test_partner_project_mapping_treats_completed_projects_as_inactive(self):
+        mapped = partner_app_service._project_to_assignment_unit(
+            {
+                "id": "project-closed",
+                "projectNumber": "25-00007",
+                "orderNumber": "25-00007",
+                "customerNumber": "11305",
+                "name": "Ekkp58",
+                "address": "Eckerkamp 58 Hamburg 22391",
+                "status": "Abgeschlossen",
+            }
+        )
+
+        self.assertEqual(mapped["project_number"], "25-00007")
+        self.assertEqual(mapped["source_status"], "Abgeschlossen")
+        self.assertFalse(mapped["is_active"])
 
     def test_partner_app_base_url_must_be_public_https(self):
         invalid_urls = [
@@ -2465,7 +2483,7 @@ class BookingSuggestionTests(TestCase):
                 return (
                     b'{"projects":[{"projectNumber":"25-00008","orderNumber":"25-00012",'
                     b'"customerNumber":"10794","name":"Buwg4","description":"Dachsanierung EFH",'
-                    b'"address":"Bucheckerweg 4, 22175 Hamburg","clientName":"Ralf Esch"}]}'
+                    b'"address":"Bucheckerweg 4, 22175 Hamburg","clientName":"Ralf Esch","status":"Aktiv"}]}'
                 )
 
         class FakeOpener:
@@ -2493,6 +2511,7 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(assignments[0]["customer_number"], "10794")
         self.assertEqual(assignments[0]["description"], "Dachsanierung EFH")
         self.assertEqual(assignments[0]["client_name"], "Ralf Esch")
+        self.assertEqual(assignments[0]["source_status"], "Aktiv")
         self.assertEqual(assignments[0]["address_line"], "Bucheckerweg 4")
         self.assertEqual(assignments[0]["postal_code"], "22175")
         self.assertEqual(assignments[0]["city"], "Hamburg")
@@ -2509,6 +2528,7 @@ class BookingSuggestionTests(TestCase):
             "customer_number": "10794",
             "description": "Badmodernisierung",
             "client_name": "Ralf Esch",
+            "source_status": "Aktiv",
             "address_line": "Neusurenland 51",
             "postal_code": "22159",
             "city": "Hamburg",
@@ -2538,6 +2558,7 @@ class BookingSuggestionTests(TestCase):
             customer_number="10794",
             description="Badmodernisierung",
             client_name="Ralf Esch",
+            source_status="Aktiv",
             address_line="Neusurenland 51",
             postal_code="22159",
             city="Hamburg",

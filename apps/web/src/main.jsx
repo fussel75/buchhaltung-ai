@@ -2002,6 +2002,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
         project.label,
         project.description,
         project.client_name,
+        project.source_status,
         project.address_line,
         project.postal_code,
         project.city,
@@ -2093,7 +2094,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
                 <span>{project.client_name || "-"}</span>
                 <span>{formatAssignmentKind(project.kind, tenantProfile)}</span>
                 <span>{project.aliases?.length ? project.aliases.join(", ") : "-"}</span>
-                <StatusPill value={project.is_active ? "aktiv" : "inaktiv"} tone={project.is_active ? "green" : "gray"} />
+                <StatusPill value={formatProjectStatus(project)} tone={project.is_active ? "green" : "gray"} />
               </div>
             ))}
           </div>
@@ -3755,6 +3756,7 @@ function MasterdataAdmin({
         customer_number: assignment.customer_number,
         description: assignment.description,
         client_name: assignment.client_name,
+        source_status: assignment.source_status,
         address_line: assignment.address_line,
         postal_code: assignment.postal_code,
         city: assignment.city,
@@ -3788,6 +3790,7 @@ function MasterdataAdmin({
       customer_number: assignment.customer_number || "",
       description: assignment.description || "",
       client_name: assignment.client_name || "",
+      source_status: assignment.source_status || "",
       address_line: assignment.address_line || "",
       postal_code: assignment.postal_code || "",
       city: assignment.city || "",
@@ -5758,6 +5761,12 @@ function formatAssignmentKind(value, tenantProfile = defaultTenantProfile("gener
 
 function usesProjectNumber(kind) {
   return ["construction_project", "construction_or_dropoff_site"].includes(kind);
+}
+
+function formatProjectStatus(project) {
+  const sourceStatus = String(project?.source_status || "").trim();
+  if (sourceStatus) return sourceStatus;
+  return project?.is_active ? "aktiv" : "inaktiv";
 }
 
 function formatAssignmentAddress(assignment) {
