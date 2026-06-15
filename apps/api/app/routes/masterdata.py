@@ -358,7 +358,7 @@ def import_partner_assignment_units(
         )
         for assignment in assignment_units
     ]
-    return {"assignment_units": synced, "synced_count": len(synced)}
+    return {"assignment_units": synced, "source_count": len(assignment_units), "synced_count": len(synced)}
 
 
 @router.get("/supplier-rules")

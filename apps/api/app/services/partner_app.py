@@ -29,12 +29,12 @@ def fetch_partner_assignment_units(settings: Settings | None = None) -> list[dic
         raise PartnerAppConfigError("BUHA_API_KEY ist nicht konfiguriert.")
 
     _validate_partner_base_url(resolved_settings.partner_app_api_base_url)
-    url = urljoin(resolved_settings.partner_app_api_base_url.rstrip("/") + "/", "api/projects")
+    url = urljoin(resolved_settings.partner_app_api_base_url.rstrip("/") + "/", "api/buha/projects")
     request = Request(
         url,
         headers={
             "Accept": "application/json",
-            "Authorization": f"Bearer {resolved_settings.buha_api_key}",
+            "x-api-key": resolved_settings.buha_api_key,
         },
     )
     try:
@@ -111,6 +111,8 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
             project_number,
             label,
             address_line,
+            _first_text(project, "description"),
+            _first_text(project, "clientName", "client_name"),
             _first_text(project, "orderNumber", "order_number"),
             _first_text(project, "customerNumber", "customer_number"),
             *_list_texts(project.get("aliases")),

@@ -1435,6 +1435,9 @@ function UploadApp() {
             <button type="button" className={activeView === "masterdata" ? "active" : ""} onClick={() => setActiveView("masterdata")}>
               Stammdaten
             </button>
+            <button type="button" className={activeView === "projects" ? "active" : ""} onClick={() => setActiveView("projects")}>
+              Projekte
+            </button>
             <button type="button" className={activeView === "users" ? "active" : ""} onClick={() => setActiveView("users")}>
               Benutzer
             </button>
@@ -1898,6 +1901,14 @@ function UploadApp() {
         />
       ) : null}
 
+      {activeView === "projects" && user?.role === "admin" ? (
+        <ProjectsAdmin
+          apiFetch={apiFetch}
+          tenantId={activeTenantId}
+          tenantProfile={tenantProfile}
+        />
+      ) : null}
+
       {activeView === "users" && user?.role === "admin" ? (
         <UserAdmin apiFetch={apiFetch} currentUser={user} activeTenantId={activeTenantId} />
       ) : null}
@@ -1911,6 +1922,178 @@ function Metric({ label, value }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
+  const [assignmentUnits, setAssignmentUnits] = useState([]);
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState("notice");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [search, setSearch] = useState("");
+  const [kindFilter, setKindFilter] = useState("all");
+
+  const loadProjects = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`);
+      if (!response.ok) {
+        const apiError = await readApiError(response, "Projekte konnten nicht geladen werden");
+        throw new Error(apiError.message);
+      }
+      const result = await response.json();
+      setAssignmentUnits(result.assignment_units ?? []);
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error.message || "Projekte konnten nicht geladen werden.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [apiFetch, tenantId]);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  async function syncPartnerProjects() {
+    if (!window.confirm("Alle Projektstammdaten aus der Partner-App abrufen und lokale Projektdaten aktualisieren?")) {
+      return;
+    }
+    setIsSyncing(true);
+    setMessage("");
+    try {
+      const response = await apiFetch(`/masterdata/assignment-units/import-partner?tenant_id=${encodeURIComponent(tenantId)}`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const apiError = await readApiError(response, "Projektstammdaten konnten nicht synchronisiert werden");
+        throw new Error(apiError.message);
+      }
+      const result = await response.json();
+      await loadProjects();
+      setMessageTone("notice");
+      setMessage(
+        `Partner-App gelesen: ${result.source_count ?? result.synced_count ?? 0} Projekte, ` +
+        `${result.synced_count ?? 0} lokal synchronisiert.`,
+      );
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error.message || "Projektstammdaten konnten nicht synchronisiert werden.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  const projectKinds = useMemo(
+    () => Array.from(new Set(assignmentUnits.map((project) => project.kind || "cost_object"))).sort(),
+    [assignmentUnits],
+  );
+  const filteredProjects = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return assignmentUnits.filter((project) => {
+      if (kindFilter !== "all" && project.kind !== kindFilter) return false;
+      if (!needle) return true;
+      const haystack = [
+        project.code,
+        project.project_number,
+        project.label,
+        project.address_line,
+        project.postal_code,
+        project.city,
+        project.external_id,
+        ...(project.aliases || []),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [assignmentUnits, kindFilter, search]);
+  const activeCount = assignmentUnits.filter((project) => project.is_active).length;
+  const withProjectNumber = assignmentUnits.filter((project) => project.project_number).length;
+
+  return (
+    <section className="admin-panel project-page">
+      <div className="section-header">
+        <div>
+          <p className="eyebrow">Partner-App und Zuordnungen</p>
+          <h2>Projekte</h2>
+        </div>
+        <span className="tenant-chip">{tenantId}</span>
+      </div>
+      {message ? <p className={messageTone}>{message}</p> : null}
+
+      <section className="project-overview">
+        <Metric label="Gesamt" value={assignmentUnits.length} />
+        <Metric label="Aktiv" value={activeCount} />
+        <Metric label="Mit Projektnummer" value={withProjectNumber} />
+        <Metric label="Sichtbar" value={filteredProjects.length} />
+      </section>
+
+      <section className="admin-card project-list-card">
+        <div className="card-header">
+          <div>
+            <p className="eyebrow">Projektliste</p>
+            <h3>{tenantProfile.assignment_label_plural}</h3>
+          </div>
+          <div className="header-actions">
+            <button type="button" onClick={syncPartnerProjects} disabled={isSyncing}>
+              {isSyncing ? "Synchronisiere..." : "Partner-App synchronisieren"}
+            </button>
+            <button className="secondary-button" type="button" onClick={loadProjects} disabled={isLoading}>
+              {isLoading ? "Lade..." : "Aktualisieren"}
+            </button>
+          </div>
+        </div>
+
+        <div className="project-toolbar">
+          <label>
+            Suche
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Projekt, Nummer, Adresse, Alias"
+            />
+          </label>
+          <label>
+            Art
+            <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+              <option value="all">Alle Arten</option>
+              {projectKinds.map((kind) => (
+                <option key={kind} value={kind}>{formatAssignmentKind(kind, tenantProfile)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {filteredProjects.length ? (
+          <div className="project-table">
+            <div className="project-row project-head">
+              <span>Projektnummer</span>
+              <span>Code</span>
+              <span>Name</span>
+              <span>Adresse</span>
+              <span>Art</span>
+              <span>Aliase</span>
+              <span>Status</span>
+            </div>
+            {filteredProjects.map((project) => (
+              <div className="project-row" key={project.id}>
+                <strong>{project.project_number || "-"}</strong>
+                <span>{formatAssignmentCode(project.code, project.kind, tenantProfile)}</span>
+                <span>{project.label}</span>
+                <span>{formatAssignmentAddress(project)}</span>
+                <span>{formatAssignmentKind(project.kind, tenantProfile)}</span>
+                <span>{project.aliases?.length ? project.aliases.join(", ") : "-"}</span>
+                <StatusPill value={project.is_active ? "aktiv" : "inaktiv"} tone={project.is_active ? "green" : "gray"} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">
+            {isLoading ? "Projekte werden geladen ..." : "Keine Projekte für diese Auswahl gefunden."}
+          </p>
+        )}
+      </section>
+    </section>
   );
 }
 
@@ -3423,7 +3606,10 @@ function MasterdataAdmin({
       const result = await response.json();
       await loadMasterdata();
       setMessageTone("notice");
-      setMessage(`Projektstammdaten synchronisiert: ${result.synced_count ?? 0} Einträge.`);
+      setMessage(
+        `Partner-App gelesen: ${result.source_count ?? result.synced_count ?? 0} Projekte, ` +
+        `${result.synced_count ?? 0} lokal synchronisiert.`,
+      );
     } catch (error) {
       setMessageTone("error");
       setMessage(error.message || "Projektstammdaten konnten nicht synchronisiert werden.");

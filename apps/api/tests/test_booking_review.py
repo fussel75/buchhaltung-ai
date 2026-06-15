@@ -2451,6 +2451,40 @@ class BookingSuggestionTests(TestCase):
 
         partner_app_service._validate_partner_base_url("https://fristd-bau.replit.app")
 
+    def test_partner_app_fetch_uses_buha_endpoint_and_api_key_header(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"projects":[{"projectNumber":"25-00008","name":"Weseler Weg 20","address":"Weseler Weg 20"}]}'
+
+        class FakeOpener:
+            def __init__(self):
+                self.request = None
+
+            def open(self, request, timeout):
+                self.request = request
+                self.timeout = timeout
+                return FakeResponse()
+
+        opener = FakeOpener()
+        settings = SimpleNamespace(
+            partner_app_api_base_url="https://fristd-bau.replit.app",
+            buha_api_key="secret-key",
+        )
+
+        with patch.object(partner_app_service, "build_opener", return_value=opener):
+            assignments = partner_app_service.fetch_partner_assignment_units(settings)
+
+        self.assertEqual(opener.request.full_url, "https://fristd-bau.replit.app/api/buha/projects")
+        self.assertEqual(opener.request.get_header("X-api-key"), "secret-key")
+        self.assertEqual(assignments[0]["project_number"], "25-00008")
+        self.assertIn("Weseler Weg 20", assignments[0]["aliases"])
+
     def test_import_partner_assignment_units_creates_tenant_assignments(self):
         request = SimpleNamespace(headers={}, state=SimpleNamespace())
         assignment = {
@@ -2476,6 +2510,7 @@ class BookingSuggestionTests(TestCase):
             result = masterdata_route.import_partner_assignment_units(request, tenant_id="demo-mandant")
 
         self.assertEqual(result["synced_count"], 1)
+        self.assertEqual(result["source_count"], 1)
         create_assignment.assert_called_once_with(
             tenant_id="demo-mandant",
             code="Neula51",

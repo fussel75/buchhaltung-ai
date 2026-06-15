@@ -607,6 +607,70 @@ button:disabled {
   color: #fff;
 }
 
+.project-page {
+  display: grid;
+  gap: 16px;
+}
+
+.project-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.project-list-card {
+  display: grid;
+  gap: 16px;
+}
+
+.project-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px);
+  gap: 12px;
+  align-items: end;
+}
+
+.project-table {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.project-row {
+  display: grid;
+  grid-template-columns:
+    minmax(110px, 0.8fr)
+    minmax(110px, 0.8fr)
+    minmax(180px, 1.2fr)
+    minmax(220px, 1.4fr)
+    minmax(140px, 0.9fr)
+    minmax(220px, 1.4fr)
+    minmax(90px, 0.6fr);
+  gap: 12px;
+  min-width: 1120px;
+  padding: 12px 14px;
+  align-items: center;
+  border-top: 1px solid var(--border);
+}
+
+.project-row:first-child {
+  border-top: 0;
+}
+
+.project-head {
+  color: #5d6672;
+  background: var(--surface-muted);
+  font-size: 0.74rem;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.project-row span,
+.project-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .batch-progress {
   display: grid;
   gap: 5px;
@@ -2894,6 +2958,11 @@ code {
   .payment-row,
   .booking-edit-row {
     min-width: 0;
+  }
+
+  .project-overview,
+  .project-toolbar {
+    grid-template-columns: 1fr;
   }
 
   .filter-tabs {
