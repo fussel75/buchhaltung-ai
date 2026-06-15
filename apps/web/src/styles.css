@@ -453,6 +453,14 @@ button:disabled {
   margin-bottom: 14px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .uploads > .queue-header {
   display: grid;
   grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);

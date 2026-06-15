@@ -3351,6 +3351,7 @@ function MasterdataAdmin({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState("notice");
   const [isUploadingBwa, setIsUploadingBwa] = useState(false);
+  const [isSyncingPartnerProjects, setIsSyncingPartnerProjects] = useState(false);
   const [supplierFormErrors, setSupplierFormErrors] = useState({});
   const [accountingFormErrors, setAccountingFormErrors] = useState({});
   const [assignmentEditErrors, setAssignmentEditErrors] = useState({});
@@ -3403,6 +3404,33 @@ function MasterdataAdmin({
       setMessage(error.message);
     });
   }, [loadMasterdata]);
+
+  async function importPartnerAssignments() {
+    if (!window.confirm("Projektstammdaten aus der Partner-App synchronisieren? Bestehende Einträge mit gleichem Code werden aktualisiert.")) {
+      return;
+    }
+    setIsSyncingPartnerProjects(true);
+    try {
+      const response = await apiFetch(`/masterdata/assignment-units/import-partner?tenant_id=${encodeURIComponent(tenantId)}`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const apiError = await readApiError(response, "Projektstammdaten konnten nicht synchronisiert werden");
+        setMessageTone("error");
+        setMessage(apiError.message);
+        return;
+      }
+      const result = await response.json();
+      await loadMasterdata();
+      setMessageTone("notice");
+      setMessage(`Projektstammdaten synchronisiert: ${result.synced_count ?? 0} Einträge.`);
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error.message || "Projektstammdaten konnten nicht synchronisiert werden.");
+    } finally {
+      setIsSyncingPartnerProjects(false);
+    }
+  }
 
   useEffect(() => {
     if (!accountingRuleDraft?.form) return;
@@ -3962,7 +3990,12 @@ function MasterdataAdmin({
               <p className="eyebrow">Kosten- und Umsatzzuordnung</p>
               <h3>{tenantProfile.assignment_label_plural}</h3>
             </div>
-            <StatusPill value={`${assignmentUnits.length} Einträge`} />
+            <div className="header-actions">
+              <button type="button" className="secondary-button compact-button" onClick={importPartnerAssignments} disabled={isSyncingPartnerProjects}>
+                {isSyncingPartnerProjects ? "Synchronisiere..." : "Partner-App synchronisieren"}
+              </button>
+              <StatusPill value={`${assignmentUnits.length} Einträge`} />
+            </div>
           </div>
           {assignmentReturnDocumentId ? (
             <div className="return-to-review-note">

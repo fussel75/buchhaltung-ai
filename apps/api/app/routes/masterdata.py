@@ -25,6 +25,7 @@ from app.services.database import (
     upsert_tenant_profile,
 )
 from app.services.bwa import analyze_bwa_file
+from app.services.partner_app import PartnerAppConfigError, PartnerAppFetchError, fetch_partner_assignment_units
 from app.services.storage import UploadRejectedError, delete_stored_document, store_bwa_document
 
 router = APIRouter()
@@ -321,6 +322,41 @@ def sync_assignment_units(
             is_active=assignment.is_active,
         )
         for assignment in payload.assignment_units
+    ]
+    return {"assignment_units": synced, "synced_count": len(synced)}
+
+
+@router.post("/assignment-units/import-partner")
+def import_partner_assignment_units(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    require_admin(request)
+    normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    require_tenant_access(request, normalized_tenant_id)
+    try:
+        assignment_units = fetch_partner_assignment_units()
+    except PartnerAppConfigError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except PartnerAppFetchError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    synced = [
+        create_assignment_unit(
+            tenant_id=normalized_tenant_id,
+            code=assignment["code"],
+            label=assignment["label"],
+            kind=assignment["kind"],
+            project_number=assignment["project_number"],
+            address_line=assignment["address_line"],
+            postal_code=assignment["postal_code"],
+            city=assignment["city"],
+            external_id=assignment["external_id"],
+            revenue_relevant=assignment["revenue_relevant"],
+            aliases=assignment["aliases"],
+            is_active=assignment["is_active"],
+        )
+        for assignment in assignment_units
     ]
     return {"assignment_units": synced, "synced_count": len(synced)}
 

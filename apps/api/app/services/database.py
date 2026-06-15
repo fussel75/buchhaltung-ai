@@ -3033,8 +3033,48 @@ def create_assignment_unit(
     is_active: bool = True,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
+    normalized_external_id = external_id.strip() if external_id else None
     with _connect() as connection:
         with connection.cursor() as cursor:
+            if normalized_external_id:
+                cursor.execute(
+                    """
+                    update tenant_assignment_units
+                    set
+                        code = %s,
+                        label = %s,
+                        kind = %s,
+                        project_number = %s,
+                        address_line = %s,
+                        postal_code = %s,
+                        city = %s,
+                        revenue_relevant = %s,
+                        aliases = %s,
+                        is_active = %s,
+                        updated_at = %s
+                    where tenant_id = %s and external_id = %s
+                    returning *
+                    """,
+                    (
+                        code.strip(),
+                        label.strip(),
+                        kind,
+                        project_number.strip() if project_number else None,
+                        address_line.strip() if address_line else None,
+                        postal_code.strip() if postal_code else None,
+                        city.strip() if city else None,
+                        revenue_relevant,
+                        Jsonb([alias.strip() for alias in aliases if alias.strip()]),
+                        is_active,
+                        now,
+                        tenant_id,
+                        normalized_external_id,
+                    ),
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    return _serialize_assignment_unit(existing)
+
             cursor.execute(
                 """
                 insert into tenant_assignment_units (
@@ -3066,7 +3106,7 @@ def create_assignment_unit(
                     address_line.strip() if address_line else None,
                     postal_code.strip() if postal_code else None,
                     city.strip() if city else None,
-                    external_id.strip() if external_id else None,
+                    normalized_external_id,
                     revenue_relevant,
                     Jsonb([alias.strip() for alias in aliases if alias.strip()]),
                     is_active,

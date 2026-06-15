@@ -17,6 +17,7 @@ from app.services import bwa as bwa_service
 from app.services import bulk_jobs as bulk_job_service
 from app.services import database as database_service
 from app.services import extraction as extraction_service
+from app.services import partner_app as partner_app_service
 from app.services.extraction import _cost_category_for_supplier_rule, _normalized_invoice_filename, _payment_terms, run_mock_extraction
 from app.routes.documents import BookingSuggestionUpdate, _download_filename
 from app.routes.users import user_can_access_tenant
@@ -2347,6 +2348,48 @@ class BookingSuggestionTests(TestCase):
         self.assertIsNone(params[4])
         self.assertIsNone(assignment["project_number"])
 
+    def test_assignment_unit_create_updates_existing_external_id_before_code_conflict(self):
+        assignment_id = uuid4()
+        row = {
+            "id": assignment_id,
+            "tenant_id": "demo-mandant",
+            "code": "Neula51",
+            "label": "Neusurenland 51",
+            "kind": "construction_project",
+            "project_number": "26-00001",
+            "address_line": "Neusurenland 51",
+            "postal_code": "22159",
+            "city": "Hamburg",
+            "external_id": "project-1",
+            "revenue_relevant": True,
+            "aliases": [],
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            assignment = database_service.create_assignment_unit(
+                tenant_id="demo-mandant",
+                code="Neula51",
+                label="Neusurenland 51",
+                kind="construction_project",
+                project_number="26-00001",
+                address_line="Neusurenland 51",
+                postal_code="22159",
+                city="Hamburg",
+                external_id="project-1",
+                revenue_relevant=True,
+                aliases=[],
+                is_active=True,
+            )
+
+        self.assertEqual(len(cursor.statements), 1)
+        self.assertIn("where tenant_id = %s and external_id = %s", cursor.statements[0][0])
+        self.assertEqual(cursor.statements[0][1][-2:], ("demo-mandant", "project-1"))
+        self.assertEqual(assignment["code"], "Neula51")
+
     def test_assignment_sync_token_allows_partner_api_without_session(self):
         request = SimpleNamespace(headers={"authorization": "Bearer sync-token"}, state=SimpleNamespace())
 
@@ -2363,6 +2406,90 @@ class BookingSuggestionTests(TestCase):
                 masterdata_route._require_admin_or_sync_token(request, "demo-mandant")
 
         self.assertEqual(context.exception.status_code, 401)
+
+    def test_partner_project_mapping_uses_project_number_as_fallback_code(self):
+        assignments = partner_app_service._extract_projects(
+            {
+                "projects": [
+                    {
+                        "id": "project-1",
+                        "projectNumber": "25-00008",
+                        "orderNumber": "A-42",
+                        "customerNumber": "K-7",
+                        "name": "Weseler Weg 20",
+                        "projectAddress": "Weseler Weg 20",
+                        "status": "active",
+                    }
+                ]
+            }
+        )
+
+        mapped = partner_app_service._project_to_assignment_unit(assignments[0])
+
+        self.assertEqual(mapped["code"], "25-00008")
+        self.assertEqual(mapped["label"], "Weseler Weg 20")
+        self.assertEqual(mapped["project_number"], "25-00008")
+        self.assertEqual(mapped["address_line"], "Weseler Weg 20")
+        self.assertEqual(mapped["kind"], "construction_project")
+        self.assertTrue(mapped["revenue_relevant"])
+        self.assertIn("A-42", mapped["aliases"])
+        self.assertIn("K-7", mapped["aliases"])
+
+    def test_partner_app_base_url_must_be_public_https(self):
+        invalid_urls = [
+            "http://fristd-bau.replit.app",
+            "https://localhost",
+            "https://127.0.0.1",
+            "https://10.0.0.5",
+            "https://service.local",
+        ]
+
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                with self.assertRaises(partner_app_service.PartnerAppConfigError):
+                    partner_app_service._validate_partner_base_url(url)
+
+        partner_app_service._validate_partner_base_url("https://fristd-bau.replit.app")
+
+    def test_import_partner_assignment_units_creates_tenant_assignments(self):
+        request = SimpleNamespace(headers={}, state=SimpleNamespace())
+        assignment = {
+            "code": "Neula51",
+            "label": "Neusurenland 51",
+            "kind": "construction_project",
+            "project_number": "26-00001",
+            "address_line": "Neusurenland 51",
+            "postal_code": "22159",
+            "city": "Hamburg",
+            "external_id": "project-1",
+            "revenue_relevant": True,
+            "aliases": ["26-00001", "Neusurenland 51"],
+            "is_active": True,
+        }
+
+        with (
+            patch.object(masterdata_route, "require_admin"),
+            patch.object(masterdata_route, "require_tenant_access"),
+            patch.object(masterdata_route, "fetch_partner_assignment_units", return_value=[assignment]),
+            patch.object(masterdata_route, "create_assignment_unit", return_value={**assignment, "id": "assignment-1"}) as create_assignment,
+        ):
+            result = masterdata_route.import_partner_assignment_units(request, tenant_id="demo-mandant")
+
+        self.assertEqual(result["synced_count"], 1)
+        create_assignment.assert_called_once_with(
+            tenant_id="demo-mandant",
+            code="Neula51",
+            label="Neusurenland 51",
+            kind="construction_project",
+            project_number="26-00001",
+            address_line="Neusurenland 51",
+            postal_code="22159",
+            city="Hamburg",
+            external_id="project-1",
+            revenue_relevant=True,
+            aliases=["26-00001", "Neusurenland 51"],
+            is_active=True,
+        )
 
     def test_assignment_lookup_does_not_match_city_or_postal_code_only(self):
         assignment = {
