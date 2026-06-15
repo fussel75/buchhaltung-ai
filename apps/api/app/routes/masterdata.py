@@ -36,6 +36,10 @@ class AssignmentUnitRequest(BaseModel):
     label: str
     kind: str = "cost_object"
     project_number: str | None = None
+    order_number: str | None = None
+    customer_number: str | None = None
+    description: str | None = None
+    client_name: str | None = None
     address_line: str | None = None
     postal_code: str | None = None
     city: str | None = None
@@ -50,6 +54,10 @@ class AssignmentUnitUpdateRequest(BaseModel):
     label: str
     kind: str = "cost_object"
     project_number: str | None = None
+    order_number: str | None = None
+    customer_number: str | None = None
+    description: str | None = None
+    client_name: str | None = None
     address_line: str | None = None
     postal_code: str | None = None
     city: str | None = None
@@ -262,6 +270,10 @@ def post_assignment_unit(
         label=payload.label,
         kind=payload.kind,
         project_number=payload.project_number,
+        order_number=payload.order_number,
+        customer_number=payload.customer_number,
+        description=payload.description,
+        client_name=payload.client_name,
         address_line=payload.address_line,
         postal_code=payload.postal_code,
         city=payload.city,
@@ -286,6 +298,10 @@ def patch_assignment_unit(
         label=payload.label,
         kind=payload.kind,
         project_number=payload.project_number,
+        order_number=payload.order_number,
+        customer_number=payload.customer_number,
+        description=payload.description,
+        client_name=payload.client_name,
         address_line=payload.address_line,
         postal_code=payload.postal_code,
         city=payload.city,
@@ -313,6 +329,10 @@ def sync_assignment_units(
             label=assignment.label,
             kind=assignment.kind,
             project_number=assignment.project_number,
+            order_number=assignment.order_number,
+            customer_number=assignment.customer_number,
+            description=assignment.description,
+            client_name=assignment.client_name,
             address_line=assignment.address_line,
             postal_code=assignment.postal_code,
             city=assignment.city,
@@ -348,6 +368,10 @@ def import_partner_assignment_units(
             label=assignment["label"],
             kind=assignment["kind"],
             project_number=assignment["project_number"],
+            order_number=assignment["order_number"],
+            customer_number=assignment["customer_number"],
+            description=assignment["description"],
+            client_name=assignment["client_name"],
             address_line=assignment["address_line"],
             postal_code=assignment["postal_code"],
             city=assignment["city"],

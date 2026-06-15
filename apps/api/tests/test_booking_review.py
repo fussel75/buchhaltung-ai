@@ -2429,6 +2429,8 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(mapped["code"], "25-00008")
         self.assertEqual(mapped["label"], "Weseler Weg 20")
         self.assertEqual(mapped["project_number"], "25-00008")
+        self.assertEqual(mapped["order_number"], "A-42")
+        self.assertEqual(mapped["customer_number"], "K-7")
         self.assertEqual(mapped["address_line"], "Weseler Weg 20")
         self.assertEqual(mapped["kind"], "construction_project")
         self.assertTrue(mapped["revenue_relevant"])
@@ -2460,7 +2462,11 @@ class BookingSuggestionTests(TestCase):
                 return False
 
             def read(self):
-                return b'{"projects":[{"projectNumber":"25-00008","name":"Weseler Weg 20","address":"Weseler Weg 20"}]}'
+                return (
+                    b'{"projects":[{"projectNumber":"25-00008","orderNumber":"25-00012",'
+                    b'"customerNumber":"10794","name":"Buwg4","description":"Dachsanierung EFH",'
+                    b'"address":"Bucheckerweg 4, 22175 Hamburg","clientName":"Ralf Esch"}]}'
+                )
 
         class FakeOpener:
             def __init__(self):
@@ -2483,7 +2489,14 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(opener.request.full_url, "https://fristd-bau.replit.app/api/buha/projects")
         self.assertEqual(opener.request.get_header("X-api-key"), "secret-key")
         self.assertEqual(assignments[0]["project_number"], "25-00008")
-        self.assertIn("Weseler Weg 20", assignments[0]["aliases"])
+        self.assertEqual(assignments[0]["order_number"], "25-00012")
+        self.assertEqual(assignments[0]["customer_number"], "10794")
+        self.assertEqual(assignments[0]["description"], "Dachsanierung EFH")
+        self.assertEqual(assignments[0]["client_name"], "Ralf Esch")
+        self.assertEqual(assignments[0]["address_line"], "Bucheckerweg 4")
+        self.assertEqual(assignments[0]["postal_code"], "22175")
+        self.assertEqual(assignments[0]["city"], "Hamburg")
+        self.assertIn("Ralf Esch", assignments[0]["aliases"])
 
     def test_import_partner_assignment_units_creates_tenant_assignments(self):
         request = SimpleNamespace(headers={}, state=SimpleNamespace())
@@ -2492,6 +2505,10 @@ class BookingSuggestionTests(TestCase):
             "label": "Neusurenland 51",
             "kind": "construction_project",
             "project_number": "26-00001",
+            "order_number": "26-00003",
+            "customer_number": "10794",
+            "description": "Badmodernisierung",
+            "client_name": "Ralf Esch",
             "address_line": "Neusurenland 51",
             "postal_code": "22159",
             "city": "Hamburg",
@@ -2517,6 +2534,10 @@ class BookingSuggestionTests(TestCase):
             label="Neusurenland 51",
             kind="construction_project",
             project_number="26-00001",
+            order_number="26-00003",
+            customer_number="10794",
+            description="Badmodernisierung",
+            client_name="Ralf Esch",
             address_line="Neusurenland 51",
             postal_code="22159",
             city="Hamburg",

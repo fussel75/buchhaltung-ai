@@ -1,5 +1,6 @@
 from ipaddress import ip_address
 from json import JSONDecodeError, loads
+import re
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
@@ -106,15 +107,25 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
     address_line = _first_text(project, "projectAddress", "project_address", "address", "addressLine", "address_line")
     postal_code = _first_text(project, "postalCode", "postal_code", "zip", "zipCode")
     city = _first_text(project, "city", "town")
+    if address_line and (not postal_code or not city):
+        parsed_address = _split_german_address(address_line)
+        if parsed_address:
+            address_line = parsed_address["address_line"]
+            postal_code = postal_code or parsed_address["postal_code"]
+            city = city or parsed_address["city"]
+    order_number = _first_text(project, "orderNumber", "order_number")
+    customer_number = _first_text(project, "customerNumber", "customer_number")
+    description = _first_text(project, "description")
+    client_name = _first_text(project, "clientName", "client_name")
     aliases = _unique_texts(
         [
             project_number,
             label,
             address_line,
-            _first_text(project, "description"),
-            _first_text(project, "clientName", "client_name"),
-            _first_text(project, "orderNumber", "order_number"),
-            _first_text(project, "customerNumber", "customer_number"),
+            description,
+            client_name,
+            order_number,
+            customer_number,
             *_list_texts(project.get("aliases")),
         ]
     )
@@ -124,6 +135,10 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
         "label": label,
         "kind": _first_text(project, "kind", "assignmentKind", "assignment_kind") or "construction_project",
         "project_number": project_number,
+        "order_number": order_number,
+        "customer_number": customer_number,
+        "description": description,
+        "client_name": client_name,
         "address_line": address_line,
         "postal_code": postal_code,
         "city": city,
@@ -149,6 +164,21 @@ def _list_texts(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _split_german_address(value: str) -> dict[str, str] | None:
+    match = re.match(r"^(?P<line>.*?)[,\s]+(?P<postal_code>\d{5})\s+(?P<city>.+)$", value.strip())
+    if not match:
+        return None
+    line = match.group("line").strip(" ,")
+    city = match.group("city").strip(" ,")
+    if not line or not city:
+        return None
+    return {
+        "address_line": line,
+        "postal_code": match.group("postal_code"),
+        "city": city,
+    }
 
 
 def _unique_texts(values: list[str | None]) -> list[str]:

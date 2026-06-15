@@ -1997,7 +1997,11 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
       const haystack = [
         project.code,
         project.project_number,
+        project.order_number,
+        project.customer_number,
         project.label,
+        project.description,
+        project.client_name,
         project.address_line,
         project.postal_code,
         project.city,
@@ -2068,9 +2072,12 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
           <div className="project-table">
             <div className="project-row project-head">
               <span>Projektnummer</span>
-              <span>Code</span>
-              <span>Name</span>
+              <span>Auftragsnummer</span>
+              <span>Kundennummer</span>
+              <span>Projektname</span>
               <span>Adresse</span>
+              <span>Beschreibung</span>
+              <span>Bauherr</span>
               <span>Art</span>
               <span>Aliase</span>
               <span>Status</span>
@@ -2078,9 +2085,12 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
             {filteredProjects.map((project) => (
               <div className="project-row" key={project.id}>
                 <strong>{project.project_number || "-"}</strong>
-                <span>{formatAssignmentCode(project.code, project.kind, tenantProfile)}</span>
+                <span>{project.order_number || "-"}</span>
+                <span>{project.customer_number || "-"}</span>
                 <span>{project.label}</span>
                 <span>{formatAssignmentAddress(project)}</span>
+                <span>{project.description || "-"}</span>
+                <span>{project.client_name || "-"}</span>
                 <span>{formatAssignmentKind(project.kind, tenantProfile)}</span>
                 <span>{project.aliases?.length ? project.aliases.join(", ") : "-"}</span>
                 <StatusPill value={project.is_active ? "aktiv" : "inaktiv"} tone={project.is_active ? "green" : "gray"} />
@@ -3741,6 +3751,10 @@ function MasterdataAdmin({
         label: assignment.label,
         kind: assignment.kind,
         project_number: assignment.project_number,
+        order_number: assignment.order_number,
+        customer_number: assignment.customer_number,
+        description: assignment.description,
+        client_name: assignment.client_name,
         address_line: assignment.address_line,
         postal_code: assignment.postal_code,
         city: assignment.city,
@@ -3770,6 +3784,10 @@ function MasterdataAdmin({
       label: assignment.label || "",
       kind: assignment.kind || tenantProfile.default_assignment_kind || "cost_object",
       project_number: assignment.project_number || "",
+      order_number: assignment.order_number || "",
+      customer_number: assignment.customer_number || "",
+      description: assignment.description || "",
+      client_name: assignment.client_name || "",
       address_line: assignment.address_line || "",
       postal_code: assignment.postal_code || "",
       city: assignment.city || "",
@@ -4300,6 +4318,30 @@ function MasterdataAdmin({
                             placeholder="Externe ID"
                             value={assignmentEditForm.external_id}
                             onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, external_id: event.target.value })}
+                          />
+                          <input
+                            aria-label="Auftragsnummer"
+                            placeholder="Auftragsnummer"
+                            value={assignmentEditForm.order_number}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, order_number: event.target.value })}
+                          />
+                          <input
+                            aria-label="Kundennummer"
+                            placeholder="Kundennummer"
+                            value={assignmentEditForm.customer_number}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, customer_number: event.target.value })}
+                          />
+                          <input
+                            aria-label="Beschreibung"
+                            placeholder="Beschreibung"
+                            value={assignmentEditForm.description}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, description: event.target.value })}
+                          />
+                          <input
+                            aria-label="Bauherr"
+                            placeholder="Bauherr"
+                            value={assignmentEditForm.client_name}
+                            onChange={(event) => setAssignmentEditForm({ ...assignmentEditForm, client_name: event.target.value })}
                           />
                         </div>
                       </InlineEditField>
