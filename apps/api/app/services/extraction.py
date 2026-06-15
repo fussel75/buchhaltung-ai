@@ -283,7 +283,7 @@ def _build_cii_xml_result(
         "discount_due_date": discount_due_date,
         "service_period": invoice_date[:7] if invoice_date else None,
         "delivery_address": delivery_address,
-        "assignment_code": assignment["code"] if assignment else None,
+        "assignment_code": _assignment_code(assignment),
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
@@ -439,7 +439,7 @@ def _build_ubl_xml_result(
         "discount_due_date": None,
         "service_period": invoice_date[:7] if invoice_date else None,
         "delivery_address": delivery_address,
-        "assignment_code": assignment["code"] if assignment else None,
+        "assignment_code": _assignment_code(assignment),
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
@@ -611,7 +611,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "delivery_address": delivery_address,
         "delivery_addresses": delivery_addresses,
         "allocation_lines": allocation_lines,
-        "assignment_code": assignment["code"] if assignment else None,
+        "assignment_code": _assignment_code(assignment),
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
         "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
@@ -1147,7 +1147,7 @@ def _find_allocation_lines(tenant_id: str, text: str) -> list[dict[str, str | No
                 "recipient": recipient,
                 "address": address,
                 "delivery_address": full_address,
-                "assignment_code": assignment["code"] if assignment else None,
+                "assignment_code": _assignment_code(assignment),
                 "assignment_label": assignment["label"] if assignment else None,
                 "assignment_kind": assignment["kind"] if assignment else None,
                 "project_number": _project_number(assignment),
@@ -1172,8 +1172,11 @@ def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresse
 
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
+    lower_text = text.lower()
     if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
         return "Theo Foerch GmbH & Co. KG"
+    if any(name in lower_text for name in ["lüchau baustoffe gmbh", "lã¼chau baustoffe gmbh", "luechau baustoffe gmbh"]):
+        return "Lüchau Baustoffe GmbH"
     if "lüchau baustoffe gmbh" in text.lower():
         return "Lüchau Baustoffe GmbH"
     if "rechnungar" in original and "0113042/504" in text:
@@ -1207,8 +1210,22 @@ def _assignment_unit(
 
 def _legacy_project_code(assignment: dict | None) -> str | None:
     if assignment and assignment["kind"] == "construction_project":
-        return assignment["code"]
+        return _assignment_code(assignment)
     return None
+
+
+def _assignment_code(assignment: dict | None) -> str | None:
+    if not assignment:
+        return None
+    code = assignment.get("code")
+    label = assignment.get("label")
+    if code and _looks_like_project_number(code) and label and not _looks_like_project_number(label):
+        return label
+    return code
+
+
+def _looks_like_project_number(value: str | None) -> bool:
+    return bool(value and search(r"^\d{2,4}-\d{3,}$", value.strip()))
 
 
 def _project_number(assignment: dict | None) -> str | None:
@@ -1260,6 +1277,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["lüchau", "lã¼chau", "baustoffe", "abdeckvlies", "artikel", "material"]):
+        return "material"
     if any(term in haystack for term in ["maler", "elektro", "sanitär", "subunternehmer", "fremdleistung"]):
         return "subcontractor"
     if any(term in haystack for term in ["hobotec", "fermacell", "schalung", "gipsfaserplatte", "artikel", "material"]):
@@ -1281,6 +1300,8 @@ def _clean_product_name(value: str | None) -> str | None:
     cleaned = sub(r"\s+", " ", value.replace("^", "")).strip()
     if cleaned.startswith("FERMACELL 10mm Gipsfaserplatte"):
         return "FERMACELL 10mm Gipsfaserplatte"
+    if cleaned.startswith("Maler-Abdeckvlies 50qm"):
+        return "Maler-Abdeckvlies 50qm"
     return cleaned[:80]
 
 
@@ -1308,6 +1329,9 @@ def _product_name(text: str) -> str:
         return "PE-Folie 200 my / Baustoffe"
     if "FERMACELL" in text and "10mm Gipsfaserplatte" in text:
         return "FERMACELL 10mm Gipsfaserplatte"
+    first_position = _find_first_position_product_name(text)
+    if first_position:
+        return _clean_product_name(first_position) or first_position
     match = search(r"Pos\. 1:\s*\n(.+?)\n(.+?)(?:\s{2,}|\n)", text)
     if not match:
         return "Eingangsrechnung"
@@ -1341,10 +1365,11 @@ def _filename_part(value: str) -> str:
 
 def _filename_assignment_label(assignment: dict | None, assignment_type: str, tenant_profile: dict) -> str:
     if assignment:
+        code = _assignment_code(assignment)
         prefix = tenant_profile.get("assignment_code_prefix")
         if prefix:
-            return f"{prefix} {assignment['code']}"
-        return f"{tenant_profile['assignment_label_singular']} {assignment['code']}"
+            return f"{prefix} {code}"
+        return f"{tenant_profile['assignment_label_singular']} {code}"
     if assignment_type == "assignment_split":
         return f"{tenant_profile['assignment_label_plural']} aufgeteilt"
     if assignment_type == "assignment_unresolved":

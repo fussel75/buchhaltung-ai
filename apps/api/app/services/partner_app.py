@@ -87,7 +87,7 @@ def _extract_projects(payload: Any) -> list[dict[str, Any]]:
 
 def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
     project_number = _first_text(project, "projectNumber", "project_number", "number")
-    code = _first_text(
+    explicit_code = _first_text(
         project,
         "assignmentCode",
         "assignment_code",
@@ -99,8 +99,9 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
         "abbreviation",
         "projectAbbreviation",
         "project_abbreviation",
-    ) or project_number
+    )
     label = _first_text(project, "name", "projectName", "project_name", "title", "label")
+    code = explicit_code or label or project_number
     if not code or not label:
         raise PartnerAppFetchError("Partner-App-Projekt ohne Code/Projektnummer oder Name gefunden.")
 

@@ -440,6 +440,51 @@ class BookingSuggestionTests(TestCase):
         )
         self.assertFalse(any(character in filename for character in '<>:"/\\|?*'))
 
+    def test_normalized_invoice_filename_uses_project_name_not_project_number(self):
+        filename = _normalized_invoice_filename(
+            invoice_number="RE1586258",
+            assignment={
+                "code": "26-00007",
+                "label": "Hk92",
+                "kind": "construction_project",
+                "project_number": "26-00007",
+            },
+            assignment_type="assigned",
+            tenant_profile={
+                "assignment_label_singular": "Bauvorhaben",
+                "assignment_label_plural": "Bauvorhaben",
+                "assignment_code_prefix": "BV",
+            },
+            supplier_name="Lüchau Baustoffe GmbH",
+            product_name="Maler-Abdeckvlies 50qm",
+            invoice_date="2026-06-11",
+        )
+
+        self.assertEqual(
+            filename,
+            "ERg RE1586258, BV Hk92, Lüchau Baustoffe GmbH, Maler-Abdeckvlies 50qm, 2026-06-11.pdf",
+        )
+
+    def test_luechau_abdeckvlies_is_material_not_subcontractor(self):
+        self.assertEqual(
+            extraction_service._cost_category(
+                supplier_name="Lüchau Baustoffe GmbH",
+                product_name="Maler-Abdeckvlies 50qm",
+                text="Maler-Abdeckvlies 50qm Premium 220g/qm",
+                assignment_type="assigned",
+            ),
+            "material",
+        )
+
+    def test_first_position_product_name_trims_luechau_abdeckvlies(self):
+        text = """
+        1 252642 1,000 ROL
+        Maler-Abdeckvlies 50qm Premium 220g/qm
+        42,01 EIN
+        """
+
+        self.assertEqual(extraction_service._product_name(text), "Maler-Abdeckvlies 50qm")
+
     def test_download_filename_is_windows_safe_for_existing_rows(self):
         filename = _download_filename(
             {
@@ -2416,7 +2461,7 @@ class BookingSuggestionTests(TestCase):
                         "projectNumber": "25-00008",
                         "orderNumber": "A-42",
                         "customerNumber": "K-7",
-                        "name": "Weseler Weg 20",
+                        "name": "Wewe20",
                         "projectAddress": "Weseler Weg 20",
                         "status": "active",
                     }
@@ -2426,8 +2471,8 @@ class BookingSuggestionTests(TestCase):
 
         mapped = partner_app_service._project_to_assignment_unit(assignments[0])
 
-        self.assertEqual(mapped["code"], "25-00008")
-        self.assertEqual(mapped["label"], "Weseler Weg 20")
+        self.assertEqual(mapped["code"], "Wewe20")
+        self.assertEqual(mapped["label"], "Wewe20")
         self.assertEqual(mapped["project_number"], "25-00008")
         self.assertEqual(mapped["order_number"], "A-42")
         self.assertEqual(mapped["customer_number"], "K-7")

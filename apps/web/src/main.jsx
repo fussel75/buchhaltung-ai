@@ -2223,6 +2223,9 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, 
         <FormField label={tenantProfile.assignment_code_label}>
           <input name="assignment_code" placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
         </FormField>
+        <FormField label="Projektnr.">
+          <input name="project_number" placeholder="z.B. 26-00007" value={form.project_number} onChange={(event) => updateField("project_number", event.target.value)} disabled={isApproved} />
+        </FormField>
         <FormField label="Zuordnungsart">
           <select name="assignment_kind" value={form.assignment_kind} onChange={(event) => updateField("assignment_kind", event.target.value)} disabled={isApproved}>
             <option value="">-</option>
@@ -5307,6 +5310,7 @@ function extractionFormFromDocument(document) {
     document_type: raw.document_type || "incoming_invoice",
     cost_category: raw.cost_category || "",
     assignment_code: raw.assignment_code || raw.project_code || "",
+    project_number: raw.project_number || "",
     assignment_kind: raw.assignment_kind || "",
     net_amount: moneyDraftValue(extraction.net_amount),
     tax_amount: moneyDraftValue(extraction.tax_amount),
@@ -5331,6 +5335,7 @@ function normalizeExtractionUpdate(values) {
     document_type: values.document_type || null,
     cost_category: values.cost_category || null,
     assignment_code: values.assignment_code?.trim() || null,
+    project_number: values.project_number?.trim() || null,
     assignment_kind: values.assignment_kind || null,
     net_amount: decimalOrNull(values.net_amount),
     tax_amount: decimalOrNull(values.tax_amount),

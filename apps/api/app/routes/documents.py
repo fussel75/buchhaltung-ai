@@ -123,6 +123,7 @@ class BookingSuggestionUpdate(BaseModel):
     booking_type: Literal["incoming_invoice", "credit_note"]
     cost_category: CostCategory | None = None
     assignment_code: str | None = Field(default=None, max_length=80)
+    project_number: str | None = Field(default=None, max_length=80)
     assignment_kind: Literal[
         "construction_project",
         "construction_or_dropoff_site",

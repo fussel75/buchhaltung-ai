@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from re import sub
+from re import search as re_search, sub
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -994,6 +994,7 @@ def update_document_extraction(
         "cost_category",
         "assignment_code",
         "assignment_kind",
+        "project_number",
         "due_date",
         "discount_due_date",
         "discount_base",
@@ -1187,10 +1188,11 @@ def _filename_assignment_label(
     tenant_profile: dict[str, Any],
 ) -> str:
     if assignment:
+        code = _display_assignment_code(assignment)
         prefix = tenant_profile.get("assignment_code_prefix")
         if prefix:
-            return f"{prefix} {assignment['code']}"
-        return f"{tenant_profile['assignment_label_singular']} {assignment['code']}"
+            return f"{prefix} {code}"
+        return f"{tenant_profile['assignment_label_singular']} {code}"
     if assignment_code:
         prefix = tenant_profile.get("assignment_code_prefix")
         if prefix:
@@ -1201,6 +1203,18 @@ def _filename_assignment_label(
     if assignment_type == "assignment_unresolved":
         return f"{tenant_profile['assignment_label_singular']} ungeklärt"
     return "Allgemeine Kosten"
+
+
+def _display_assignment_code(assignment: dict[str, Any]) -> str:
+    code = assignment.get("code")
+    label = assignment.get("label")
+    if code and _looks_like_project_number(code) and label and not _looks_like_project_number(label):
+        return label
+    return code or label or "-"
+
+
+def _looks_like_project_number(value: str | None) -> bool:
+    return bool(value and re_search(r"^\d{2,4}-\d{3,}$", value.strip()))
 
 
 def approve_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
@@ -3258,6 +3272,21 @@ def get_assignment_unit_by_code(tenant_id: str, code: str | None) -> dict[str, A
                 """,
                 (tenant_id, code.strip()),
             )
+            row = cursor.fetchone()
+            if row:
+                return _serialize_assignment_unit(row)
+            try:
+                cursor.execute(
+                    """
+                    select *
+                    from tenant_assignment_units
+                    where tenant_id = %s and lower(coalesce(project_number, '')) = lower(%s)
+                    limit 1
+                    """,
+                    (tenant_id, code.strip()),
+                )
+            except psycopg.errors.UndefinedColumn:
+                return None
             row = cursor.fetchone()
             return _serialize_assignment_unit(row) if row else None
 
