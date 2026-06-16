@@ -19,8 +19,23 @@ jobs:
         env:
           SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
         run: |
           set -eo pipefail
+          if [ -z "$SSH_HOST" ]; then
+            echo "::error title=DEPLOY_HOST missing::Set DEPLOY_HOST to the VPS IP address or SSH hostname."
+            exit 1
+          fi
+          if [ -z "$SSH_KEY_B64" ]; then
+            echo "::error title=DEPLOY_SSH_KEY_B64 missing::Set DEPLOY_SSH_KEY_B64 to the base64 encoded private deploy key."
+            exit 1
+          fi
+          if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]]; then
+            echo "::error title=DEPLOY_PORT invalid::DEPLOY_PORT must be a number, for example 22."
+            exit 1
+          fi
+
+          echo "Deploy target: ${SSH_HOST}:${SSH_PORT}"
 
           mkdir -p ~/.ssh
           printf '%s' "$SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
@@ -31,18 +46,18 @@ jobs:
           known_host_found=false
 
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if ssh-keyscan -T 20 -H "$SSH_HOST" > "$known_hosts_tmp"; then
+            if ssh-keyscan -T 20 -p "$SSH_PORT" -H "$SSH_HOST" > "$known_hosts_tmp"; then
               cat "$known_hosts_tmp" >> ~/.ssh/known_hosts
               known_host_found=true
               break
             fi
 
             if [ "$attempt" -eq 10 ]; then
-              echo "::warning title=ssh-keyscan failed::Could not prefetch host key after 10 attempts; SSH will use accept-new."
+              echo "::warning title=ssh-keyscan failed::Could not prefetch host key from ${SSH_HOST}:${SSH_PORT} after 10 attempts; SSH will use accept-new."
               break
             fi
 
-            echo "ssh-keyscan failed. Retrying in 10s (${attempt}/10)..."
+            echo "ssh-keyscan failed for ${SSH_HOST}:${SSH_PORT}. Retrying in 10s (${attempt}/10)..."
             sleep 10
           done
 
@@ -53,6 +68,7 @@ jobs:
 
           ssh_options=(
             -i ~/.ssh/id_ed25519
+            -p "$SSH_PORT"
             -o BatchMode=yes
             -o IdentitiesOnly=yes
             -o ConnectTimeout=30
@@ -85,7 +101,7 @@ jobs:
             if [ "$attempt" -eq 10 ]; then
               tail_summary="$(tail -n 20 "$deploy_log" | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r/%0D/g')"
               echo "::error title=SSH connection failed::${tail_summary}"
-              echo "SSH connection failed after 10 attempts."
+              echo "SSH connection failed after 10 attempts. Check DEPLOY_HOST, DEPLOY_PORT, the VPS firewall, and whether GitHub Actions IPs are allowed to reach SSH."
               exit 255
             fi
 
