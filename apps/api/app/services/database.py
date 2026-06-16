@@ -3063,6 +3063,7 @@ def create_assignment_unit(
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     normalized_external_id = external_id.strip() if external_id else None
+    normalized_project_number = project_number.strip() if project_number else None
     with _connect() as connection:
         with connection.cursor() as cursor:
             if normalized_external_id:
@@ -3112,7 +3113,71 @@ def create_assignment_unit(
                 )
                 existing = cursor.fetchone()
                 if existing:
+                    _delete_assignment_unit_project_duplicates(cursor, tenant_id, normalized_project_number, existing["id"])
                     return _serialize_assignment_unit(existing)
+
+            if normalized_project_number:
+                cursor.execute(
+                    """
+                    select id
+                    from tenant_assignment_units
+                    where tenant_id = %s and lower(coalesce(project_number, '')) = lower(%s)
+                    order by (code = %s) desc, (external_id is not null) desc, updated_at desc
+                    limit 1
+                    """,
+                    (tenant_id, normalized_project_number, code.strip()),
+                )
+                project_match = cursor.fetchone()
+                if project_match:
+                    cursor.execute(
+                        """
+                        update tenant_assignment_units
+                        set
+                            code = %s,
+                            label = %s,
+                            kind = %s,
+                            project_number = %s,
+                            order_number = %s,
+                            customer_number = %s,
+                            description = %s,
+                            client_name = %s,
+                            source_status = %s,
+                            address_line = %s,
+                            postal_code = %s,
+                            city = %s,
+                            external_id = %s,
+                            revenue_relevant = %s,
+                            aliases = %s,
+                            is_active = %s,
+                            updated_at = %s
+                        where id = %s
+                        returning *
+                        """,
+                        (
+                            code.strip(),
+                            label.strip(),
+                            kind,
+                            normalized_project_number,
+                            order_number.strip() if order_number else None,
+                            customer_number.strip() if customer_number else None,
+                            description.strip() if description else None,
+                            client_name.strip() if client_name else None,
+                            source_status.strip() if source_status else None,
+                            address_line.strip() if address_line else None,
+                            postal_code.strip() if postal_code else None,
+                            city.strip() if city else None,
+                            normalized_external_id,
+                            revenue_relevant,
+                            Jsonb([alias.strip() for alias in aliases if alias.strip()]),
+                            is_active,
+                            now,
+                            project_match["id"],
+                        ),
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        _delete_assignment_unit_project_duplicates(cursor, tenant_id, normalized_project_number, existing["id"])
+                        return _serialize_assignment_unit(existing)
 
             cursor.execute(
                 """
@@ -3147,7 +3212,7 @@ def create_assignment_unit(
                     code.strip(),
                     label.strip(),
                     kind,
-                    project_number.strip() if project_number else None,
+                    normalized_project_number,
                     order_number.strip() if order_number else None,
                     customer_number.strip() if customer_number else None,
                     description.strip() if description else None,
@@ -3164,7 +3229,24 @@ def create_assignment_unit(
                     now,
                 ),
             )
-            return _serialize_assignment_unit(cursor.fetchone())
+            created = cursor.fetchone()
+            if created:
+                _delete_assignment_unit_project_duplicates(cursor, tenant_id, normalized_project_number, created["id"])
+            return _serialize_assignment_unit(created)
+
+
+def _delete_assignment_unit_project_duplicates(cursor, tenant_id: str, project_number: str | None, keep_id) -> None:
+    if not project_number:
+        return
+    cursor.execute(
+        """
+        delete from tenant_assignment_units
+        where tenant_id = %s
+          and lower(coalesce(project_number, '')) = lower(%s)
+          and id <> %s
+        """,
+        (tenant_id, project_number, keep_id),
+    )
 
 
 def update_assignment_unit(

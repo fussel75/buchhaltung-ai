@@ -2430,10 +2430,55 @@ class BookingSuggestionTests(TestCase):
                 is_active=True,
             )
 
-        self.assertEqual(len(cursor.statements), 1)
+        self.assertEqual(len(cursor.statements), 2)
         self.assertIn("where tenant_id = %s and external_id = %s", cursor.statements[0][0])
         self.assertEqual(cursor.statements[0][1][-2:], ("demo-mandant", "project-1"))
+        self.assertIn("delete from tenant_assignment_units", cursor.statements[1][0])
         self.assertEqual(assignment["code"], "Neula51")
+
+    def test_assignment_unit_create_updates_existing_project_number_and_removes_duplicates(self):
+        assignment_id = uuid4()
+        row = {
+            "id": assignment_id,
+            "tenant_id": "demo-mandant",
+            "code": "Hk92",
+            "label": "Hk92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "address_line": "Heukoppel 92",
+            "postal_code": "22179",
+            "city": "Hamburg",
+            "external_id": "partner-project-7",
+            "revenue_relevant": True,
+            "aliases": [],
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = RecordingCursor(fetchone_result=row)
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            assignment = database_service.create_assignment_unit(
+                tenant_id="demo-mandant",
+                code="Hk92",
+                label="Hk92",
+                kind="construction_project",
+                project_number="26-00007",
+                address_line="Heukoppel 92",
+                postal_code="22179",
+                city="Hamburg",
+                external_id=None,
+                revenue_relevant=True,
+                aliases=["26-00007", "Heukoppel 92"],
+                is_active=True,
+            )
+
+        statements = [statement for statement, _params in cursor.statements]
+        self.assertIn("where tenant_id = %s and lower(coalesce(project_number, '')) = lower(%s)", statements[0])
+        self.assertIn("where id = %s returning *", statements[1])
+        self.assertIn("delete from tenant_assignment_units", statements[2])
+        self.assertEqual(cursor.statements[2][1], ("demo-mandant", "26-00007", assignment_id))
+        self.assertEqual(assignment["code"], "Hk92")
 
     def test_assignment_sync_token_allows_partner_api_without_session(self):
         request = SimpleNamespace(headers={"authorization": "Bearer sync-token"}, state=SimpleNamespace())
