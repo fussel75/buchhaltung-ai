@@ -497,13 +497,16 @@ def _build_pdf_text_result(document: dict) -> dict:
 
     invoice_number = _find_text(text, r"Rechnungs-Nr\.:\s*(\d+)") or _find_text(
         text,
+        r"\bNummer\s*:\s*([0-9]+-[0-9]+)",
+    ) or _find_text(
+        text,
         r"Nr\.\s*\(S\)\s*:\s*([0-9-]+)",
     ) or _find_text(
         text,
         r"Belegnummer:\s*([A-Z]{1,5}\d+)",
     ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_customer_number(text)
-    invoice_date = _find_date(text, r"Datum:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+    invoice_date = _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"Datum\s*-\s*Zeit\s*:\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
@@ -520,11 +523,12 @@ def _build_pdf_text_result(document: dict) -> dict:
     )
     allocation_lines = _find_allocation_lines(document["tenant_id"], text)
     visible_discount = _find_visible_discount_terms(text)
-    due_date = due_date or visible_discount.get("due_date")
+    due_date = due_date or _find_dammers_due_date(text) or visible_discount.get("due_date")
     discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent")
     discount_due_date = (
         _find_date(text, r"(\d{2}\.\d{2}\.\d{4})\s+3,00%\s+Skonto")
         or _discount_due_date_from_days(invoice_date, _find_discount_days(text))
+        or _find_dammers_discount_due_date(text)
         or visible_discount.get("discount_due_date")
     )
     totals = _find_invoice_totals(text)
@@ -532,7 +536,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     net_amount = totals.get("net_amount")
     tax_amount = totals.get("tax_amount")
     gross_amount = totals.get("gross_amount")
-    discount_amount = _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})") or visible_discount.get(
+    discount_amount = _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})") or _find_dammers_discount_amount(text) or visible_discount.get(
         "discount_amount"
     )
     if net_amount is None and tax_amount is not None and gross_amount is not None:
@@ -1029,6 +1033,19 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    dammers_total = search(
+        r"Summe\s+Warenwert\s+EUR\s+([0-9.]+,\d{2})[\s\S]*?"
+        r"\+\s*19,00\s*%\s*Mwst\.\s+EUR\s+([0-9.]+,\d{2})[\s\S]*?"
+        r"Rechnungsbetrag.*?EUR\s+([0-9.]+,\d{2})",
+        text,
+    )
+    if dammers_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(dammers_total.group(1)),
+            "tax_amount": _money_to_decimal(dammers_total.group(2)),
+            "gross_amount": _money_to_decimal(dammers_total.group(3)),
+        }
     luechau_total = search(
         r"\b\d{1,2}%\s+MwSt\.:\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})",
         text,
@@ -1082,6 +1099,18 @@ def _find_discount_percent(text: str) -> Decimal | None:
 def _find_discount_days(text: str) -> int | None:
     value = _find_text(text, r"\b(\d+)\s+Tage\s+[0-9]+(?:,\d{1,2})?%\s+Skonto")
     return int(value) if value else None
+
+
+def _find_dammers_due_date(text: str) -> str | None:
+    return _find_date(text, r"zahlbar bis\s+sp[äÃ¤]testens\s+(\d{2}\.\d{2}\.\d{2})")
+
+
+def _find_dammers_discount_due_date(text: str) -> str | None:
+    return _find_date(text, r"zahlbar bis zum\s+(\d{2}\.\d{2}\.\d{2})\s+abz[üÃ¼]glich\s+EUR\s+[0-9.]+,\d{2}\s+Skonto")
+
+
+def _find_dammers_discount_amount(text: str) -> Decimal | None:
+    return _find_money(text, r"abz[üÃ¼]glich\s+EUR\s+([0-9.]+,\d{2})\s+Skonto")
 
 
 def _discount_due_date_from_days(invoice_date: str | None, days: int | None) -> str | None:
@@ -1173,6 +1202,8 @@ def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresse
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
+    if "auslieferungslager" in lower_text and "barmbek" in lower_text and "0515834/086" in text:
+        return "Rolf Dammers oHG"
     if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
         return "Theo Foerch GmbH & Co. KG"
     if any(name in lower_text for name in ["lüchau baustoffe gmbh", "lã¼chau baustoffe gmbh", "luechau baustoffe gmbh"]):
@@ -1277,6 +1308,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["rolf dammers", "dachtraufprofil", "alu-stossverbinder", "alu-stoßverbinder"]):
+        return "material"
     if any(term in haystack for term in ["lüchau", "lã¼chau", "baustoffe", "abdeckvlies", "artikel", "material"]):
         return "material"
     if any(term in haystack for term in ["maler", "elektro", "sanitär", "subunternehmer", "fremdleistung"]):
@@ -1312,6 +1345,11 @@ def _filename_product_name(value: str) -> str:
 
 def _find_first_position_product_name(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        if search(r"^\d{5,}\s+\d+,\d{2}\s+\w+\s+\d+,\d{2}\s+\w+\s+\d+,\d{2}$", line):
+            for candidate in lines[index + 1 : index + 4]:
+                if candidate and search(r"[A-Za-zÄÖÜäöüß]", candidate):
+                    return candidate
     item_line_pattern = r"^[A-Z0-9][A-Z0-9./ -]{3,}\s+\d+,\d{3}\s+(?:ST|PA|M|KG|LTR|ROL|PKT)\b"
     for index, line in enumerate(lines):
         if not search(item_line_pattern, line):

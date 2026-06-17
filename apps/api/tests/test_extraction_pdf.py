@@ -15,6 +15,57 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_dammers_invoice_reads_digital_pdf_text(self):
+        text = """
+        Auslieferungslager : Barmbek
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB  GmbH & Co KG
+        Haldesdorfer Str. 44
+        Nummer         :            773934-606
+        Datum          :    05.06.2026 - 14:24
+        Kundennummer   :           0515834/086
+        ART-NR BEZEICHNUNG                   MENGE    EINZELPREIS RAB    NETTOWERT
+        51680                                15,00 m     13,40 m           201,00
+        Alu-Dachtraufprofil DP 80
+        Hoehe 80 mm Breite 140 mm  3 m
+        51681                                    2 St     2,10 St            4,20
+        Alu-Stossverbinder f. DP 80
+        Summe Warenwert                                            EUR     205,20
+        + 19,00 % Mwst.                                            EUR      38,99
+        Rechnungsbetrag (zahlbar bis spätestens 06.07.26 o. Abzug) EUR     244,19
+        zahlbar bis zum 16.06.26 abzüglich EUR 7,33 Skonto
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "773934-606.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["invoice_number"], "773934-606")
+        self.assertEqual(result["customer_number"], "0515834/086")
+        self.assertEqual(result["invoice_date"], "2026-06-05")
+        self.assertEqual(result["due_date"], "2026-07-06")
+        self.assertEqual(result["discount_due_date"], "2026-06-16")
+        self.assertEqual(result["net_amount"], Decimal("205.20"))
+        self.assertEqual(result["tax_amount"], Decimal("38.99"))
+        self.assertEqual(result["gross_amount"], Decimal("244.19"))
+        self.assertEqual(result["discount_base"], Decimal("244.19"))
+        self.assertEqual(result["discount_amount"], Decimal("7.33"))
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Alu-Dachtraufprofil DP 80")
+
     def test_foerch_invoice_uses_filename_and_derives_net_amount(self):
         text = """
         THEO FOERCH GmbH & Co. KG
