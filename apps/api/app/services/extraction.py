@@ -497,6 +497,9 @@ def _build_pdf_text_result(document: dict) -> dict:
 
     invoice_number = _find_text(text, r"Rechnungs-Nr\.:\s*(\d+)") or _find_text(
         text,
+        r"(?:Rechnung|Retourgutschrift)\s+Datum\s+Seite\s*\n\s*([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}",
+    ) or _find_text(
+        text,
         r"\bNummer\s*:\s*([0-9]+-[0-9]+)",
     ) or _find_text(
         text,
@@ -507,6 +510,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_customer_number(text)
     invoice_date = _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+        text,
+        r"(?:Rechnung|Retourgutschrift)\s+Datum\s+Seite\s*\n\s*[0-9]{6,}\s+(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
         text,
         r"Datum\s*-\s*Zeit\s*:\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
@@ -523,22 +529,25 @@ def _build_pdf_text_result(document: dict) -> dict:
     )
     allocation_lines = _find_allocation_lines(document["tenant_id"], text)
     visible_discount = _find_visible_discount_terms(text)
-    due_date = due_date or _find_dammers_due_date(text) or visible_discount.get("due_date")
-    discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent")
+    pietsch_discount = _find_pietsch_discount_terms(text)
+    due_date = due_date or _find_dammers_due_date(text) or visible_discount.get("due_date") or pietsch_discount.get("due_date")
+    discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent") or pietsch_discount.get("discount_percent")
     discount_due_date = (
         _find_date(text, r"(\d{2}\.\d{2}\.\d{4})\s+3,00%\s+Skonto")
         or _discount_due_date_from_days(invoice_date, _find_discount_days(text))
         or _find_dammers_discount_due_date(text)
         or visible_discount.get("discount_due_date")
+        or pietsch_discount.get("discount_due_date")
     )
     totals = _find_invoice_totals(text)
-    discount_base = totals.get("discount_base") or visible_discount.get("discount_base")
+    discount_base = totals.get("discount_base") or visible_discount.get("discount_base") or pietsch_discount.get("discount_base")
     net_amount = totals.get("net_amount")
     tax_amount = totals.get("tax_amount")
     gross_amount = totals.get("gross_amount")
     discount_amount = _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})") or _find_dammers_discount_amount(text) or visible_discount.get(
         "discount_amount"
-    )
+    ) or pietsch_discount.get("discount_amount")
+    discounted_payable_amount = visible_discount.get("discounted_payable_amount") or pietsch_discount.get("discounted_payable_amount")
     if net_amount is None and tax_amount is not None and gross_amount is not None:
         net_amount = (gross_amount - tax_amount).quantize(Decimal("0.01"))
     if discount_base is None and visible_discount.get("discount_net_amount") is not None and net_amount is not None:
@@ -638,7 +647,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_net_amount": visible_discount.get("discount_net_amount"),
         "discount_tax_amount": visible_discount.get("discount_tax_amount"),
         "discount_gross_amount": visible_discount.get("discount_gross_amount"),
-        "discounted_payable_amount": visible_discount.get("discounted_payable_amount"),
+        "discounted_payable_amount": discounted_payable_amount,
         "is_credit_note": is_credit_note,
         "document_type": "credit_note" if is_credit_note else "incoming_invoice",
         "payment_terms": _payment_terms(
@@ -648,7 +657,7 @@ def _build_pdf_text_result(document: dict) -> dict:
             discount_base=discount_base,
             discount_percent=discount_percent,
             discount_amount=discount_amount,
-            discounted_payable_amount=visible_discount.get("discounted_payable_amount"),
+            discounted_payable_amount=discounted_payable_amount,
             is_credit_note=is_credit_note,
         ),
         "currency": "EUR",
@@ -1021,6 +1030,7 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
 def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer\s*:?\s*([0-9][0-9/.-]*)")
@@ -1033,6 +1043,20 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    pietsch_total = search(
+        r"Gesamtwert\s+([0-9.]+,\d{2}-?)\s+EUR[\s\S]*?"
+        r"Umsatzsteuer\s+19,00\s*%\s+auf\s+[0-9.]+,\d{2}-?\s+([0-9.]+,\d{2}-?)\s+EUR[\s\S]*?"
+        r"Endbetrag\s+([0-9.]+,\d{2}-?)\s+EUR[\s\S]*?"
+        r"skontierf[Ã¤ä]higen Betrag\s*\(\s*([0-9.]+,\d{2}-?)\s+EUR\s*\)",
+        text,
+    )
+    if pietsch_total:
+        return {
+            "discount_base": _money_to_decimal_with_trailing_minus(pietsch_total.group(4)),
+            "net_amount": _money_to_decimal_with_trailing_minus(pietsch_total.group(1)),
+            "tax_amount": _money_to_decimal_with_trailing_minus(pietsch_total.group(2)),
+            "gross_amount": _money_to_decimal_with_trailing_minus(pietsch_total.group(3)),
+        }
     dammers_total = search(
         r"Summe\s+Warenwert\s+EUR\s+([0-9.]+,\d{2})[\s\S]*?"
         r"\+\s*19,00\s*%\s*Mwst\.\s+EUR\s+([0-9.]+,\d{2})[\s\S]*?"
@@ -1113,6 +1137,28 @@ def _find_dammers_discount_amount(text: str) -> Decimal | None:
     return _find_money(text, r"abz[üÃ¼]glich\s+EUR\s+([0-9.]+,\d{2})\s+Skonto")
 
 
+def _find_pietsch_discount_terms(text: str) -> dict[str, Decimal | str | None]:
+    match = search(
+        r"Zahlbetrag bis\s+(\d{2}\.\d{2}\.\d{4})\s+([0-9]+(?:,\d{1,3})?)\s*%\s+Skonto\s+([0-9.]+,\d{2}-?)\s+EUR[\s\S]*?"
+        r"Zahlbetrag bis\s+(\d{2}\.\d{2}\.\d{4})\s+ohne Abzug\s+([0-9.]+,\d{2}-?)\s+EUR",
+        text,
+    )
+    if not match:
+        return {}
+    discount_due, percent_text, discounted_payable, due_date, gross_text = match.groups()
+    gross_amount = _money_to_decimal_with_trailing_minus(gross_text)
+    discounted_payable_amount = _money_to_decimal_with_trailing_minus(discounted_payable)
+    discount_amount = abs(gross_amount - discounted_payable_amount).quantize(Decimal("0.01"))
+    return {
+        "discount_due_date": _date_text_to_iso(discount_due),
+        "due_date": _date_text_to_iso(due_date),
+        "discount_percent": _percent_to_decimal(percent_text),
+        "discount_base": None,
+        "discount_amount": discount_amount,
+        "discounted_payable_amount": discounted_payable_amount,
+    }
+
+
 def _discount_due_date_from_days(invoice_date: str | None, days: int | None) -> str | None:
     if not invoice_date or days is None:
         return None
@@ -1121,6 +1167,13 @@ def _discount_due_date_from_days(invoice_date: str | None, days: int | None) -> 
 
 def _money_to_decimal(value: str) -> Decimal:
     return Decimal(value.replace(".", "").replace(",", ".")).quantize(Decimal("0.01"))
+
+
+def _money_to_decimal_with_trailing_minus(value: str) -> Decimal:
+    stripped = value.strip()
+    sign = Decimal("-1") if stripped.endswith("-") else Decimal("1")
+    stripped = stripped.rstrip("-")
+    return (_money_to_decimal(stripped) * sign).quantize(Decimal("0.01"))
 
 
 def _percent_to_decimal(value: str) -> Decimal:
@@ -1147,7 +1200,7 @@ def _find_delivery_addresses(text: str) -> list[str]:
 
 
 def _find_customer_reference(text: str) -> str | None:
-    match = search(
+    match = search(r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text) or search(
         r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
         text,
     ) or search(
@@ -1202,6 +1255,8 @@ def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresse
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
+    if "pietsch hamburg-ost damaschke" in lower_text:
+        return "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG"
     if "auslieferungslager" in lower_text and "barmbek" in lower_text and "0515834/086" in text:
         return "Rolf Dammers oHG"
     if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
@@ -1308,6 +1363,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["pietsch", "profipress", "kupferrohr", "sanpress", "gewindeschneidkluppe"]):
+        return "material"
     if any(term in haystack for term in ["rolf dammers", "dachtraufprofil", "alu-stossverbinder", "alu-stoßverbinder"]):
         return "material"
     if any(term in haystack for term in ["lüchau", "lã¼chau", "baustoffe", "abdeckvlies", "artikel", "material"]):
@@ -1345,6 +1402,15 @@ def _filename_product_name(value: str) -> str:
 
 def _find_first_position_product_name(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines()]
+    pietsch_item_pattern = r"^\d+\s+\d{6,}\s+[-0-9,.]+\s+(?:ST|M|KG|LTR|PA|ROL|PKT)\s+[-0-9,.]+\s+\d+\s+[-0-9,.]+\s+EUR$"
+    for index, line in enumerate(lines):
+        if not search(pietsch_item_pattern, line):
+            continue
+        for candidate in lines[index + 1 : index + 4]:
+            if not candidate or candidate.startswith("RGR:"):
+                continue
+            if search(r"[A-Za-zÄÖÜäöüß]", candidate):
+                return candidate
     for index, line in enumerate(lines):
         if search(r"^\d{5,}\s+\d+,\d{2}\s+\w+\s+\d+,\d{2}\s+\w+\s+\d+,\d{2}$", line):
             for candidate in lines[index + 1 : index + 4]:

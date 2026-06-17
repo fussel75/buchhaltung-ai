@@ -15,6 +15,126 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_pietsch_invoice_reads_commission_and_discount_terms(self):
+        text = """
+        Pos Material Menge ME E-Preis PE Betrag
+        Lieferschein: 721674439 Lieferung: 11.06.2026
+        Auftrag: 116527756 Bestelldatum: 10.06.2026
+        Projekt:
+        Kommissionsangaben: Weseler Weg 20
+        Lieferadresse:
+        FriStD-Bau ZuB GmbH & Co. KG
+        Weseler Weg 20
+        22045 Hamburg
+        10 320101000                5 M         6,33 1         31,65  EUR
+        RAL Kupferrohr 15 x 1,0 mm, korr.-gesch.
+        halbhart, DVGW, (Stange: 5 Meter), je M.
+        Pietsch Hamburg-Ost Damaschke GmbH & Co. KG
+        Rechnung Datum Seite
+        407437077 17.06.2026 1  /  2
+        Kunde: 321940
+        Gesamtwert        82,60  EUR
+        Umsatzsteuer     19,00 % auf       82,60        15,69  EUR
+        Endbetrag        98,29  EUR
+        auf den skontierfähigen Betrag (     96,17  EUR )
+        Zahlbetrag bis 01.07.2026 3,000 % Skonto                95,40  EUR
+        Zahlbetrag bis 17.07.2026 ohne Abzug                98,29  EUR
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_407437077 an FriStD-Bau ZuB GmbH Co. KG.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "pietsch.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Wewe20",
+            "label": "Weseler Weg 20",
+            "kind": "construction_project",
+            "project_number": "25-00008",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text == "Weseler Weg 20":
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG")
+        self.assertEqual(result["invoice_number"], "407437077")
+        self.assertEqual(result["customer_number"], "321940")
+        self.assertEqual(result["customer_reference"], "Weseler Weg 20")
+        self.assertEqual(result["assignment_code"], "Wewe20")
+        self.assertEqual(result["project_number"], "25-00008")
+        self.assertEqual(result["invoice_date"], "2026-06-17")
+        self.assertEqual(result["due_date"], "2026-07-17")
+        self.assertEqual(result["discount_due_date"], "2026-07-01")
+        self.assertEqual(result["net_amount"], Decimal("82.60"))
+        self.assertEqual(result["tax_amount"], Decimal("15.69"))
+        self.assertEqual(result["gross_amount"], Decimal("98.29"))
+        self.assertEqual(result["discount_base"], Decimal("96.17"))
+        self.assertEqual(result["discount_percent"], Decimal("3.00"))
+        self.assertEqual(result["discount_amount"], Decimal("2.89"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("95.40"))
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "RAL Kupferrohr 15 x 1,0 mm, korr.-gesch.")
+
+    def test_pietsch_credit_note_keeps_negative_amounts(self):
+        text = """
+        Pos Material Menge ME E-Preis PE Betrag
+        Kommissionsangaben: Heukoppel 92
+        10 659422000                1 ST      369,00- 1        369,00- EUR
+        REMS Gewindeschneidkluppe eva Set R *
+        m. Schneidk. 1/2-3/4-1-1 1/4" # 520015
+        Gesamtwert       369,00- EUR
+        Umsatzsteuer     19,00 % auf      369,00-        70,11- EUR
+        Endbetrag       439,11- EUR
+        auf den skontierfähigen Betrag (    439,11  EUR )
+        Zahlbetrag bis 14.06.2026 3,000 % Skonto               425,94- EUR
+        Zahlbetrag bis 30.06.2026 ohne Abzug               439,11- EUR
+        Pietsch Hamburg-Ost Damaschke GmbH & Co. KG
+        Retourgutschrift Datum Seite
+        407403955 31.05.2026 1  /  1
+        Kunde: 321940
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_407403955 an FriStD-Bau ZuB GmbH Co. KG.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "pietsch-credit.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "credit_note")
+        self.assertEqual(result["invoice_number"], "407403955")
+        self.assertEqual(result["invoice_date"], "2026-05-31")
+        self.assertEqual(result["net_amount"], Decimal("-369.00"))
+        self.assertEqual(result["tax_amount"], Decimal("-70.11"))
+        self.assertEqual(result["gross_amount"], Decimal("-439.11"))
+        self.assertEqual(result["discount_amount"], Decimal("-13.17"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("-425.94"))
+        self.assertEqual(result["payment_terms"][0]["label"], "Gutschrift verrechnen")
+        self.assertEqual(result["payment_terms"][1]["label"], "Verrechnung mit Skonto")
+
     def test_dammers_invoice_reads_digital_pdf_text(self):
         text = """
         Auslieferungslager : Barmbek
