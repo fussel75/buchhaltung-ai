@@ -1933,6 +1933,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState("all");
+  const [sortConfig, setSortConfig] = useState({ key: "project_number", direction: "asc" });
 
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
@@ -2012,8 +2013,22 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
       return haystack.includes(needle);
     });
   }, [assignmentUnits, kindFilter, search]);
+  const sortedProjects = useMemo(() => {
+    const direction = sortConfig.direction === "desc" ? -1 : 1;
+    return [...filteredProjects].sort((left, right) => {
+      const leftValue = projectSortValue(left, sortConfig.key, tenantProfile);
+      const rightValue = projectSortValue(right, sortConfig.key, tenantProfile);
+      return compareProjectValues(leftValue, rightValue) * direction;
+    });
+  }, [filteredProjects, sortConfig, tenantProfile]);
   const activeCount = assignmentUnits.filter((project) => project.is_active).length;
   const withProjectNumber = assignmentUnits.filter((project) => project.project_number).length;
+  function changeProjectSort(key) {
+    setSortConfig((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
 
   return (
     <section className="admin-panel project-page">
@@ -2069,21 +2084,21 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
           </label>
         </div>
 
-        {filteredProjects.length ? (
+        {sortedProjects.length ? (
           <div className="project-table">
             <div className="project-row project-head">
-              <span>Projektnummer</span>
-              <span>Auftragsnummer</span>
-              <span>Kundennummer</span>
-              <span>Projektname</span>
-              <span>Adresse</span>
-              <span>Beschreibung</span>
-              <span>Bauherr</span>
-              <span>Art</span>
-              <span>Aliase</span>
-              <span>Status</span>
+              <ProjectSortHeader label="Projektnummer" sortKey="project_number" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Auftragsnummer" sortKey="order_number" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Kundennummer" sortKey="customer_number" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Projektname" sortKey="label" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Adresse" sortKey="address" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Beschreibung" sortKey="description" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Bauherr" sortKey="client_name" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Art" sortKey="kind" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Aliase" sortKey="aliases" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Status" sortKey="status" sortConfig={sortConfig} onSort={changeProjectSort} />
             </div>
-            {filteredProjects.map((project) => (
+            {sortedProjects.map((project) => (
               <div className="project-row" key={project.id}>
                 <strong>{project.project_number || "-"}</strong>
                 <span>{project.order_number || "-"}</span>
@@ -2106,6 +2121,37 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
       </section>
     </section>
   );
+}
+
+function ProjectSortHeader({ label, sortKey, sortConfig, onSort }) {
+  const isActive = sortConfig.key === sortKey;
+  return (
+    <button
+      className={`project-sort-button${isActive ? " active" : ""}`}
+      type="button"
+      onClick={() => onSort(sortKey)}
+      aria-sort={isActive ? (sortConfig.direction === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <span>{label}</span>
+      <span aria-hidden="true">{isActive ? (sortConfig.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+    </button>
+  );
+}
+
+function projectSortValue(project, key, tenantProfile) {
+  if (key === "address") return formatAssignmentAddress(project);
+  if (key === "aliases") return project.aliases?.join(", ") || "";
+  if (key === "kind") return formatAssignmentKind(project.kind, tenantProfile);
+  if (key === "status") return formatProjectStatus(project);
+  return project[key] ?? "";
+}
+
+function compareProjectValues(left, right) {
+  const leftText = String(left || "").trim();
+  const rightText = String(right || "").trim();
+  if (!leftText && rightText) return 1;
+  if (leftText && !rightText) return -1;
+  return leftText.localeCompare(rightText, "de-DE", { numeric: true, sensitivity: "base" });
 }
 
 function BulkJobHistory({ jobs }) {

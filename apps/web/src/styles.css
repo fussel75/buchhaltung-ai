@@ -668,6 +668,45 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.project-sort-button {
+  display: inline-flex;
+  min-width: 0;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: inherit;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.project-sort-button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-sort-button span:last-child {
+  color: #7b8490;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.project-sort-button.active {
+  color: var(--ink);
+}
+
+.project-sort-button:hover,
+.project-sort-button:focus-visible {
+  color: var(--ink);
+}
+
 .project-row span,
 .project-row strong {
   min-width: 0;
