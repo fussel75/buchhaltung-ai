@@ -15,6 +15,78 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_arens_stitz_invoice_reads_header_totals_and_assignment(self):
+        text = """
+        R E C H N U N G
+        Bei Schriftwechsel bitte angeben
+        KD-Nr. Rechn.Nr.   Datum    Blatt
+        480 FRHA05   8221927 03.06.2026   1
+        FriStD-Bau ZuB GmbH & Co. KG
+        kevin.thon@gc-gruppe.de
+        Artikel                           Menge     ME       Preis    Pos/Wert
+        Lieferung 108 51141749-001 vom 03.06.2026 Abholung
+        Kommissions Pflicht !!!!
+        AUFTR.TEXT: Heukoppel 92
+        AUFTR.NR. : --
+        CTS230N      4,000 ST      10,62       42,48
+        COSMO Standard Stellantrieb 230V IP54 Netto
+        M30x1,5mm, stroml. zu, man. Arretierung
+        Transportsicherung         0,64 *
+        Zahlbar bis 19.06.2026  2,00% Skt= 50,28 Warenwert :       43,12 EUR
+        Zahlbar bis 05.07.2026 ohne Abzug  19,00%MWST:        8,19 EUR
+        Skontofähiger Betrag :        51,31 ------------
+            Gesamt:       51,31 EUR
+        05.06.2026 ============
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "RG_480_FRHA05_8221927.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "stitz.pdf",
+            "size_bytes": 88000,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Hk92",
+            "label": "Heukoppel 92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text == "Heukoppel 92":
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Arens & Stitz KG")
+        self.assertEqual(result["invoice_number"], "8221927")
+        self.assertEqual(result["customer_number"], "FRHA05")
+        self.assertEqual(result["customer_reference"], "Heukoppel 92")
+        self.assertEqual(result["assignment_code"], "Hk92")
+        self.assertEqual(result["project_number"], "26-00007")
+        self.assertEqual(result["invoice_date"], "2026-06-03")
+        self.assertEqual(result["discount_due_date"], "2026-06-19")
+        self.assertEqual(result["due_date"], "2026-07-05")
+        self.assertEqual(result["net_amount"], Decimal("43.12"))
+        self.assertEqual(result["tax_amount"], Decimal("8.19"))
+        self.assertEqual(result["gross_amount"], Decimal("51.31"))
+        self.assertEqual(result["discount_base"], Decimal("51.31"))
+        self.assertEqual(result["discount_percent"], Decimal("2.00"))
+        self.assertEqual(result["discount_amount"], Decimal("1.03"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("50.28"))
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "COSMO Standard Stellantrieb 230V IP54 Netto")
+
     def test_pietsch_invoice_reads_commission_and_discount_terms(self):
         text = """
         Pos Material Menge ME E-Preis PE Betrag

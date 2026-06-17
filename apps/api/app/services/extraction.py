@@ -500,6 +500,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"(?:Rechnung|Retourgutschrift)\s+Datum\s+Seite\s*\n\s*([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}",
     ) or _find_text(
         text,
+        r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+FRHA05\s+([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}",
+    ) or _find_text(
+        text,
         r"\bNummer\s*:\s*([0-9]+-[0-9]+)",
     ) or _find_text(
         text,
@@ -512,6 +515,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     invoice_date = _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"(?:Rechnung|Retourgutschrift)\s+Datum\s+Seite\s*\n\s*[0-9]{6,}\s+(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+FRHA05\s+[0-9]{6,}\s+(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
         r"Datum\s*-\s*Zeit\s*:\s*(\d{2}\.\d{2}\.\d{4})",
@@ -1031,6 +1037,7 @@ def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+(FRHA05)\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}")
         or _find_text(text, r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer\s*:?\s*([0-9][0-9/.-]*)")
@@ -1043,6 +1050,20 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    arens_stitz_total = search(
+        r"Warenwert\s*:\s*([0-9.]+,\d{2})\s+EUR[\s\S]*?"
+        r"19,00%MWST:\s*([0-9.]+,\d{2})\s+EUR[\s\S]*?"
+        r"Skontof[Ã¤ä]higer Betrag\s*:\s*([0-9.]+,\d{2})[\s\S]*?"
+        r"Gesamt:\s*([0-9.]+,\d{2})\s+EUR",
+        text,
+    )
+    if arens_stitz_total:
+        return {
+            "discount_base": _money_to_decimal(arens_stitz_total.group(3)),
+            "net_amount": _money_to_decimal(arens_stitz_total.group(1)),
+            "tax_amount": _money_to_decimal(arens_stitz_total.group(2)),
+            "gross_amount": _money_to_decimal(arens_stitz_total.group(4)),
+        }
     pietsch_total = search(
         r"Gesamtwert\s+([0-9.]+,\d{2}-?)\s+EUR[\s\S]*?"
         r"Umsatzsteuer\s+19,00\s*%\s+auf\s+[0-9.]+,\d{2}-?\s+([0-9.]+,\d{2}-?)\s+EUR[\s\S]*?"
@@ -1200,7 +1221,9 @@ def _find_delivery_addresses(text: str) -> list[str]:
 
 
 def _find_customer_reference(text: str) -> str | None:
-    match = search(r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text) or search(
+    match = search(r"AUFTR\.TEXT:\s*(.+?)(?:\n|$)", text) or search(
+        r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text
+    ) or search(
         r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
         text,
     ) or search(
@@ -1255,6 +1278,8 @@ def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresse
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
+    if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
+        return "Arens & Stitz KG"
     if "pietsch hamburg-ost damaschke" in lower_text:
         return "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG"
     if "auslieferungslager" in lower_text and "barmbek" in lower_text and "0515834/086" in text:
@@ -1363,6 +1388,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["arens & stitz", "profipress", "trinnity", "cosmo standard stellantrieb", "push-open"]):
+        return "material"
     if any(term in haystack for term in ["pietsch", "profipress", "kupferrohr", "sanpress", "gewindeschneidkluppe"]):
         return "material"
     if any(term in haystack for term in ["rolf dammers", "dachtraufprofil", "alu-stossverbinder", "alu-stoßverbinder"]):
