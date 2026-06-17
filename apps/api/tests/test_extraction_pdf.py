@@ -15,6 +15,108 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_af_elektro_invoice_reads_reverse_charge_discount_and_project_address(self):
+        text = """
+        AF-Elektro GmbH
+        E-mail: info@af-elektro.de / Tel.:+49(170)4020717
+        Rechnung
+        Sehr geehrte Damen und Herren,Vielen Dank für Ihren Auftrag, den wir wie folgt in Rechnung stellen:Bauvorhaben:Neusurenland 5122159 Hamburg
+        FriStD-Bau ZuB GmbH & Co. KG
+        Sachbearbeiter/-in: Artur Franz
+        Rechnungs-Nr.: 22198
+        Datum: 04.03.2026
+        Kunden-Nr.: 1000012214
+        Anzahl Bezeichnung Einzelpreis GesamtpreisEinheitPos.
+        2. Abschlagsrechnung, gemäß Angebot Nr. 20260009 vom 30.01.2026
+        1 560,13 € 560,13 €1 Stk.
+        Elektroinstallation gemäß Installationsplan des Küchenbauers
+        Summe 3.819,92 €
+        Gesamtbetrag 3.819,92 €
+        Sie können 3% Skonto abziehen, wenn Sie die Rechnung innerhalb von 5 Tagen auf die unten angegebene Bankverbindung
+        überweisen. Zahlbar binnen 10 Tagen ab Rechnungsdatum.
+        Steuerschuldnerschaft des Leistungsempfängers: Die Rechnung ist gemäß §13b Umsatzsteuergesetz netto.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "22198.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "af-elektro.pdf",
+            "size_bytes": 367000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "AF-Elektro GmbH")
+        self.assertEqual(result["invoice_number"], "22198")
+        self.assertEqual(result["customer_number"], "1000012214")
+        self.assertEqual(result["invoice_date"], "2026-03-04")
+        self.assertEqual(result["due_date"], "2026-03-14")
+        self.assertEqual(result["discount_due_date"], "2026-03-09")
+        self.assertEqual(result["discount_percent"], Decimal("3.00"))
+        self.assertEqual(result["discount_amount"], Decimal("114.60"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("3705.32"))
+        self.assertEqual(result["delivery_address"], "Neusurenland 51, 22159 Hamburg")
+        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["product_name"], "2. Abschlagsrechnung, gemäß Angebot Nr. 20260009 vom 30.01.2026")
+        self.assertEqual(result["net_amount"], Decimal("3819.92"))
+        self.assertEqual(result["tax_amount"], Decimal("0.00"))
+        self.assertEqual(result["gross_amount"], Decimal("3819.92"))
+        self.assertNotIn("MwSt", " ".join(result["warnings"]))
+
+    def test_a_franz_invoice_reads_reverse_charge_due_date_and_product(self):
+        text = """
+        A. Franz Elektrotechnik
+        E-mail: info@af-elektro.de
+        Rechnung
+        Sehr geehrte Damen und Herren,Vielen Dank für Ihren Auftrag, den wir wie folgt in Rechnung stellen:Bauvorhabem:Süderfeldstraße 46a 22529 Hamburg
+        FriStD-Bau ZuB GmbH & Co. KG
+        Rechnungs-Nr.: 21953
+        Datum: 03.11.2025
+        Kunden-Nr.: 1000012214
+        Anzahl Bezeichnung Einzelpreis GesamtpreisEinheitPos.
+        1,5 49,50 € 74,25 €1 Std.
+        Überprüfung und Fehlersuche am Heizkreisverteiler
+        Summe 129,25 €
+        Gesamtbetrag 129,25 €
+        Bitte überweisen Sie den Betrag von 129,25 € bis zum 10.11.2025, ohne Skontoabzug auf das unten angegebene Konto.
+        Steuerschuldnerschaft des Leistungsempfängers: Die Rechnung ist gemäß §13b Umsatzsteuergesetz netto.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "21953.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "a-franz.pdf",
+            "size_bytes": 359000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "A. Franz Elektrotechnik")
+        self.assertEqual(result["invoice_number"], "21953")
+        self.assertEqual(result["invoice_date"], "2025-11-03")
+        self.assertEqual(result["due_date"], "2025-11-10")
+        self.assertEqual(result["delivery_address"], "Süderfeldstraße 46a, 22529 Hamburg")
+        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["product_name"], "Überprüfung und Fehlersuche am Heizkreisverteiler")
+        self.assertEqual(result["net_amount"], Decimal("129.25"))
+        self.assertEqual(result["tax_amount"], Decimal("0.00"))
+        self.assertEqual(result["gross_amount"], Decimal("129.25"))
+        self.assertNotIn("MwSt", " ".join(result["warnings"]))
+
     def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
         text = """
         Enno Roggemann GmbH & Co. KG

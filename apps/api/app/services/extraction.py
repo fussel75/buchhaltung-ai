@@ -549,6 +549,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     visible_discount = _find_visible_discount_terms(text)
     pietsch_discount = _find_pietsch_discount_terms(text)
     roggemann_discount = _find_roggemann_discount_terms(text)
+    af_elektro_discount = _find_af_elektro_payment_terms(text, invoice_date)
     due_date = (
         due_date
         or _find_bueroshop_due_date(text)
@@ -556,12 +557,14 @@ def _build_pdf_text_result(document: dict) -> dict:
         or visible_discount.get("due_date")
         or pietsch_discount.get("due_date")
         or roggemann_discount.get("due_date")
+        or af_elektro_discount.get("due_date")
     )
     discount_percent = (
         _find_discount_percent(text)
         or visible_discount.get("discount_percent")
         or pietsch_discount.get("discount_percent")
         or roggemann_discount.get("discount_percent")
+        or af_elektro_discount.get("discount_percent")
     )
     discount_due_date = (
         _find_date(text, r"(\d{2}\.\d{2}\.\d{4})\s+3,00%\s+Skonto")
@@ -570,6 +573,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         or visible_discount.get("discount_due_date")
         or pietsch_discount.get("discount_due_date")
         or roggemann_discount.get("discount_due_date")
+        or af_elektro_discount.get("discount_due_date")
     )
     totals = _find_invoice_totals(text)
     discount_base = (
@@ -577,6 +581,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         or visible_discount.get("discount_base")
         or pietsch_discount.get("discount_base")
         or roggemann_discount.get("discount_base")
+        or af_elektro_discount.get("discount_base")
     )
     net_amount = totals.get("net_amount")
     tax_amount = totals.get("tax_amount")
@@ -586,12 +591,14 @@ def _build_pdf_text_result(document: dict) -> dict:
         or visible_discount.get("discount_amount")
         or pietsch_discount.get("discount_amount")
         or roggemann_discount.get("discount_amount")
+        or af_elektro_discount.get("discount_amount")
         or _find_money(text, r"Skonto\s*=\s*([0-9.]+,\d{2})")
     )
     discounted_payable_amount = (
         visible_discount.get("discounted_payable_amount")
         or pietsch_discount.get("discounted_payable_amount")
         or roggemann_discount.get("discounted_payable_amount")
+        or af_elektro_discount.get("discounted_payable_amount")
     )
     if net_amount is None and tax_amount is not None and gross_amount is not None:
         net_amount = (gross_amount - tax_amount).quantize(Decimal("0.01"))
@@ -608,6 +615,8 @@ def _build_pdf_text_result(document: dict) -> dict:
         discount_amount = (discount_base * discount_percent / Decimal("100")).quantize(Decimal("0.01"))
     is_credit_note = gross_amount is not None and gross_amount < 0
     discount_amount = _signed_discount_amount(discount_amount, gross_amount)
+    if discounted_payable_amount is None and gross_amount is not None and discount_amount is not None:
+        discounted_payable_amount = (gross_amount - discount_amount).quantize(Decimal("0.01"))
     delivery_addresses = _find_delivery_addresses(text)
     delivery_address = delivery_addresses[0] if delivery_addresses else _find_delivery_address(text)
     customer_reference = _find_customer_reference(text)
@@ -645,7 +654,7 @@ def _build_pdf_text_result(document: dict) -> dict:
             "MwSt": tax_amount,
             "Gesamtbetrag": gross_amount,
         }.items()
-        if not value
+        if value is None or value == ""
     ]
     warnings = []
     if len(delivery_addresses) > 1:
@@ -1091,6 +1100,15 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
+    if af_elektro_total:
+        gross_amount = _money_to_decimal(af_elektro_total.group(1))
+        return {
+            "discount_base": gross_amount,
+            "net_amount": gross_amount,
+            "tax_amount": Decimal("0.00"),
+            "gross_amount": gross_amount,
+        }
     roggemann_total = search(
         r"Netto-Betrag EUR\s+([0-9.]+,\d{2}-?)[\s\S]*?"
         r"19,00\s*%\s*MWSt EUR\s+([0-9.]+,\d{2}-?)[\s\S]*?"
@@ -1268,6 +1286,23 @@ def _find_roggemann_discount_terms(text: str) -> dict[str, Decimal | str | None]
     }
 
 
+def _find_af_elektro_payment_terms(text: str, invoice_date: str | None) -> dict[str, Decimal | str | None]:
+    due_date = _find_date(text, r"bis zum\s+(\d{2}\.\d{2}\.\d{4}),\s+ohne Skontoabzug")
+    percent_text = _find_text(text, r"([0-9]+(?:,\d{1,2})?)\s*%\s+Skonto")
+    discount_days = _find_text(text, r"innerhalb von\s+(\d+)\s+Tagen")
+    due_days = _find_text(text, r"Zahlbar binnen\s+(\d+)\s+Tagen")
+    discount_due_date = _discount_due_date_from_days(invoice_date, int(discount_days)) if invoice_date and discount_days else None
+    calculated_due_date = _discount_due_date_from_days(invoice_date, int(due_days)) if invoice_date and due_days else None
+    return {
+        "due_date": due_date or calculated_due_date,
+        "discount_due_date": discount_due_date,
+        "discount_percent": _percent_to_decimal(percent_text) if percent_text else None,
+        "discount_base": None,
+        "discount_amount": None,
+        "discounted_payable_amount": None,
+    }
+
+
 def _find_bueroshop_due_date(text: str) -> str | None:
     return _find_date(text, r"Rg\.-Betrag EUR\s*\n\s*Zahlbar bis[\s\S]*?\b(\d{2}\.\d{2}\.\d{4})")
 
@@ -1303,6 +1338,9 @@ def _find_delivery_address(text: str) -> str | None:
 
 def _find_delivery_addresses(text: str) -> list[str]:
     addresses = []
+    af_address = search(r"Bauvorhab(?:en|em):\s*(.+?)\s*\n\s*FriStD-Bau", text)
+    if af_address:
+        addresses.append(_normalize_inline_address(af_address.group(1).strip()))
     for match in finditer(
         r"An:\s*(.+?),\s*([^\n]*?\d+[^\n]*)\s*\n\s*(\d{5}\s+[^\n]+)",
         text,
@@ -1316,6 +1354,15 @@ def _find_delivery_addresses(text: str) -> list[str]:
         street, postal_code, city = (part.strip() for part in match.groups())
         addresses.append(f"{street}, {postal_code} {city}")
     return list(dict.fromkeys(addresses))
+
+
+def _normalize_inline_address(value: str) -> str:
+    cleaned = sub(r"\s+", " ", value).strip()
+    match = search(r"(.+?\d+[A-Za-zÄÖÜäöüß]?)\s*(\d{5})\s+(.+)$", cleaned)
+    if match:
+        street, postal_code, city = (part.strip() for part in match.groups())
+        return f"{street}, {postal_code} {city}"
+    return cleaned
 
 
 def _find_customer_reference(text: str) -> str | None:
@@ -1380,6 +1427,10 @@ def _supplier_name(document: dict, text: str) -> str:
     lower_text = text.lower()
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
+    if "af-elektro gmbh" in lower_text and "info@af-elektro.de" in lower_text:
+        return "AF-Elektro GmbH"
+    if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
+        return "A. Franz Elektrotechnik"
     if "roggemann.de" in lower_text and "enno roggemann gmbh" in lower_text:
         return "Enno Roggemann GmbH & Co. KG"
     if "bueroshop24.de" in lower_text or "büroshop24 gmbh" in lower_text:
@@ -1492,6 +1543,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["af-elektro", "a. franz elektrotechnik", "elektroinstallation", "heizkreisverteiler"]):
+        return "subcontractor"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
         return "material"
     if any(term in haystack for term in ["büroshop24", "bueroshop24", "epson tinte", "kleinmengenzuschlag"]):
@@ -1537,6 +1590,22 @@ def _filename_product_name(value: str) -> str:
 
 def _find_first_position_product_name(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines()]
+    if "info@af-elektro.de" in text.lower():
+        for index, line in enumerate(lines):
+            if not line.startswith("Anzahl Bezeichnung"):
+                continue
+            for candidate in lines[index + 1 : index + 8]:
+                if not candidate:
+                    continue
+                if candidate.startswith(("Summe", "Gesamtbetrag", "Rechnungs-Nr.")):
+                    break
+                if search(r"^\d+(?:,\d+)?\s+[0-9.]+,\d{2}\s*€\s+[0-9.]+,\d{2}\s*€\d+\s+\w+\.", candidate):
+                    tail = sub(r"^\d+(?:,\d+)?\s+[0-9.]+,\d{2}\s*€\s+[0-9.]+,\d{2}\s*€\d+\s+\w+\.\s*", "", candidate).strip()
+                    if tail:
+                        return _clean_af_elektro_product_name(tail)
+                    continue
+                if search(r"[A-Za-zÄÖÜäöüß]", candidate):
+                    return _clean_af_elektro_product_name(candidate)
     for index, line in enumerate(lines):
         if not (
             search(r"^\d{4}\s+\d{12,}\s+1(?:\s+\(\*\))?$", line)
@@ -1581,6 +1650,13 @@ def _find_first_position_product_name(text: str) -> str | None:
             if search(r"[A-Za-zÄÖÜäöüß]", candidate):
                 return candidate
     return None
+
+
+def _clean_af_elektro_product_name(value: str) -> str:
+    cleaned = value.lstrip("- ").strip()
+    cleaned = sub(r"\s*-\s*Montage\b.*$", "", cleaned)
+    cleaned = sub(r"\s*[A-Z]\.\s*[A-ZÄÖÜa-zäöüß]+:\d{2}\.\d{2}\.\d{4}.*$", "", cleaned)
+    return cleaned.strip()
 
 
 def _product_name(text: str) -> str:
