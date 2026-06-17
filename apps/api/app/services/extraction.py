@@ -495,7 +495,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         ]
         return result
 
-    invoice_number = _find_text(text, r"Rechnungs-Nr\.:\s*(\d+)") or _find_text(
+    invoice_number = _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
         r"RechnungsNr\.\s*:\s*([0-9]+)\s+\d{2}\.\d{2}\.\d{2,4}",
     ) or _find_text(
@@ -1084,6 +1084,7 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
 def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kunden-Nr\.?:\s*([A-Z0-9-]+?)(?=Auftrag|Lieferschein|Rechnung|\s|$)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*[0-9]{6,}\s+([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}")
@@ -1100,6 +1101,19 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    eindruck24_total = search(
+        r"Gesamt Netto\s*\(19,00\s*%\)\s*([0-9.]+,\d{2})\s*.*?"
+        r"zzgl\.\s*MwSt\s*\(19,00\s*%\)\s*([0-9.]+,\d{2})\s*.*?"
+        r"Rechnungsbetrag\s*([0-9.]+,\d{2})",
+        text,
+    )
+    if eindruck24_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(eindruck24_total.group(1)),
+            "tax_amount": _money_to_decimal(eindruck24_total.group(2)),
+            "gross_amount": _money_to_decimal(eindruck24_total.group(3)),
+        }
     af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
     if af_elektro_total:
         gross_amount = _money_to_decimal(af_elektro_total.group(1))
@@ -1431,6 +1445,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "AF-Elektro GmbH"
     if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
         return "A. Franz Elektrotechnik"
+    if "eindruck24" in lower_text and "buchhaltung@eindruck24.de" in lower_text:
+        return "Eindruck24"
     if "roggemann.de" in lower_text and "enno roggemann gmbh" in lower_text:
         return "Enno Roggemann GmbH & Co. KG"
     if "bueroshop24.de" in lower_text or "büroshop24 gmbh" in lower_text:
@@ -1545,6 +1561,8 @@ def _cost_category(
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
     if any(term in haystack for term in ["af-elektro", "a. franz elektrotechnik", "elektroinstallation", "heizkreisverteiler"]):
         return "subcontractor"
+    if any(term in haystack for term in ["eindruck24", "druck bis", "sparker", "flex medium"]):
+        return "general_overhead"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
         return "material"
     if any(term in haystack for term in ["büroshop24", "bueroshop24", "epson tinte", "kleinmengenzuschlag"]):
@@ -1590,6 +1608,10 @@ def _filename_product_name(value: str) -> str:
 
 def _find_first_position_product_name(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines()]
+    if "buchhaltung@eindruck24.de" in text.lower():
+        product = _find_eindruck24_product_name(text)
+        if product:
+            return product
     if "info@af-elektro.de" in text.lower():
         for index, line in enumerate(lines):
             if not line.startswith("Anzahl Bezeichnung"):
@@ -1650,6 +1672,23 @@ def _find_first_position_product_name(text: str) -> str | None:
             if search(r"[A-Za-zÄÖÜäöüß]", candidate):
                 return candidate
     return None
+
+
+def _find_eindruck24_product_name(text: str) -> str | None:
+    normalized = sub(r"\s+", " ", text)
+    match = search(
+        r"RechnungPos\..*?G\.Preis netto1[0-9,.]+Stk(.+?)19,00\s*%",
+        normalized,
+    )
+    if not match:
+        return None
+    value = match.group(1).strip()
+    value = sub(r"^[A-Z0-9]{5,}?(?=[A-Z][a-zÃ¤Ã¶Ã¼ÃŸ])", "", value)
+    if "Sparker" in value:
+        value = value[value.index("Sparker") :]
+    elif "Flex" in value:
+        value = value[value.index("Flex") :]
+    return value.strip()
 
 
 def _clean_af_elektro_product_name(value: str) -> str:

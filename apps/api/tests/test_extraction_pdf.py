@@ -117,6 +117,80 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["gross_amount"], Decimal("129.25"))
         self.assertNotIn("MwSt", " ".join(result["warnings"]))
 
+    def test_eindruck24_invoice_reads_glued_header_totals_and_first_item(self):
+        text = """
+        Ch. Werner - Eindruck24Eimsbütteler Straße 3422769 HamburgDeutschland
+        Eindruck24 · Eimsbütteler Straße 34 · 22769 HamburgFriStD-Bau ZuB GmbH & Co.KG
+        Eindruck24BuchhaltungEimsbütteler Straße 3422769 HamburgTel: 04072379500E-Mail: buchhaltung@eindruck24.de
+        RechnungPos.MengeArt.-Nr.BezeichnungMwSt.Preis nettoG.Preis netto13,00StkSTTU171C0021LSparker 2.0 Black - L19,00 %8,94 €26,81 €26,00StkE241199DTG Druck bis DIN-A4 mitVorbehandlung19,00 %5,67 €34,02 €31,00SPS - UPS Standard19,00 %8,50 €8,50 €
+        Gesamt Netto (19,00 %)69,34 €zzgl. MwSt (19,00 %)13,17 €Rechnungsbetrag82,51 €Zahlbetrag82,51 €
+        Rechnungs-Nr:E24-12568-REDatum:06.01.2026Leistungs- / Lieferdatum:06.01.2026Kunden-Nr:E24-1071-KDAuftrag:E24-17451-AT
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Invoice E24-12568-RE.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "eindruck24.pdf",
+            "size_bytes": 116639,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Eindruck24")
+        self.assertEqual(result["invoice_number"], "E24-12568-RE")
+        self.assertEqual(result["customer_number"], "E24-1071-KD")
+        self.assertEqual(result["invoice_date"], "2026-01-06")
+        self.assertEqual(result["cost_category"], "general_overhead")
+        self.assertEqual(result["product_name"], "Sparker 2.0 Black - L")
+        self.assertEqual(result["net_amount"], Decimal("69.34"))
+        self.assertEqual(result["tax_amount"], Decimal("13.17"))
+        self.assertEqual(result["gross_amount"], Decimal("82.51"))
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg E24-12568-RE, Allgemeine Kosten, Eindruck24, Sparker 2.0 Black - L, 2026-01-06.pdf",
+        )
+        self.assertEqual(result["warnings"], [])
+
+    def test_eindruck24_invoice_reads_flex_item(self):
+        text = """
+        Ch. Werner - Eindruck24Eimsbütteler Straße 3422769 HamburgDeutschland
+        Eindruck24BuchhaltungEimsbütteler Straße 3422769 HamburgTel: 04072379500E-Mail: buchhaltung@eindruck24.de
+        RechnungPos.MengeArt.-Nr.BezeichnungMwSt.Preis nettoG.Preis netto13,00StkE241262Flex Medium 2C bis DIN-A3+19,00 %12,50 €37,50 €21,00SPS - UPS Standard19,00 %8,50 €8,50 €
+        Gesamt Netto (19,00 %)46,00 €zzgl. MwSt (19,00 %)8,74 €Rechnungsbetrag54,75 €Zahlbetrag54,75 €
+        Rechnungs-Nr:E24-12540-REDatum:29.12.2025Leistungs- / Lieferdatum:29.12.2025Kunden-Nr:E24-1071-KDAuftrag:E24-17354-AT
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Invoice E24-12540-RE.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "eindruck24-flex.pdf",
+            "size_bytes": 116538,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["invoice_number"], "E24-12540-RE")
+        self.assertEqual(result["invoice_date"], "2025-12-29")
+        self.assertEqual(result["product_name"], "Flex Medium 2C bis DIN-A3+")
+        self.assertEqual(result["net_amount"], Decimal("46.00"))
+        self.assertEqual(result["tax_amount"], Decimal("8.74"))
+        self.assertEqual(result["gross_amount"], Decimal("54.75"))
+
     def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
         text = """
         Enno Roggemann GmbH & Co. KG
