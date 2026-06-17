@@ -191,6 +191,95 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_amount"], Decimal("8.74"))
         self.assertEqual(result["gross_amount"], Decimal("54.75"))
 
+    def test_ibe_primecard_invoice_reads_mixed_tax_totals_and_product(self):
+        text = """
+        I.B.E. Institut für betriebliches Entgeltmanagement GmbH | Marienstr. 14-16 | 80331 München
+        FriStD-Bau ZuB GmbH & Co.KG
+        Haldesdorfer Straße 44
+        22179 Hamburg
+        München, 28.01.2026
+        Rechnungsnummer: SU01764-26-01a
+        Kundennummer: U01764
+        Leistungszeitraum: Januar 2026 / Benefitbuchung: Januar 2026
+        Nr. Beschreibung Anzahl Einzelpreis Gesamtpreis MwSt
+        1. Ladebetrag PRIMECARD - Sachbezug 4 50,00 € 200,00 € 0 %
+        2. Ladegebühr PRIMECARD - Sachbezug 4 2,50 € 10,00 € 19 %
+        Nettobetrag 0 % 200,00 €
+        Nettobetrag 19 % 10,00 €
+        Mehrwertsteuer 19 % 1,90 €
+        Rechnungsbetrag 211,90 €
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung-SU01764-26-01a.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "ibe-primecard.pdf",
+            "size_bytes": 16722,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "I.B.E. Institut für betriebliches Entgeltmanagement GmbH")
+        self.assertEqual(result["invoice_number"], "SU01764-26-01a")
+        self.assertEqual(result["customer_number"], "U01764")
+        self.assertEqual(result["invoice_date"], "2026-01-28")
+        self.assertIsNone(result["due_date"])
+        self.assertEqual(result["product_name"], "Ladebetrag PRIMECARD - Sachbezug")
+        self.assertEqual(result["cost_category"], "general_overhead")
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(result["net_amount"], Decimal("210.00"))
+        self.assertEqual(result["tax_amount"], Decimal("1.90"))
+        self.assertEqual(result["gross_amount"], Decimal("211.90"))
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg SU01764-26-01a, Allgemeine Kosten, I.B.E. Institut für betriebliches Entgeltmanagement GmbH, Ladebetrag PRIMECARD - Sachbezug, 2026-01-28.pdf",
+        )
+
+    def test_ibe_primecard_gift_invoice_reads_low_mixed_tax_total(self):
+        text = """
+        I.B.E. Institut für betriebliches Entgeltmanagement GmbH | Marienstr. 14-16 | 80331 München
+        München, 28.01.2026
+        Rechnungsnummer: SU01764-26-01b
+        Kundennummer: U01764
+        Nr. Beschreibung Anzahl Einzelpreis Gesamtpreis MwSt
+        1. Ladebetrag PRIMECARD - Geschenk 1 60,00 € 60,00 € 0 %
+        2. Ladegebühr PRIMECARD - Geschenk 1 2,50 € 2,50 € 19 %
+        Nettobetrag 0 % 60,00 €
+        Nettobetrag 19 % 2,50 €
+        Mehrwertsteuer 19 % 0,48 €
+        Rechnungsbetrag 62,98 €
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung-SU01764-26-01b.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "ibe-primecard-gift.pdf",
+            "size_bytes": 16716,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["invoice_number"], "SU01764-26-01b")
+        self.assertEqual(result["product_name"], "Ladebetrag PRIMECARD - Geschenk")
+        self.assertEqual(result["net_amount"], Decimal("62.50"))
+        self.assertEqual(result["tax_amount"], Decimal("0.48"))
+        self.assertEqual(result["gross_amount"], Decimal("62.98"))
+
     def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
         text = """
         Enno Roggemann GmbH & Co. KG

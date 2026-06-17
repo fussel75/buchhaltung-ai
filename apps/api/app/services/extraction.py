@@ -501,6 +501,9 @@ def _build_pdf_text_result(document: dict) -> dict:
 
     invoice_number = _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
+        r"Rechnungsnummer:\s*([A-Z0-9-]+[a-z]?)",
+    ) or _find_text(
+        text,
         r"RechnungsNr\.\s*:\s*([0-9]+)\s+\d{2}\.\d{2}\.\d{2,4}",
     ) or _find_text(
         text,
@@ -523,6 +526,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_customer_number(text)
     invoice_date = _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+        text,
+        r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
         text,
         r"RechnungsNr\.\s*:\s*[0-9]+\s+(\d{2}\.\d{2}\.\d{2,4})",
     ) or _find_date(
@@ -1091,6 +1097,7 @@ def _find_customer_number(text: str) -> str | None:
         or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.?:\s*([A-Z0-9-]+?)(?=Auftrag|Lieferschein|Rechnung|\s|$)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kundennummer:\s*([A-Z0-9][A-Z0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*[0-9]{6,}\s+([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}")
         or _find_text(text, r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+(FRHA05)\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}")
@@ -1118,6 +1125,21 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "net_amount": _money_to_decimal(eindruck24_total.group(1)),
             "tax_amount": _money_to_decimal(eindruck24_total.group(2)),
             "gross_amount": _money_to_decimal(eindruck24_total.group(3)),
+        }
+    ibe_total = search(
+        r"Nettobetrag\s+0\s*%\s+([0-9.]+,\d{2})\s*€?[\s\S]*?"
+        r"Nettobetrag\s+19\s*%\s+([0-9.]+,\d{2})\s*€?[\s\S]*?"
+        r"Mehrwertsteuer\s+19\s*%\s+([0-9.]+,\d{2})\s*€?[\s\S]*?"
+        r"Rechnungsbetrag\s+([0-9.]+,\d{2})\s*€?",
+        text,
+    )
+    if ibe_total:
+        net_amount = _money_to_decimal(ibe_total.group(1)) + _money_to_decimal(ibe_total.group(2))
+        return {
+            "discount_base": None,
+            "net_amount": net_amount.quantize(Decimal("0.01")),
+            "tax_amount": _money_to_decimal(ibe_total.group(3)),
+            "gross_amount": _money_to_decimal(ibe_total.group(4)),
         }
     af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
     if af_elektro_total:
@@ -1452,6 +1474,10 @@ def _supplier_name(document: dict, text: str) -> str:
         return "A. Franz Elektrotechnik"
     if "eindruck24" in lower_text and "buchhaltung@eindruck24.de" in lower_text:
         return "Eindruck24"
+    if "institut für betriebliches entgeltmanagement gmbh" in lower_text or (
+        "primecard" in lower_text and "marienstr. 14-16" in lower_text
+    ):
+        return "I.B.E. Institut für betriebliches Entgeltmanagement GmbH"
     if "roggemann.de" in lower_text and "enno roggemann gmbh" in lower_text:
         return "Enno Roggemann GmbH & Co. KG"
     if "bueroshop24.de" in lower_text or "büroshop24 gmbh" in lower_text:
@@ -1570,6 +1596,8 @@ def _cost_category(
         return "general_overhead"
     if "datev" in haystack:
         return "software_subscription"
+    if any(term in haystack for term in ["primecard", "institut für betriebliches entgeltmanagement", "institut fuer betriebliches entgeltmanagement"]):
+        return "general_overhead"
     if any(term in haystack for term in ["maison gebäudeservice", "maison gebaeudeservice", "allgemeine reinigungsarbeiten"]):
         return "general_overhead"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
@@ -1619,6 +1647,13 @@ def _find_first_position_product_name(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines()]
     if "buchhaltung@eindruck24.de" in text.lower():
         product = _find_eindruck24_product_name(text)
+        if product:
+            return product
+    if "primecard" in text.lower():
+        product = _find_text(
+            text,
+            r"1\.\s+(Ladebetrag\s+PRIMECARD\s+-\s+.+?)\s+\d+\s+[0-9.]+,\d{2}\s*€\s+[0-9.]+,\d{2}\s*€\s+0\s*%",
+        )
         if product:
             return product
     if "info@af-elektro.de" in text.lower():
