@@ -493,6 +493,9 @@ def _build_ubl_xml_result(
 def _build_pdf_text_result(document: dict) -> dict:
     text = _extract_pdf_text(document["storage_path"])
     if len(text.strip()) < 80:
+        tank_receipt = _build_scanned_tank_receipt_result(document)
+        if tank_receipt:
+            return tank_receipt
         result = _build_mock_result(document)
         result["warnings"] = [
             "PDF-Text konnte nicht ausreichend gelesen werden. OCR wird für diesen Belegtyp benötigt.",
@@ -765,6 +768,129 @@ def _build_mock_result(document: dict) -> dict:
         "normalized_filename": None,
         "source": "mock",
     }
+
+
+def _build_scanned_tank_receipt_result(document: dict) -> dict | None:
+    parsed = _tank_receipt_from_filename(document["original_filename"])
+    if not parsed:
+        return None
+
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    supplier_name = "Tankbeleg"
+    product_name = "Diesel"
+    invoice_number = parsed["invoice_number"]
+    invoice_date = parsed["invoice_date"]
+    normalized_filename = _normalized_invoice_filename(
+        invoice_number=invoice_number,
+        assignment=None,
+        assignment_type="general_cost",
+        tenant_profile=tenant_profile,
+        supplier_name=supplier_name,
+        product_name=product_name,
+        invoice_date=invoice_date,
+    )
+    vehicle = parsed["vehicle"]
+    driver = parsed.get("driver")
+    warnings = [
+        "Scan-/Foto-Tankbeleg: Beträge, Liter und Tankstelle müssen per OCR oder manuell geprüft werden.",
+    ]
+    if driver:
+        warnings.append(f"Fahrer-Kürzel aus Dateiname erkannt: {driver}.")
+
+    return {
+        "supplier_name": supplier_name,
+        "invoice_number": invoice_number,
+        "customer_number": None,
+        "customer_reference": vehicle,
+        "invoice_date": invoice_date,
+        "due_date": invoice_date,
+        "discount_due_date": None,
+        "service_period": invoice_date[:7] if invoice_date else None,
+        "delivery_address": None,
+        "delivery_addresses": [],
+        "allocation_lines": [],
+        "assignment_code": None,
+        "assignment_label": None,
+        "assignment_kind": None,
+        "assignment_revenue_relevant": None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
+        "project_code": None,
+        "project_number": None,
+        "project_name": None,
+        "assignment_type": "general_cost",
+        "cost_category": "fuel_vehicle",
+        "product_name": product_name,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "document_type": "incoming_invoice",
+        "payment_terms": _payment_terms(
+            gross_amount=None,
+            due_date=invoice_date,
+            discount_due_date=None,
+            discount_base=None,
+            discount_percent=None,
+            discount_amount=None,
+            discounted_payable_amount=None,
+            is_credit_note=False,
+        ),
+        "currency": "EUR",
+        "confidence": Decimal("0.62"),
+        "warnings": warnings,
+        "normalized_filename": normalized_filename,
+        "source": "pdf_scan_filename_rules",
+        "vehicle": vehicle,
+        "driver": driver,
+    }
+
+
+def _tank_receipt_from_filename(filename: str) -> dict | None:
+    stem = Path(filename).stem
+    if "tankbeleg" not in stem.lower():
+        return None
+    date_match = search(r"(\d{4}-\d{2}-\d{2})", stem)
+    vehicle_match = search(r"\b(HH[-\s]*FB[-\s]*\d+)\b", stem, flags=0)
+    if not date_match or not vehicle_match:
+        return None
+
+    vehicle = sub(r"\s+", " ", vehicle_match.group(1).replace("-", " - ")).strip()
+    vehicle = vehicle.replace("HH - FB", "HH-FB").replace(" - ", " ")
+    vehicle = sub(r"\s+", " ", vehicle).strip()
+    driver = _tank_receipt_driver_from_filename(stem)
+    invoice_date = date_match.group(1)
+    invoice_number = f"{vehicle} {invoice_date}"
+    return {
+        "vehicle": vehicle,
+        "driver": driver,
+        "invoice_date": invoice_date,
+        "invoice_number": invoice_number,
+    }
+
+
+def _tank_receipt_driver_from_filename(stem: str) -> str | None:
+    without_date = sub(r",?\s*\d{4}-\d{2}-\d{2}\s*$", "", stem).strip()
+    parts = [part.strip() for part in without_date.split(",") if part.strip()]
+    if not parts:
+        return None
+    last_part = parts[-1]
+    lower_last = last_part.lower()
+    if lower_last != "tankbeleg" and "tankbeleg" not in lower_last:
+        return last_part
+    words = last_part.split()
+    if len(words) >= 2 and words[-1].isalpha():
+        return words[-1]
+    return None
 
 
 def _extract_pdf_text(storage_path: str) -> str:

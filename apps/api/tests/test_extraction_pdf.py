@@ -344,6 +344,66 @@ class ExtractionPdfTests(TestCase):
             "ERg 6514767, Allgemeine Kosten, Mittwald CM Service GmbH & Co. KG, Zusätzliche Domains Preisstufe 1, 2026-01-27.pdf",
         )
 
+    def test_scanned_tank_receipt_uses_filename_without_mock_amounts(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "HH-FB 814, Tankbeleg LS, 2025-12-10.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "tankbeleg.pdf",
+            "created_at": "2026-06-17T10:00:00+00:00",
+            "size_bytes": 493091,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["source"], "pdf_scan_filename_rules")
+        self.assertEqual(result["supplier_name"], "Tankbeleg")
+        self.assertEqual(result["invoice_number"], "HH-FB 814 2025-12-10")
+        self.assertEqual(result["customer_reference"], "HH-FB 814")
+        self.assertEqual(result["vehicle"], "HH-FB 814")
+        self.assertEqual(result["driver"], "LS")
+        self.assertEqual(result["invoice_date"], "2025-12-10")
+        self.assertEqual(result["due_date"], "2025-12-10")
+        self.assertEqual(result["cost_category"], "fuel_vehicle")
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(result["product_name"], "Diesel")
+        self.assertIsNone(result["net_amount"])
+        self.assertIsNone(result["tax_amount"])
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("OCR", " ".join(result["warnings"]))
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg HH-FB 814 2025-12-10, Allgemeine Kosten, Tankbeleg, Diesel, 2025-12-10.pdf",
+        )
+
+    def test_scanned_tank_receipt_filename_driver_is_optional(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "HH-FB 4753, Tankbeleg, PhS, 2025-11-25.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "tankbeleg.pdf",
+            "created_at": "2026-06-17T10:00:00+00:00",
+            "size_bytes": 121895,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["invoice_number"], "HH-FB 4753 2025-11-25")
+        self.assertEqual(result["customer_reference"], "HH-FB 4753")
+        self.assertEqual(result["driver"], "PhS")
+        self.assertEqual(result["invoice_date"], "2025-11-25")
+        self.assertEqual(result["cost_category"], "fuel_vehicle")
+
     def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
         text = """
         Enno Roggemann GmbH & Co. KG
