@@ -280,6 +280,70 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_amount"], Decimal("0.48"))
         self.assertEqual(result["gross_amount"], Decimal("62.98"))
 
+    def test_mittwald_invoice_reads_hosting_domain_totals_and_direct_debit_date(self):
+        text = """
+        Mittwald CM Service * Königsberger Straße 4-6 * 32339 Espelkamp
+        FriStD-Bau ZuB GmbH & Co.KG
+        Rechnung Kunden Nr.: 296313
+        Kunden Ust-Nr.: DE276234295
+        Rechnung Nr.: 6514767
+        Rechnungsdatum: 27.01.2026
+        Bitte nicht überweisen:
+        Zahlung per Lastschriftverfahren
+        Pos. Menge Artikel USt. Einzelpreis
+        Netto
+        Gesamtpreis
+        Netto
+        Zusätzliche Domains Preisstufe 1
+        Domains mit einem monatlichen Preis von 1,99 EUR
+        Domain: suliqua.com
+        Projekt: p145339 (Webhosting XL 10.0)
+        Leistungszeitraum: 27.01.2026 bis 26.01.2027
+        1 12 Monate 19 % 1,99 EUR 23,88 EUR
+        Zwischensumme Netto
+        Zzgl. 19 % USt. (Deutschland) auf 23,88 EUR
+        23,88 EUR
+        4,54 EUR
+        Gesamtbetrag 28,42 EUR
+        Der Rechnungsbetrag wird frühestens am 29.01.2026
+        von Ihrem Konto abgebucht.
+        Mittwald CM Service GmbH & Co. KG
+        E-Mail: info@mittwald.de
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "6514767.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "mittwald.pdf",
+            "size_bytes": 54481,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Mittwald CM Service GmbH & Co. KG")
+        self.assertEqual(result["invoice_number"], "6514767")
+        self.assertEqual(result["customer_number"], "296313")
+        self.assertEqual(result["invoice_date"], "2026-01-27")
+        self.assertEqual(result["due_date"], "2026-01-29")
+        self.assertEqual(result["product_name"], "Zusätzliche Domains Preisstufe 1")
+        self.assertEqual(result["cost_category"], "software_subscription")
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(result["net_amount"], Decimal("23.88"))
+        self.assertEqual(result["tax_amount"], Decimal("4.54"))
+        self.assertEqual(result["gross_amount"], Decimal("28.42"))
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 6514767, Allgemeine Kosten, Mittwald CM Service GmbH & Co. KG, Zusätzliche Domains Preisstufe 1, 2026-01-27.pdf",
+        )
+
     def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
         text = """
         Enno Roggemann GmbH & Co. KG

@@ -504,6 +504,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"Rechnungsnummer:\s*([A-Z0-9-]+[a-z]?)",
     ) or _find_text(
         text,
+        r"Rechnung\s+Nr\.:\s*([0-9]+)",
+    ) or _find_text(
+        text,
         r"RechnungsNr\.\s*:\s*([0-9]+)\s+\d{2}\.\d{2}\.\d{2,4}",
     ) or _find_text(
         text,
@@ -530,6 +533,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
+        r"Rechnungsdatum:\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
         r"RechnungsNr\.\s*:\s*[0-9]+\s+(\d{2}\.\d{2}\.\d{2,4})",
     ) or _find_date(
         text,
@@ -554,6 +560,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
+        or _find_date(text, r"fr[üÃ¼]hestens am\s+(\d{2}\.\d{2}\.\d{4})")
     )
     allocation_lines = _find_allocation_lines(document["tenant_id"], text)
     visible_discount = _find_visible_discount_terms(text)
@@ -1098,6 +1105,7 @@ def _find_customer_number(text: str) -> str | None:
         or _find_text(text, r"Kunden-Nr\.?:\s*([A-Z0-9-]+?)(?=Auftrag|Lieferschein|Rechnung|\s|$)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer:\s*([A-Z0-9][A-Z0-9/.-]*)")
+        or _find_text(text, r"Kunden\s+Nr\.:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*[0-9]{6,}\s+([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}")
         or _find_text(text, r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+(FRHA05)\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}")
@@ -1140,6 +1148,20 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "net_amount": net_amount.quantize(Decimal("0.01")),
             "tax_amount": _money_to_decimal(ibe_total.group(3)),
             "gross_amount": _money_to_decimal(ibe_total.group(4)),
+        }
+    mittwald_total = search(
+        r"Zwischensumme\s+Netto[\s\S]*?"
+        r"Zzgl\.\s+19\s*%\s+USt\.[^\n]*?\s+auf\s+([0-9.]+,\d{2})\s+EUR[\s\S]*?"
+        r"\n\s*([0-9.]+,\d{2})\s+EUR\s*\n\s*([0-9.]+,\d{2})\s+EUR[\s\S]*?"
+        r"Gesamtbetrag\s+([0-9.]+,\d{2})\s+EUR",
+        text,
+    )
+    if mittwald_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(mittwald_total.group(2)),
+            "tax_amount": _money_to_decimal(mittwald_total.group(3)),
+            "gross_amount": _money_to_decimal(mittwald_total.group(4)),
         }
     af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
     if af_elektro_total:
@@ -1474,6 +1496,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "A. Franz Elektrotechnik"
     if "eindruck24" in lower_text and "buchhaltung@eindruck24.de" in lower_text:
         return "Eindruck24"
+    if "mittwald cm service" in lower_text or "info@mittwald.de" in lower_text:
+        return "Mittwald CM Service GmbH & Co. KG"
     if "institut für betriebliches entgeltmanagement gmbh" in lower_text or (
         "primecard" in lower_text and "marienstr. 14-16" in lower_text
     ):
@@ -1596,6 +1620,8 @@ def _cost_category(
         return "general_overhead"
     if "datev" in haystack:
         return "software_subscription"
+    if any(term in haystack for term in ["mittwald", "webhosting", "zusätzliche domains", "zusaetzliche domains", "domain:"]):
+        return "software_subscription"
     if any(term in haystack for term in ["primecard", "institut für betriebliches entgeltmanagement", "institut fuer betriebliches entgeltmanagement"]):
         return "general_overhead"
     if any(term in haystack for term in ["maison gebäudeservice", "maison gebaeudeservice", "allgemeine reinigungsarbeiten"]):
@@ -1654,6 +1680,10 @@ def _find_first_position_product_name(text: str) -> str | None:
             text,
             r"1\.\s+(Ladebetrag\s+PRIMECARD\s+-\s+.+?)\s+\d+\s+[0-9.]+,\d{2}\s*€\s+[0-9.]+,\d{2}\s*€\s+0\s*%",
         )
+        if product:
+            return product
+    if "mittwald cm service" in text.lower() or "info@mittwald.de" in text.lower():
+        product = _find_text(text, r"\n\s*(Zus[äÃ¤]tzliche Domains Preisstufe \d+)")
         if product:
             return product
     if "info@af-elektro.de" in text.lower():
