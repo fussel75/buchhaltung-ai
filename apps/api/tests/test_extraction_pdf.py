@@ -15,6 +15,101 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_bueroshop24_invoice_reads_header_totals_and_product(self):
+        text = """
+        GiroCode
+        FriStD-Bau ZuB GmbH & Co. KG
+        Haldesdorfer Str. 44
+        22179 Hamburg
+        büroshop24 GmbH
+        www.bueroshop24.de
+        kundenservice@bueroshop24.de
+        Rechnung
+        Rechnungs-Nr. Kunden-Nr. Rg.-/Liefer-Datum Auftrags-Nr. Besteller/Bestell-Nr. Paket-Nr.
+        Ronny Friedrich
+        150975289 56348194 16.06.2026 807391992 228614358
+        Zahlung per PayPal
+        Bestell-Nr. Menge Artikelbezeichnung Einzelpreis Gesamtpreis USt.
+        KZ
+        Bemerkung
+        371 409-79 2 EPSON Tinte M 35/T3583 26,99 53,98 1
+        Versandkosten 5,29
+        Zahlartgebühr Warenwert Netto Gesamt-Netto USt.-Betrag % USt. Rg.-Betrag EUR
+        53,98 59,27 11,26 19 70,53 1
+        Verwendungszweck:
+        Rg. 150975289, Kd. 56348194
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_0150975289.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "bueroshop.pdf",
+            "size_bytes": 88000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "büroshop24 GmbH")
+        self.assertEqual(result["invoice_number"], "150975289")
+        self.assertEqual(result["customer_number"], "56348194")
+        self.assertEqual(result["invoice_date"], "2026-06-16")
+        self.assertEqual(result["net_amount"], Decimal("59.27"))
+        self.assertEqual(result["tax_amount"], Decimal("11.26"))
+        self.assertEqual(result["gross_amount"], Decimal("70.53"))
+        self.assertIsNone(result["assignment_code"])
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(result["cost_category"], "general_overhead")
+        self.assertEqual(result["product_name"], "EPSON Tinte M 35/T3583")
+
+    def test_bueroshop24_invoice_reads_due_date_when_present(self):
+        text = """
+        büroshop24 GmbH
+        www.bueroshop24.de
+        Rechnung
+        Rechnungs-Nr. Kunden-Nr. Rg.-/Liefer-Datum Auftrags-Nr. Besteller/Bestell-Nr. Paket-Nr.
+        Ronny Friedrich
+        147460802 56348194 03.09.2025 804733702 223465245
+        Bestell-Nr. Menge Artikelbezeichnung Einzelpreis Gesamtpreis USt.
+        KZ
+        Bemerkung
+        371 409-79 1 EPSON Tinte M 35/T3583 26,99 26,99 1
+        Versandkosten 4,19
+        Kleinmengenzuschlag 2,99
+        Zahlartgebühr Warenwert Netto Gesamt-Netto USt.-Betrag % USt. Rg.-Betrag EUR
+        Zahlbar bis
+        26,99 34,17 6,49 19 40,66 1 03.10.2025
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_0147460802.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "bueroshop.pdf",
+            "size_bytes": 88000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["invoice_number"], "147460802")
+        self.assertEqual(result["invoice_date"], "2025-09-03")
+        self.assertEqual(result["due_date"], "2025-10-03")
+        self.assertEqual(result["net_amount"], Decimal("34.17"))
+        self.assertEqual(result["tax_amount"], Decimal("6.49"))
+        self.assertEqual(result["gross_amount"], Decimal("40.66"))
+
     def test_arens_stitz_invoice_reads_header_totals_and_assignment(self):
         text = """
         R E C H N U N G

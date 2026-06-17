@@ -497,6 +497,9 @@ def _build_pdf_text_result(document: dict) -> dict:
 
     invoice_number = _find_text(text, r"Rechnungs-Nr\.:\s*(\d+)") or _find_text(
         text,
+        r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*([0-9]{6,})\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}",
+    ) or _find_text(
+        text,
         r"(?:Rechnung|Retourgutschrift)\s+Datum\s+Seite\s*\n\s*([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}",
     ) or _find_text(
         text,
@@ -513,6 +516,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_customer_number(text)
     invoice_date = _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+        text,
+        r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*[0-9]{6,}\s+[0-9]{6,}\s+(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
         text,
         r"(?:Rechnung|Retourgutschrift)\s+Datum\s+Seite\s*\n\s*[0-9]{6,}\s+(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
@@ -536,7 +542,13 @@ def _build_pdf_text_result(document: dict) -> dict:
     allocation_lines = _find_allocation_lines(document["tenant_id"], text)
     visible_discount = _find_visible_discount_terms(text)
     pietsch_discount = _find_pietsch_discount_terms(text)
-    due_date = due_date or _find_dammers_due_date(text) or visible_discount.get("due_date") or pietsch_discount.get("due_date")
+    due_date = (
+        due_date
+        or _find_bueroshop_due_date(text)
+        or _find_dammers_due_date(text)
+        or visible_discount.get("due_date")
+        or pietsch_discount.get("due_date")
+    )
     discount_percent = _find_discount_percent(text) or visible_discount.get("discount_percent") or pietsch_discount.get("discount_percent")
     discount_due_date = (
         _find_date(text, r"(\d{2}\.\d{2}\.\d{4})\s+3,00%\s+Skonto")
@@ -1037,6 +1049,7 @@ def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*[0-9]{6,}\s+([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}")
         or _find_text(text, r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+(FRHA05)\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}")
         or _find_text(text, r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*:?\s*([0-9][0-9/.-]*)")
@@ -1050,6 +1063,18 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    bueroshop_total = search(
+        r"Zahlartgeb(?:ühr|Ã¼hr)\s+Warenwert\s+Netto\s+Gesamt-Netto\s+USt\.-Betrag\s+%\s+USt\.\s+Rg\.-Betrag\s+EUR[\s\S]*?"
+        r"(?:Zahlbar bis\s+)?[0-9.]+,\d{2}\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+19\s+([0-9.]+,\d{2})",
+        text,
+    )
+    if bueroshop_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(bueroshop_total.group(1)),
+            "tax_amount": _money_to_decimal(bueroshop_total.group(2)),
+            "gross_amount": _money_to_decimal(bueroshop_total.group(3)),
+        }
     arens_stitz_total = search(
         r"Warenwert\s*:\s*([0-9.]+,\d{2})\s+EUR[\s\S]*?"
         r"19,00%MWST:\s*([0-9.]+,\d{2})\s+EUR[\s\S]*?"
@@ -1180,6 +1205,10 @@ def _find_pietsch_discount_terms(text: str) -> dict[str, Decimal | str | None]:
     }
 
 
+def _find_bueroshop_due_date(text: str) -> str | None:
+    return _find_date(text, r"Rg\.-Betrag EUR\s*\n\s*Zahlbar bis[\s\S]*?\b(\d{2}\.\d{2}\.\d{4})")
+
+
 def _discount_due_date_from_days(invoice_date: str | None, days: int | None) -> str | None:
     if not invoice_date or days is None:
         return None
@@ -1280,6 +1309,8 @@ def _supplier_name(document: dict, text: str) -> str:
     lower_text = text.lower()
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
+    if "bueroshop24.de" in lower_text or "büroshop24 gmbh" in lower_text:
+        return "büroshop24 GmbH"
     if "pietsch hamburg-ost damaschke" in lower_text:
         return "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG"
     if "auslieferungslager" in lower_text and "barmbek" in lower_text and "0515834/086" in text:
@@ -1388,6 +1419,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["büroshop24", "bueroshop24", "epson tinte", "kleinmengenzuschlag"]):
+        return "general_overhead"
     if any(term in haystack for term in ["arens & stitz", "profipress", "trinnity", "cosmo standard stellantrieb", "push-open"]):
         return "material"
     if any(term in haystack for term in ["pietsch", "profipress", "kupferrohr", "sanpress", "gewindeschneidkluppe"]):
@@ -1429,6 +1462,13 @@ def _filename_product_name(value: str) -> str:
 
 def _find_first_position_product_name(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines()]
+    bueroshop_item = search(
+        r"^\s*\d+\s+(?:\d+\s+)?\d+-\d+\s+\d+\s+(.+?)\s+[0-9.]+,\d{2}\s+[0-9.]+,\d{2}\s+\d\s*$",
+        text,
+        MULTILINE,
+    )
+    if bueroshop_item:
+        return bueroshop_item.group(1).strip()
     pietsch_item_pattern = r"^\d+\s+\d{6,}\s+[-0-9,.]+\s+(?:ST|M|KG|LTR|PA|ROL|PKT)\s+[-0-9,.]+\s+\d+\s+[-0-9,.]+\s+EUR$"
     for index, line in enumerate(lines):
         if not search(pietsch_item_pattern, line):
