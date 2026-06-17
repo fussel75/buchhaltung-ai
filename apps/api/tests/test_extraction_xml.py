@@ -6,7 +6,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from app.services import extraction as extraction_service
-from app.services.extraction import _build_extraction_result
+from app.services.extraction import _build_extraction_result, _build_structured_xml_result
 
 
 TENANT_PROFILE = {
@@ -59,7 +59,90 @@ UBL_INVOICE = b"""<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+DATEV_CII_INVOICE = """<?xml version="1.0" encoding="utf-8"?>
+<rsm:CrossIndustryInvoice xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100" xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100">
+  <rsm:ExchangedDocument>
+    <ram:ID>31813772026</ram:ID>
+    <ram:IssueDateTime><udt:DateTimeString format="102">20260331</udt:DateTimeString></ram:IssueDateTime>
+    <ram:IncludedNote><ram:Content>Beraternummer: 1060182</ram:Content></ram:IncludedNote>
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument><ram:LineID>1</ram:LineID></ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:SellerAssignedID>95138</ram:SellerAssignedID>
+        <ram:Name>DATEV Unternehmen online</ram:Name>
+      </ram:SpecifiedTradeProduct>
+    </ram:IncludedSupplyChainTradeLineItem>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty><ram:Name>DATEV eG</ram:Name></ram:SellerTradeParty>
+      <ram:BuyerTradeParty><ram:ID>1060182</ram:ID><ram:Name>FriStD-Bau ZuB GmbH &amp; Co. KG</ram:Name></ram:BuyerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:Description>Der Betrag in Höhe von 41,27 Euro wird voraussichtlich am 15.04.2026 per Lastschrift eingezogen.</ram:Description>
+        <ram:DueDateDateTime><udt:DateTimeString format="102">20260415</udt:DateTimeString></ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>34.68</ram:LineTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">6.59</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>41.27</ram:GrandTotalAmount>
+        <ram:DuePayableAmount>41.27</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>
+""".encode("utf-8")
+
+
 class ExtractionXmlTests(TestCase):
+    def test_embedded_datev_cii_invoice_uses_xml_due_date_without_cash_discount(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "1060182_20260331.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "datev.pdf",
+            "size_bytes": len(DATEV_CII_INVOICE),
+            "sha256": "abc",
+        }
+        text = """
+        DATEV-Rechnung
+        März 2026
+        Beraternummer: 1060182
+        Kontonummer: 41399752 Rechnungsnummer: 31813772026 Rechnungsdatum: 31.03.2026
+        DATEV Unternehmen online März 2026
+        Rechnungsendbetrag 41,27
+        Der Betrag in Höhe von 41,27 Euro wird voraussichtlich am 15.04.2026 per Lastschrift eingezogen.
+        """
+
+        with (
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_structured_xml_result(document, "factur-x.xml", DATEV_CII_INVOICE, text)
+
+        self.assertEqual(result["source"], "embedded_xml")
+        self.assertEqual(result["xml_format"], "cii")
+        self.assertEqual(result["supplier_name"], "DATEV eG")
+        self.assertEqual(result["invoice_number"], "31813772026")
+        self.assertEqual(result["customer_number"], "1060182")
+        self.assertEqual(result["invoice_date"], "2026-03-31")
+        self.assertEqual(result["due_date"], "2026-04-15")
+        self.assertIsNone(result["discount_due_date"])
+        self.assertEqual(result["product_name"], "DATEV Unternehmen online")
+        self.assertEqual(result["cost_category"], "software_subscription")
+        self.assertEqual(result["net_amount"], Decimal("34.68"))
+        self.assertEqual(result["tax_amount"], Decimal("6.59"))
+        self.assertEqual(result["gross_amount"], Decimal("41.27"))
+        self.assertEqual(result["payment_terms"][0]["due_date"], "2026-04-15")
+        self.assertEqual(len(result["payment_terms"]), 1)
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 31813772026, Allgemeine Kosten, DATEV eG, DATEV Unternehmen online, 2026-03-31.pdf",
+        )
+
     def test_standalone_ubl_invoice_is_structured_extraction(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

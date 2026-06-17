@@ -164,7 +164,7 @@ def _build_cii_xml_result(
         ".//ram:ApplicableHeaderTradeSettlement/ram:SpecifiedTradePaymentTerms/ram:Description",
         ns,
     )
-    discount_due_date = _cii_date(
+    xml_payment_due_date = _cii_date(
         _xml_text(
             root,
             ".//ram:ApplicableHeaderTradeSettlement/ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime/udt:DateTimeString",
@@ -212,14 +212,18 @@ def _build_cii_xml_result(
     # so the project assignment is enriched from the human-readable PDF.
     delivery_address = _xml_delivery_address(root, ns) or _find_delivery_address(text)
     customer_reference = _find_customer_reference(text)
+    discount_due_date = None
     due_date = (
         visible_discount.get("due_date")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+ohne Abzug")
         or _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
+        or (xml_payment_due_date if discount_percent is None else None)
     )
     visible_discount_due_date = _find_date(text, r"verrechnen bis zum\s+(\d{2}\.\d{2}\.\d{2})")
     if visible_discount_due_date or visible_discount.get("discount_due_date"):
         discount_due_date = visible_discount_due_date or visible_discount.get("discount_due_date")
+    elif discount_percent is not None and xml_payment_due_date:
+        discount_due_date = xml_payment_due_date
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
@@ -1563,6 +1567,8 @@ def _cost_category(
         return "subcontractor"
     if any(term in haystack for term in ["eindruck24", "druck bis", "sparker", "flex medium"]):
         return "general_overhead"
+    if "datev" in haystack:
+        return "software_subscription"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
         return "material"
     if any(term in haystack for term in ["büroshop24", "bueroshop24", "epson tinte", "kleinmengenzuschlag"]):
