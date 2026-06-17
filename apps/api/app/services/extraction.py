@@ -1088,6 +1088,7 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
 def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.?:\s*([A-Z0-9-]+?)(?=Auftrag|Lieferschein|Rechnung|\s|$)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
@@ -1569,6 +1570,8 @@ def _cost_category(
         return "general_overhead"
     if "datev" in haystack:
         return "software_subscription"
+    if any(term in haystack for term in ["maison gebäudeservice", "maison gebaeudeservice", "allgemeine reinigungsarbeiten"]):
+        return "general_overhead"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
         return "material"
     if any(term in haystack for term in ["büroshop24", "bueroshop24", "epson tinte", "kleinmengenzuschlag"]):

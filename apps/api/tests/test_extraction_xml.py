@@ -96,7 +96,89 @@ DATEV_CII_INVOICE = """<?xml version="1.0" encoding="utf-8"?>
 """.encode("utf-8")
 
 
+MAISON_CII_INVOICE = """<?xml version="1.0" encoding="utf-8"?>
+<rsm:CrossIndustryInvoice xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100" xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100">
+  <rsm:ExchangedDocument>
+    <ram:ID>RE-(2026)-25</ram:ID>
+    <ram:IssueDateTime><udt:DateTimeString format="102">20260331</udt:DateTimeString></ram:IssueDateTime>
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument><ram:LineID>1</ram:LineID></ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct><ram:Name>Allgemeine Reinigungsarbeiten</ram:Name></ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>300.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty><ram:Name>Maison Gebäudeservice - Oliwia Melissa Demirel</ram:Name></ram:SellerTradeParty>
+      <ram:BuyerTradeParty><ram:Name>FriStD-Bau ZuB GmbH &amp; Co. KG</ram:Name></ram:BuyerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:DueDateDateTime><udt:DateTimeString format="102">20260331</udt:DateTimeString></ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>300.00</ram:LineTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">57.00</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>357.00</ram:GrandTotalAmount>
+        <ram:DuePayableAmount>357.00</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>
+""".encode("utf-8")
+
+
 class ExtractionXmlTests(TestCase):
+    def test_maison_cii_invoice_uses_visible_customer_id_and_overhead_category(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "2603-RE-2026-25-Maison-Gebaeudeservice-Oliwia-Meli.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "maison.pdf",
+            "size_bytes": len(MAISON_CII_INVOICE),
+            "sha256": "abc",
+        }
+        text = """
+        Rechnung
+        Maison Gebäudeservice - Oliwia Melissa Demirel
+        FristD-Bau ZuB GmbH & Co. KG
+        Haldesdorfer Straße 4422179 HamburgDeutschland
+        Kunden-Steuer-ID 987
+        Rechnungsnummer RE-(2026)-25
+        Ausstellungsdatum 31.03.2026
+        Allgemeine Reinigungsarbeiten
+        März 2026 1 Monat 300,00 € 19 % 300,00 €
+        Bitte begleichen Sie die Rechnung direkt nach Erhalt. (31.03.2026)
+        """
+
+        with (
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_structured_xml_result(document, "factur-x.xml", MAISON_CII_INVOICE, text)
+
+        self.assertEqual(result["source"], "embedded_xml")
+        self.assertEqual(result["xml_format"], "cii")
+        self.assertEqual(result["supplier_name"], "Maison Gebäudeservice - Oliwia Melissa Demirel")
+        self.assertEqual(result["invoice_number"], "RE-(2026)-25")
+        self.assertEqual(result["customer_number"], "987")
+        self.assertEqual(result["invoice_date"], "2026-03-31")
+        self.assertEqual(result["due_date"], "2026-03-31")
+        self.assertEqual(result["product_name"], "Allgemeine Reinigungsarbeiten")
+        self.assertEqual(result["cost_category"], "general_overhead")
+        self.assertEqual(result["net_amount"], Decimal("300.00"))
+        self.assertEqual(result["tax_amount"], Decimal("57.00"))
+        self.assertEqual(result["gross_amount"], Decimal("357.00"))
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg RE-(2026)-25, Allgemeine Kosten, Maison Gebäudeservice - Oliwia Melissa Demirel, Allgemeine Reinigungsarbeiten, 2026-03-31.pdf",
+        )
+
     def test_embedded_datev_cii_invoice_uses_xml_due_date_without_cash_discount(self):
         document = {
             "tenant_id": "demo-mandant",
