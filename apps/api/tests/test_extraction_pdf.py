@@ -15,6 +15,109 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
+        text = """
+        Enno Roggemann GmbH & Co. KG
+        www.roggemann.de
+        Datum
+        RechnungsNr.: 26107466 26.05.26
+        Kunden-Nr. .: 0088163
+        R e c h n u n g
+        Betr.Lieferscheinnr.: 008118 vom/am 22.05.26 Auftragsnr.: 015012/00/26 / las
+        Ihre Kommission: Weseler Weg
+        Anlieferung . .:
+        0178/6665994
+        Weseler Weg 20                      D   22045   Hamburg
+        0020 303015340191055 1
+        Cape Cod Unterschlagsprofil    13,7cm   19,0mm
+        Zahlung . . . .:
+        bis 17.06.26 mit 3 % Skonto    =     1325,35  EURNetto-Betrag EUR      1145,96
+        bis 26.06.26 netto             =     1363,69  EUR 19,00 % MWSt EUR       217,73
+        Gesamtbetrag EUR      1363,69
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "R-26107466-0088163.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "roggemann.pdf",
+            "size_bytes": 270000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Enno Roggemann GmbH & Co. KG")
+        self.assertEqual(result["document_type"], "incoming_invoice")
+        self.assertEqual(result["invoice_number"], "26107466")
+        self.assertEqual(result["customer_number"], "0088163")
+        self.assertEqual(result["invoice_date"], "2026-05-26")
+        self.assertEqual(result["due_date"], "2026-06-26")
+        self.assertEqual(result["discount_due_date"], "2026-06-17")
+        self.assertEqual(result["discount_amount"], Decimal("38.34"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("1325.35"))
+        self.assertEqual(result["delivery_address"], "Weseler Weg 20, 22045 Hamburg")
+        self.assertEqual(result["customer_reference"], "Weseler Weg")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Cape Cod Unterschlagsprofil 13,7cm 19,0mm")
+        self.assertEqual(result["net_amount"], Decimal("1145.96"))
+        self.assertEqual(result["tax_amount"], Decimal("217.73"))
+        self.assertEqual(result["gross_amount"], Decimal("1363.69"))
+
+    def test_roggemann_credit_note_reads_negative_amounts_and_pickup_address(self):
+        text = """
+        Enno Roggemann GmbH & Co. KG
+        www.roggemann.de
+        Datum
+        RechnungsNr.: 25117978 10.12.25
+        Kunden-Nr. .: 0088163
+        Rücklieferungs Gutschrift
+        Abholung  . . .:
+        0174/2778822
+        Bucheckerweg 4                      D   22175   Hamburg
+        0020 303021051221036 1
+        Fasebretter    12,1cm   22,5mm
+        Zahlung . . . .:
+        bis  1.01.26 mit 3 % Skonto    =       47,37- EURNetto-Betrag EUR        41,04-
+        bis 10.01.26 netto             =       48,84- EUR 19,00 % MWSt EUR         7,80-
+        Gesamtbetrag EUR        48,84-
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "R-25117978-0088163.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "roggemann-credit.pdf",
+            "size_bytes": 268000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Enno Roggemann GmbH & Co. KG")
+        self.assertEqual(result["document_type"], "credit_note")
+        self.assertEqual(result["invoice_number"], "25117978")
+        self.assertEqual(result["invoice_date"], "2025-12-10")
+        self.assertEqual(result["due_date"], "2026-01-10")
+        self.assertEqual(result["discount_due_date"], "2026-01-01")
+        self.assertEqual(result["discount_amount"], Decimal("-1.47"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("-47.37"))
+        self.assertEqual(result["delivery_address"], "Bucheckerweg 4, 22175 Hamburg")
+        self.assertEqual(result["product_name"], "Fasebretter 12,1cm 22,5mm")
+        self.assertEqual(result["net_amount"], Decimal("-41.04"))
+        self.assertEqual(result["tax_amount"], Decimal("-7.80"))
+        self.assertEqual(result["gross_amount"], Decimal("-48.84"))
+
     def test_bueroshop24_invoice_reads_header_totals_and_product(self):
         text = """
         GiroCode
