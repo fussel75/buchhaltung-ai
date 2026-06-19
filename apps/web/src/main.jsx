@@ -236,6 +236,7 @@ function UploadApp() {
   const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
   const [assignmentUnitDraft, setAssignmentUnitDraft] = useState(null);
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
+  const [assignmentUnits, setAssignmentUnits] = useState([]);
   const approvalValidationRequestRef = useRef(0);
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
@@ -369,9 +370,24 @@ function UploadApp() {
     setTenantProfile(result.tenant_profile ?? defaultTenantProfile("general"));
   }, [activeTenantId, apiFetch]);
 
+  const loadAssignmentUnits = useCallback(async () => {
+    if (!activeTenantId) {
+      setAssignmentUnits([]);
+      return;
+    }
+    const response = await apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(activeTenantId)}`);
+    if (!response.ok) return;
+    const result = await response.json();
+    setAssignmentUnits(result.assignment_units ?? []);
+  }, [activeTenantId, apiFetch]);
+
   useEffect(() => {
     loadTenantProfile();
   }, [loadTenantProfile]);
+
+  useEffect(() => {
+    loadAssignmentUnits();
+  }, [loadAssignmentUnits]);
 
   useEffect(() => {
     if (!approvalDocumentId) return undefined;
@@ -1769,6 +1785,7 @@ function UploadApp() {
                             <ExtractionEditForm
                               document={document}
                               tenantProfile={tenantProfile}
+                              assignmentUnits={assignmentUnits}
                               isSaving={savingExtractionIds.includes(document.id)}
                               onSave={saveExtraction}
                             />
@@ -1870,6 +1887,7 @@ function UploadApp() {
         hasPrevious={focusedReviewIndex > 0}
         hasNext={focusedReviewIndex >= 0 && focusedReviewIndex < focusableReviewDocuments.length - 1}
         positionLabel={focusedReviewPositionLabel}
+        assignmentUnits={assignmentUnits}
         savingPaymentIds={savingPaymentIds}
         savingSuggestionIds={savingSuggestionIds}
         focusTarget={reviewFocusTarget?.documentId === focusedReviewDocumentId ? reviewFocusTarget : null}
@@ -1897,7 +1915,10 @@ function UploadApp() {
           onAccountingRuleSaved={returnToApprovalAfterAccountingRule}
           onAssignmentUnitDraftConsumed={clearAssignmentUnitDraft}
           onAssignmentUnitSaved={returnToApprovalAfterAssignmentUnit}
-          onProfileSaved={setTenantProfile}
+          onProfileSaved={(profile) => {
+            setTenantProfile(profile);
+            loadAssignmentUnits();
+          }}
         />
       ) : null}
 
@@ -2195,7 +2216,7 @@ function BulkJobHistory({ jobs }) {
   );
 }
 
-function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, onSave }) {
+function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isSaving, onDirtyChange, onSave }) {
   const [form, setForm] = useState(() => extractionFormFromDocument(document));
   const baselineForm = useMemo(
     () => extractionFormFromDocument(document),
@@ -2206,6 +2227,17 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, 
     [baselineForm, form],
   );
   const isApproved = document.status === "review_approved";
+  const assignmentOptions = useMemo(
+    () => assignmentUnits
+      .filter((assignment) => assignment.is_active !== false)
+      .map((assignment) => ({
+        ...assignment,
+        review_code: reviewAssignmentCode(assignment),
+      }))
+      .filter((assignment) => assignment.review_code || assignment.project_number)
+      .sort((left, right) => compareProjectValues(left.project_number || left.review_code, right.project_number || right.review_code)),
+    [assignmentUnits],
+  );
 
   useEffect(() => {
     setForm(baselineForm);
@@ -2216,7 +2248,26 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, 
   }, [isDirty, onDirtyChange]);
 
   function updateField(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === "assignment_code") {
+        const assignment = findAssignmentOption(assignmentOptions, "assignment_code", value);
+        if (assignment) {
+          next.assignment_code = assignment.review_code || value;
+          next.project_number = assignment.project_number || "";
+          next.assignment_kind = assignment.kind || current.assignment_kind;
+        }
+      }
+      if (field === "project_number") {
+        const assignment = findAssignmentOption(assignmentOptions, "project_number", value);
+        if (assignment) {
+          next.project_number = assignment.project_number || value;
+          next.assignment_code = assignment.review_code || "";
+          next.assignment_kind = assignment.kind || current.assignment_kind;
+        }
+      }
+      return next;
+    });
   }
 
   function submit(event) {
@@ -2267,10 +2318,24 @@ function ExtractionEditForm({ document, tenantProfile, isSaving, onDirtyChange, 
           </select>
         </FormField>
         <FormField label={tenantProfile.assignment_code_label}>
-          <input name="assignment_code" placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
+          <input name="assignment_code" list={`assignment-code-options-${document.id}`} placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
+          <datalist id={`assignment-code-options-${document.id}`}>
+            {assignmentOptions.map((assignment) => (
+              <option key={`code-${assignment.id}`} value={assignment.review_code}>
+                {[assignment.project_number, assignment.address_line, assignment.client_name].filter(Boolean).join(", ")}
+              </option>
+            ))}
+          </datalist>
         </FormField>
         <FormField label="Projektnr.">
-          <input name="project_number" placeholder="z.B. 26-00007" value={form.project_number} onChange={(event) => updateField("project_number", event.target.value)} disabled={isApproved} />
+          <input name="project_number" list={`project-number-options-${document.id}`} placeholder="z.B. 26-00007" value={form.project_number} onChange={(event) => updateField("project_number", event.target.value)} disabled={isApproved} />
+          <datalist id={`project-number-options-${document.id}`}>
+            {assignmentOptions.filter((assignment) => assignment.project_number).map((assignment) => (
+              <option key={`project-${assignment.id}`} value={assignment.project_number}>
+                {[assignment.review_code, assignment.address_line, assignment.client_name].filter(Boolean).join(", ")}
+              </option>
+            ))}
+          </datalist>
         </FormField>
         <FormField label="Zuordnungsart">
           <select name="assignment_kind" value={form.assignment_kind} onChange={(event) => updateField("assignment_kind", event.target.value)} disabled={isApproved}>
@@ -2627,6 +2692,7 @@ function DocumentPreview({ document }) {
 function ReviewFocusDialog({
   document,
   tenantProfile,
+  assignmentUnits = [],
   isSavingExtraction,
   isSavingPayment,
   isSavingSuggestion,
@@ -2790,6 +2856,7 @@ function ReviewFocusDialog({
               <ExtractionEditForm
                 document={document}
                 tenantProfile={tenantProfile}
+                assignmentUnits={assignmentUnits}
                 isSaving={isSavingExtraction}
                 onDirtyChange={(isDirty) => {
                   setHasUnsavedExtractionChanges(isDirty);
@@ -5879,6 +5946,31 @@ function formatAssignmentCode(code, kind, tenantProfile) {
   if (!code) return null;
   if (tenantProfile.assignment_code_prefix) return `${tenantProfile.assignment_code_prefix} ${code}`;
   return `${formatAssignmentKind(kind, tenantProfile)} ${code}`;
+}
+
+function reviewAssignmentCode(assignment) {
+  if (!assignment) return "";
+  const code = assignment.code || "";
+  const label = assignment.label || "";
+  if (looksLikeProjectNumber(code) && label && !looksLikeProjectNumber(label)) return label;
+  return code || label;
+}
+
+function findAssignmentOption(assignments, field, value) {
+  const normalizedValue = normalizeSearchText(value);
+  if (!normalizedValue) return null;
+  if (field === "project_number") {
+    return assignments.find((assignment) => normalizeSearchText(assignment.project_number) === normalizedValue) || null;
+  }
+  return assignments.find((assignment) => (
+    normalizeSearchText(assignment.review_code) === normalizedValue
+    || normalizeSearchText(assignment.code) === normalizedValue
+    || normalizeSearchText(assignment.label) === normalizedValue
+  )) || null;
+}
+
+function looksLikeProjectNumber(value) {
+  return /^\d{2,4}-\d{3,}$/.test(String(value || "").trim());
 }
 
 function assignmentProfileFromRaw(rawResult) {

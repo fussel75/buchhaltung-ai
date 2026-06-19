@@ -2480,6 +2480,43 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(cursor.statements[2][1], ("demo-mandant", "26-00007", assignment_id))
         self.assertEqual(assignment["code"], "Hk92")
 
+    def test_assignment_lookup_accepts_project_label_as_review_code(self):
+        assignment_id = uuid4()
+        row = {
+            "id": assignment_id,
+            "tenant_id": "demo-mandant",
+            "code": "26-00007",
+            "label": "Hk92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "order_number": "26-00001",
+            "customer_number": "11124",
+            "description": "Wärmepumpe",
+            "client_name": "Christoph Balschat",
+            "source_status": "active",
+            "address_line": "Heukoppel 92",
+            "postal_code": "22179",
+            "city": "Hamburg",
+            "external_id": "partner-project-7",
+            "revenue_relevant": True,
+            "aliases": [],
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        cursor = SequenceCursor(fetchone_results=[None, None, row])
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            assignment = database_service.get_assignment_unit_by_code("demo-mandant", "Hk92")
+
+        statements = [statement for statement, _params in cursor.statements]
+        self.assertIn("where tenant_id = %s and lower(code) = lower(%s)", statements[0])
+        self.assertIn("where tenant_id = %s and lower(coalesce(project_number, '')) = lower(%s)", statements[1])
+        self.assertIn("where tenant_id = %s and lower(label) = lower(%s)", statements[2])
+        self.assertEqual(assignment["code"], "26-00007")
+        self.assertEqual(assignment["label"], "Hk92")
+        self.assertEqual(assignment["project_number"], "26-00007")
+
     def test_assignment_sync_token_allows_partner_api_without_session(self):
         request = SimpleNamespace(headers={"authorization": "Bearer sync-token"}, state=SimpleNamespace())
 

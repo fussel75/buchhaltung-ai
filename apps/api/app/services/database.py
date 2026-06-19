@@ -3373,6 +3373,18 @@ def get_assignment_unit_by_code(tenant_id: str, code: str | None) -> dict[str, A
             except psycopg.errors.UndefinedColumn:
                 return None
             row = cursor.fetchone()
+            if row:
+                return _serialize_assignment_unit(row)
+            cursor.execute(
+                """
+                select *
+                from tenant_assignment_units
+                where tenant_id = %s and lower(label) = lower(%s)
+                limit 1
+                """,
+                (tenant_id, code.strip()),
+            )
+            row = cursor.fetchone()
             return _serialize_assignment_unit(row) if row else None
 
 
