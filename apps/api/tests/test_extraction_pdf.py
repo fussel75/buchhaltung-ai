@@ -15,6 +15,25 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_pdf_filename_with_octet_stream_uses_pdf_extraction(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "776511-606.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_build_embedded_xml_result", return_value=None),
+            patch.object(extraction_service, "_build_pdf_text_result", return_value={"source": "pdf_text_rules"}),
+            patch.object(extraction_service, "_build_mock_result", return_value={"source": "mock"}),
+        ):
+            result = extraction_service._build_extraction_result(document)
+
+        self.assertEqual(result["source"], "pdf_text_rules")
+
     def test_af_elektro_invoice_reads_reverse_charge_discount_and_project_address(self):
         text = """
         AF-Elektro GmbH
@@ -817,7 +836,7 @@ class ExtractionPdfTests(TestCase):
         document = {
             "tenant_id": "demo-mandant",
             "original_filename": "773934-606.pdf",
-            "content_type": "application/pdf",
+            "content_type": "application/octet-stream",
             "storage_path": "dammers.pdf",
             "size_bytes": 236119,
             "sha256": "abc",

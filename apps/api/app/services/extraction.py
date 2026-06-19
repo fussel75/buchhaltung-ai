@@ -68,7 +68,7 @@ def _build_extraction_result(document: dict) -> dict:
         structured = _build_standalone_xml_result(document)
         return structured or _build_mock_result(document)
 
-    if document["content_type"] == "application/pdf":
+    if _is_pdf_document(document):
         structured = _build_embedded_xml_result(document)
         if structured:
             return structured
@@ -79,7 +79,13 @@ def _build_extraction_result(document: dict) -> dict:
 
 
 def _is_standalone_xml_document(document: dict) -> bool:
-    return document["content_type"] in {"application/xml", "text/xml"} or Path(document["original_filename"]).suffix.lower() == ".xml"
+    content_type = str(document.get("content_type") or "").split(";", 1)[0].strip().lower()
+    return content_type in {"application/xml", "text/xml"} or Path(document["original_filename"]).suffix.lower() == ".xml"
+
+
+def _is_pdf_document(document: dict) -> bool:
+    content_type = str(document.get("content_type") or "").split(";", 1)[0].strip().lower()
+    return content_type == "application/pdf" or Path(document["original_filename"]).suffix.lower() == ".pdf"
 
 
 def _structured_source(document: dict) -> str:
@@ -93,7 +99,7 @@ def _normalized_structured_filename(filename: str | None, document: dict) -> str
 
 
 def _build_embedded_xml_result(document: dict) -> dict | None:
-    if document["content_type"] != "application/pdf":
+    if not _is_pdf_document(document):
         return None
 
     xml_attachment = _find_embedded_invoice_xml(document["storage_path"])
