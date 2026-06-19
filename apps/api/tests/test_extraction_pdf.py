@@ -1408,3 +1408,132 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["customer_number"], "425590")
         self.assertEqual(result["customer_reference"], "Neusurenland 51")
         self.assertEqual(result["assignment_code"], "Neula51")
+
+    def test_rieprecht_invoice_reads_spaced_number_project_totals_and_due_date(self):
+        text = """
+        FriStD Bau ZuB GmbH & Co.KG
+        R e c h n u n g   N r .   2 6 0 0 0 0 2
+        für   Weseler Weg 20, Hamburg
+        Rg.-Datum Kunden-Nr. Bestellung Vertreter/ADM Bearbeiter Seite
+        09.01.2026 10501 Ronny Friedrich                    RI  1
+        Pos. Artikel-Nr./Bezeichnung Menge / Einheit E-Preis €  Rabatt Mwst.% G-Preis €
+        Lieferschein Nr. 2600001 vom 05.01.2026
+          1Gestellung Container                    1,000 Stück             60,00        19.00        60,00
+        Lieferschein Nr. 2600002 vom 05.01.2026
+          1Gestellung Container                    1,000 Stück             60,00        19.00        60,00
+        Warenwert
+        mit  19.00% Mwst.        120,00 € Mwst. 19.00%         22,80 €
+        Nettobetrag  €       120,00
+        Mwst. gesamt €        22,80
+        Zahlung ohne Abzug bis 19.01.2026
+        Zahlbetrag   €       142,80
+        Rieprecht GmbH Heinrichstr. 11, 22946 Brunsbek
+        stefan@rieprecht-gmbh.de
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rg2600002_RIEP_mit_Belegen.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "rieprecht.pdf",
+            "size_bytes": 232000,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "25-00008",
+            "label": "Wewe20",
+            "kind": "construction_project",
+            "project_number": "25-00008",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Weseler Weg 20" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rieprecht GmbH")
+        self.assertEqual(result["invoice_number"], "2600002")
+        self.assertEqual(result["customer_number"], "10501")
+        self.assertEqual(result["invoice_date"], "2026-01-09")
+        self.assertEqual(result["due_date"], "2026-01-19")
+        self.assertEqual(result["delivery_address"], "Weseler Weg 20, Hamburg")
+        self.assertEqual(result["assignment_code"], "Wewe20")
+        self.assertEqual(result["project_number"], "25-00008")
+        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["product_name"], "Gestellung Container")
+        self.assertEqual(result["net_amount"], Decimal("120.00"))
+        self.assertEqual(result["tax_amount"], Decimal("22.80"))
+        self.assertEqual(result["gross_amount"], Decimal("142.80"))
+        self.assertEqual(result["warnings"], [])
+
+    def test_rieprecht_invoice_reads_totals_from_second_page(self):
+        text = """
+        FriStD Bau ZuB GmbH & Co.KG
+        R e c h n u n g   N r .   2 5 0 0 0 7 8
+        für   Farmsener Landstr. 36b, Hamburg
+        Rg.-Datum Kunden-Nr. Bestellung Vertreter/ADM Bearbeiter Seite
+        08.09.2025 10501 Ronny Friedrich                    RI  1
+          1Transport                               1,000 Stück            130,00        19.00       130,00
+        Container Abholung - Tauschen
+          2Plattemsand F1 0-4                      7,000 t                 24,50        19.00       171,50
+          1Boden ohne Analyse                      9,680 t                 38,00        19.00       367,84
+        Zwischensumme     2.323,68
+        Rechnung Nr. 2500078    Seite  2
+        Nettobetrag  €     2.323,68
+        Mwst. gesamt €       441,50
+        Zahlung ohne Abzug bis 18.09.2025
+        Zahlbetrag   €     2.765,18
+        Rieprecht GmbH Heinrichstr. 11, 22946 Brunsbek
+        stefan@rieprecht-gmbh.de
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rg2500078_RIEP_mit_Belegen.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "rieprecht.pdf",
+            "size_bytes": 715000,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "25-00006",
+            "label": "FaLastr36b",
+            "kind": "construction_project",
+            "project_number": "25-00006",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Farmsener Landstr. 36b" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rieprecht GmbH")
+        self.assertEqual(result["invoice_number"], "2500078")
+        self.assertEqual(result["customer_number"], "10501")
+        self.assertEqual(result["invoice_date"], "2025-09-08")
+        self.assertEqual(result["due_date"], "2025-09-18")
+        self.assertEqual(result["assignment_code"], "FaLastr36b")
+        self.assertEqual(result["project_number"], "25-00006")
+        self.assertEqual(result["product_name"], "Boden/Plattemsand Container")
+        self.assertEqual(result["net_amount"], Decimal("2323.68"))
+        self.assertEqual(result["tax_amount"], Decimal("441.50"))
+        self.assertEqual(result["gross_amount"], Decimal("2765.18"))
+        self.assertEqual(result["warnings"], [])

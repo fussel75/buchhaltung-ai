@@ -502,7 +502,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         ]
         return result
 
-    invoice_number = _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
+    invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
         r"Rechnungsnummer:\s*([A-Z0-9-]+[a-z]?)",
     ) or _find_text(
@@ -540,7 +540,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"Belegnummer:\s*([A-Z]{1,5}\d+)",
     ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_customer_number(text)
-    invoice_date = _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+    invoice_date = _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
@@ -585,6 +585,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _invoice_date_from_filename(document["original_filename"])
     due_date = (
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
+        or _find_date(text, r"Zahlung ohne Abzug bis\s+(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
         or _find_date(text, r"fr[üÃ¼]hestens am\s+(\d{2}\.\d{2}\.\d{4})")
@@ -1255,6 +1256,20 @@ def _date_text_to_iso(value: str) -> str:
     return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
 
 
+def _find_rieprecht_invoice_number(text: str) -> str | None:
+    match = search(r"R\s*e\s*c\s*h\s*n\s*u\s*n\s*g\s+N\s*r\s*\.\s*((?:\d\s*){7,})", text)
+    if not match:
+        return None
+    return sub(r"\s+", "", match.group(1))
+
+
+def _find_rieprecht_invoice_date(text: str) -> str | None:
+    return _find_date(
+        text,
+        r"Rg\.-Datum\s+Kunden-Nr\.[^\n]*\n\s*(\d{2}\.\d{2}\.\d{4})\s+[0-9]{5}\b",
+    )
+
+
 def _invoice_number_from_filename(filename: str) -> str | None:
     stem = Path(filename).stem.lower()
     match = search(r"(?:rechnung|rg)[_-]?([0-9]{6,})", stem, flags=0)
@@ -1302,7 +1317,8 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
 
 def _find_customer_number(text: str) -> str | None:
     return (
-        _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        _find_text(text, r"Rg\.-Datum\s+Kunden-Nr\.[^\n]*\n\s*\d{2}\.\d{2}\.\d{4}\s+([0-9]{5})\b")
+        or _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Ihre Kundennummer Unser Vorgang Datum\s*(Q[0-9]+)")
         or _find_text(text, r"Kunde:\s*(Q[0-9]+)Rechnung:")
@@ -1327,6 +1343,19 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    rieprecht_total = search(
+        r"Nettobetrag\s*€\s*([0-9.]+,\d{2})[\s\S]*?"
+        r"Mwst\.\s*gesamt\s*€\s*([0-9.]+,\d{2})[\s\S]*?"
+        r"Zahlbetrag\s*€\s*([0-9.]+,\d{2})",
+        text,
+    )
+    if rieprecht_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(rieprecht_total.group(1)),
+            "tax_amount": _money_to_decimal(rieprecht_total.group(2)),
+            "gross_amount": _money_to_decimal(rieprecht_total.group(3)),
+        }
     roennfeld_total = search(
         r"Gesamtbetrag\s*(-?[0-9.]+,\d{2})\s*€\s*zuzüglich MwSt\.\s*0\s*%\s*Endbetrag\s*(-?[0-9.]+,\d{2})",
         text,
@@ -1663,6 +1692,8 @@ def _find_delivery_address(text: str) -> str | None:
 
 def _find_delivery_addresses(text: str) -> list[str]:
     addresses = []
+    for match in finditer(r"^\s*f[üu]r\s+([^\n,]+?\d+[A-Za-z]?,\s*[^\n]+)", text, MULTILINE):
+        addresses.append(_normalize_inline_address(match.group(1).strip()))
     af_address = search(r"Bauvorhab(?:en|em):\s*(.+?)\s*\n\s*FriStD-Bau", text)
     if af_address:
         addresses.append(_normalize_inline_address(af_address.group(1).strip()))
@@ -1752,6 +1783,8 @@ def _supplier_name(document: dict, text: str) -> str:
     lower_text = text.lower()
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
+    if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
+        return "Rieprecht GmbH"
     if "af-elektro gmbh" in lower_text and "info@af-elektro.de" in lower_text:
         return "AF-Elektro GmbH"
     if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
@@ -1880,6 +1913,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung"]):
+        return "subcontractor"
     if any(term in haystack for term in ["rönnfeld", "roennfeld", "rollladen", "raffstore", "markisen", "sonnenschutz"]):
         return "subcontractor"
     if any(term in haystack for term in ["af-elektro", "a. franz elektrotechnik", "elektroinstallation", "heizkreisverteiler"]):
@@ -2053,6 +2088,16 @@ def _product_name(text: str) -> str:
         return "Maler-Abdeckvlies 50qm"
     if "FERMACELL" in text and "10mm Gipsfaserplatte" in text:
         return "FERMACELL 10mm Gipsfaserplatte"
+    lower_text = text.lower()
+    if "rieprecht" in lower_text:
+        if "baumisch" in lower_text:
+            return "Baumisch Container"
+        if "Gestellung Container" in text:
+            return "Gestellung Container"
+        if "Boden ohne Analyse" in text and "Plattemsand" in text:
+            return "Boden/Plattemsand Container"
+        if "Container Abholung" in text:
+            return "Container Abholung"
     first_position = _find_first_position_product_name(text)
     if first_position:
         return _clean_product_name(first_position) or first_position
