@@ -522,6 +522,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+FRHA05\s+([0-9]{6,})\s+\d{2}\.\d{2}\.\d{4}",
     ) or _find_text(
         text,
+        r"\*(GS\d{6,}|RE\d{6,})\d{2}\*",
+    ) or _find_text(
+        text,
         r"\bNummer\s*:\s*([0-9]+-[0-9]+)",
     ) or _find_text(
         text,
@@ -561,6 +564,12 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _find_date(
         text,
         r"Belegdatum:\s*\n\s*Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Kundennummer:\s*\n\s*Belegdatum:\s*\n\s*Belegnummer:\s*\n\s*[^\n]*\n\s*[0-9]{6,}\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"\n\s*[0-9]{6,}\s*\n\s*(\d{2}\.\d{2}\.\d{4})\s*\n\s*(?:GS|RE)\d{6,}",
     ) or _invoice_date_from_filename(document["original_filename"])
     due_date = (
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
@@ -1043,10 +1052,11 @@ def _is_iso_date(value: str) -> bool:
 
 
 def _find_visible_discount_base(text: str) -> Decimal | None:
-    return _find_money(
+    match = search(
+        r"(?:davon\s+skontof\S*hig|Skontof\S*higer\s+Betrag|skontierf\S*higer\s+Betrag\s+EUR)\s*:?\s*(-?[0-9.]+,\d{2})",
         text,
-        r"(?:davon\s+skontofähig|Skontofähiger\s+Betrag|skontierfähiger\s+Betrag\s+EUR)\s*:?\s*([0-9.]+,\d{2})",
     )
+    return _money_to_decimal_signed(match.group(1)) if match else None
 
 
 def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
@@ -1075,6 +1085,9 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
     ) or _find_money(
         text,
         r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+[0-9.]+,\d{2}\s+=\s+EUR\s+([0-9.]+,\d{2})",
+    ) or _find_money(
+        text,
+        r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+-?[0-9.]+,\d{2}\s+=\s+EUR\s+(-?[0-9.]+,\d{2})",
     )
     if discount_due_date is None:
         discount_due_date = _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
@@ -1083,6 +1096,9 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
     discount_amount = _find_money(
         text,
         r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+([0-9.]+,\d{2})",
+    ) or _find_money(
+        text,
+        r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+abzgl\.\s+[0-9]+(?:,\d{1,2})?\s*%\s+Skonto\s+EUR\s+(-[0-9.]+,\d{2})",
     )
     return {
         "discount_due_date": discount_due_date
@@ -1248,6 +1264,8 @@ def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"([0-9]{6,})\s*Kundennummer:")
+        or _find_text(text, r"\n\s*([0-9]{6,})\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*(?:GS|RE)\d{6,}")
         or _find_text(text, r"Kunden-Nr\.?:\s*([A-Z0-9-]+?)(?=Auftrag|Lieferschein|Rechnung|\s|$)")
         or _find_text(text, r"\bKunde:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer:\s*([A-Z0-9][A-Z0-9/.-]*)")
@@ -1259,7 +1277,6 @@ def _find_customer_number(text: str) -> str | None:
         or _find_text(text, r"Kunden-Nr\.\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"KundenNr\.\s*\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer\s*:?\s*([0-9][0-9/.-]*)")
-        or _find_text(text, r"([0-9][0-9/.-]*)\s*Kundennummer:")
         or _find_text(
             text,
             r"Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*([0-9][0-9/.-]*)",
@@ -1395,6 +1412,18 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "net_amount": _money_to_decimal(luechau_total.group(1)),
             "tax_amount": _money_to_decimal(luechau_total.group(2)),
             "gross_amount": _money_to_decimal(luechau_total.group(3)),
+        }
+    luechau_credit_total = search(
+        r"Brutto-Betrag:MwSt\.-Betrag:Netto-Betrag:\s*"
+        r"(-?[0-9.]+,\d{2})(-?[0-9.]+,\d{2})(-?[0-9.]+,\d{2})\s*19%\s*MwSt\.:",
+        text,
+    )
+    if luechau_credit_total:
+        return {
+            "discount_base": _find_visible_discount_base(text),
+            "net_amount": _money_to_decimal_signed(luechau_credit_total.group(3)),
+            "tax_amount": _money_to_decimal_signed(luechau_credit_total.group(2)),
+            "gross_amount": _money_to_decimal_signed(luechau_credit_total.group(1)),
         }
     haho_total = search(
         r"Netto-Betrag\s+EUR\s+([0-9.]+,\d{2})[\s\S]*?"
@@ -1956,6 +1985,8 @@ def _clean_af_elektro_product_name(value: str) -> str:
 def _product_name(text: str) -> str:
     if "PE-Folie 200 my" in text:
         return "PE-Folie 200 my / Baustoffe"
+    if "Maler-Abdeckvlies 50qm" in text:
+        return "Maler-Abdeckvlies 50qm"
     if "FERMACELL" in text and "10mm Gipsfaserplatte" in text:
         return "FERMACELL 10mm Gipsfaserplatte"
     first_position = _find_first_position_product_name(text)

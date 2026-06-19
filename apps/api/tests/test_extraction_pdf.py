@@ -1127,6 +1127,135 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["gross_amount"], Decimal("128.52"))
         self.assertEqual(result["product_name"], "Fi-BSH gehob.,gefast, foliert 6,0cm cm 20,0cm")
 
+    def test_luechau_credit_note_reads_header_negative_amounts_and_discount(self):
+        text = """
+        Lüchau Baustoffe GmbH, Rissener Str. 142, 22880 Wedel
+        08.01.2026 / 12:44 / REVERSANDLUECHAU
+        13803716
+        08.01.2026
+        GS1035164
+        Seite 1
+        FriStD-Bau ZuB GmbH & Co. KG
+        Gutschrift
+        *GS103516425*
+        Ausstelllager: Wedel
+        Ausstelldatum:
+        Kundennummer:
+        Belegdatum:
+        Belegnummer:
+        Lieferanschrift:
+        Weseler Weg 20
+        22045 Hamburg
+        Rücknahme von Lieferung  LI1048490 / RE1535760
+        252642 19EIN37,81RO3,000Maler-Abdeckvlies 50qm  Premium 220g/qm1
+        Breite 0,97 x Länge 51,6 m -102,08[-10%]
+        Zahlbar bis 22.01.2026 abzgl. 3 % Skonto EUR -3,64 = EUR -117,84
+        skontierfähiger Betrag EUR -121,48
+        Brutto-Betrag:MwSt.-Betrag:Netto-Betrag:
+        -121,48-19,40-102,0819% MwSt.:
+        Gutschriftssumme EUR: -121,48
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "GS1035164.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "luechau-credit.pdf",
+            "size_bytes": 127332,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Wewe20",
+            "label": "Weseler Weg 20",
+            "kind": "construction_project",
+            "project_number": "25-00008",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Weseler Weg 20" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Lüchau Baustoffe GmbH")
+        self.assertEqual(result["document_type"], "credit_note")
+        self.assertEqual(result["invoice_number"], "GS1035164")
+        self.assertEqual(result["customer_number"], "13803716")
+        self.assertEqual(result["invoice_date"], "2026-01-08")
+        self.assertEqual(result["assignment_code"], "Wewe20")
+        self.assertEqual(result["project_number"], "25-00008")
+        self.assertEqual(result["product_name"], "Maler-Abdeckvlies 50qm")
+        self.assertEqual(result["net_amount"], Decimal("-102.08"))
+        self.assertEqual(result["tax_amount"], Decimal("-19.40"))
+        self.assertEqual(result["gross_amount"], Decimal("-121.48"))
+        self.assertEqual(result["discount_base"], Decimal("-121.48"))
+        self.assertEqual(result["discount_amount"], Decimal("-3.64"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("-117.84"))
+        self.assertEqual(result["warnings"], [])
+
+    def test_luechau_invoice_reads_glued_customer_number_and_product(self):
+        text = """
+        Lüchau Baustoffe GmbH, Rissener Str. 142, 22880 Wedel
+        FriStD-Bau ZuB GmbH & Co. KG
+        Rechnung Seite 1
+        Belegnummer: RE1535760
+        Belegdatum:
+        AT: AT1594729
+        18.12.2025
+        13803716Kundennummer:
+        Lieferanschrift: FriStD-Bau ZuB GmbH & Co. KG
+        Weseler Weg 20
+        22045 Hamburg
+        42526425 Maler-Abdeckvlies 50qm  Premium 220g/qm RO 37,81 EIN 19
+        Breite 0,97 x Länge 51,6 m 136,10[-10%]
+        Fortsetzung Rechnung Seite 2
+        Belegnummer:
+        Belegdatum:
+        Kundennummer:
+        RE1535760
+        18.12.2025
+        13803716
+        Netto: MwSt.: Brutto:
+        19% MwSt.: 357,47 67,92 425,39
+        Zahlungssumme EUR:
+        425,39
+        Zahlbar bis 01.01.2026 abzgl. 3 % Skonto EUR 11,26 = EUR 414,13
+        skontierfähiger Betrag EUR 375,41
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "RE1535760.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "luechau-invoice.pdf",
+            "size_bytes": 120557,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Lüchau Baustoffe GmbH")
+        self.assertEqual(result["invoice_number"], "RE1535760")
+        self.assertEqual(result["customer_number"], "13803716")
+        self.assertEqual(result["invoice_date"], "2025-12-18")
+        self.assertEqual(result["product_name"], "Maler-Abdeckvlies 50qm")
+        self.assertEqual(result["net_amount"], Decimal("357.47"))
+        self.assertEqual(result["tax_amount"], Decimal("67.92"))
+        self.assertEqual(result["gross_amount"], Decimal("425.39"))
+
     def test_foerch_reads_customer_reference_from_column_text(self):
         text = """
         THEO FOERCH GmbH & Co. KG
