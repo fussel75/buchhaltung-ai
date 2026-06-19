@@ -1537,3 +1537,71 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_amount"], Decimal("441.50"))
         self.assertEqual(result["gross_amount"], Decimal("2765.18"))
         self.assertEqual(result["warnings"], [])
+
+    def test_konzept54_invoice_reads_project_support_totals_and_due_date(self):
+        text = """
+        FriStD-Bau ZuB GmbH & Co.KGHaldesdorfer Str. 4422179 Hamburg
+        konzept 54 GmbH & Co.KG · Haldesdorfer Str. 44 · 22179 Hamburg
+        Kunden-Nr. :
+         10019Hamburg
+        10.11.2025
+         Rechnung 25-00056
+        Bauvorhaben:
+        Süderfeldstr 46a, 22529 Hamburg
+        Projekt-Nr. :
+        Haldesdorfer Str. 44 22179 Hamburg Tel: +49 40 386 745 70 post@konzept-54.de www.konzept-54.de
+        Leistungsdatum:          05.11.2025Typ: WPF 07, Seriennummer: 232911-8871-009786
+        PosMengeMEBezeichnungE-PreisG-Preis
+        11,00Stdweiteres Ersatzteil: Art.: 344680Pumpen Baugruppe HPS 7.0
+         193,52 193,52
+        24,00StdTechnischer Wärmepumpen-SupportQualifizierter Wärmepumpenspeziallist im Kundenauftrag.
+         129,00 516,00
+        Nettosumme 709,52Umsatzsteuer 19 % 134,81
+        Gesamtsumme 844,33
+        Wir bedanken uns für Ihren Auftrag und möchten Sie bitten, den Rechnungsbetrag bis zum 17.11.2025 zu begleichen.
+        Bitte mit angeben:RN 25-00056, KN 10019
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "ARg 25-00056, Materiallieferung+Kundendienst.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "konzept54.pdf",
+            "size_bytes": 202096,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Süfe46a",
+            "label": "Süderfeldstraße 46a",
+            "kind": "construction_project",
+            "project_number": "25-00010",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Süderfeldstr 46a" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "konzept 54 GmbH & Co.KG")
+        self.assertEqual(result["invoice_number"], "25-00056")
+        self.assertEqual(result["customer_number"], "10019")
+        self.assertEqual(result["invoice_date"], "2025-11-10")
+        self.assertEqual(result["due_date"], "2025-11-17")
+        self.assertEqual(result["delivery_address"], "Süderfeldstr 46a, 22529 Hamburg")
+        self.assertEqual(result["assignment_code"], "Süfe46a")
+        self.assertEqual(result["project_number"], "25-00010")
+        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["product_name"], "Technischer Wärmepumpen-Support")
+        self.assertEqual(result["net_amount"], Decimal("709.52"))
+        self.assertEqual(result["tax_amount"], Decimal("134.81"))
+        self.assertEqual(result["gross_amount"], Decimal("844.33"))
+        self.assertEqual(result["warnings"], [])

@@ -510,6 +510,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"Rechnung\s+Nr\.:\s*([0-9]+)",
     ) or _find_text(
         text,
+        r"\bRechnung\s+([0-9]{2}-[0-9]{5,})\b",
+    ) or _find_text(
+        text,
         r"RechnungsNr\.\s*:\s*([0-9]+)\s+\d{2}\.\d{2}\.\d{2,4}",
     ) or _find_text(
         text,
@@ -543,6 +546,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     invoice_date = _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Kunden-Nr\.\s*:\s*\n\s*[0-9]+[^\n]*\n\s*(\d{2}\.\d{2}\.\d{4})\s*\n\s*Rechnung\s+[0-9]{2}-[0-9]{5,}",
     ) or _find_date(
         text,
         r"Rechnungsdatum:\s*(\d{2}\.\d{2}\.\d{4})",
@@ -586,6 +592,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     due_date = (
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"Zahlung ohne Abzug bis\s+(\d{2}\.\d{2}\.\d{4})")
+        or _find_date(text, r"Rechnungsbetrag bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+zu begleichen")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
         or _find_date(text, r"fr[üÃ¼]hestens am\s+(\d{2}\.\d{2}\.\d{4})")
@@ -1319,6 +1326,7 @@ def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Rg\.-Datum\s+Kunden-Nr\.[^\n]*\n\s*\d{2}\.\d{2}\.\d{4}\s+([0-9]{5})\b")
         or _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kunden-Nr\.\s*:\s*\n\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Ihre Kundennummer Unser Vorgang Datum\s*(Q[0-9]+)")
         or _find_text(text, r"Kunde:\s*(Q[0-9]+)Rechnung:")
@@ -1409,6 +1417,18 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "net_amount": _money_to_decimal(mittwald_total.group(2)),
             "tax_amount": _money_to_decimal(mittwald_total.group(3)),
             "gross_amount": _money_to_decimal(mittwald_total.group(4)),
+        }
+    konzept54_total = search(
+        r"Nettosumme\s+([0-9.]+,\d{2})\s*Umsatzsteuer\s+19\s*%\s+([0-9.]+,\d{2})[\s\S]*?"
+        r"Gesamtsumme\s+([0-9.]+,\d{2})",
+        text,
+    )
+    if konzept54_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(konzept54_total.group(1)),
+            "tax_amount": _money_to_decimal(konzept54_total.group(2)),
+            "gross_amount": _money_to_decimal(konzept54_total.group(3)),
         }
     af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
     if af_elektro_total:
@@ -1694,6 +1714,8 @@ def _find_delivery_addresses(text: str) -> list[str]:
     addresses = []
     for match in finditer(r"^\s*f[üu]r\s+([^\n,]+?\d+[A-Za-z]?,\s*[^\n]+)", text, MULTILINE):
         addresses.append(_normalize_inline_address(match.group(1).strip()))
+    for match in finditer(r"Bauvorhaben:\s*([^\n]*?\d+[A-Za-z]?,\s*\d{5}\s+[^\n]+)", text):
+        addresses.append(_normalize_inline_address(match.group(1).strip()))
     af_address = search(r"Bauvorhab(?:en|em):\s*(.+?)\s*\n\s*FriStD-Bau", text)
     if af_address:
         addresses.append(_normalize_inline_address(af_address.group(1).strip()))
@@ -1785,6 +1807,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
         return "Rieprecht GmbH"
+    if "konzept-54.de" in lower_text or "konzept 54 gmbh" in lower_text:
+        return "konzept 54 GmbH & Co.KG"
     if "af-elektro gmbh" in lower_text and "info@af-elektro.de" in lower_text:
         return "AF-Elektro GmbH"
     if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
@@ -1914,6 +1938,8 @@ def _cost_category(
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
     if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung"]):
+        return "subcontractor"
+    if any(term in haystack for term in ["konzept 54", "wärmepumpen-support", "waermepumpen-support", "kundendienst"]):
         return "subcontractor"
     if any(term in haystack for term in ["rönnfeld", "roennfeld", "rollladen", "raffstore", "markisen", "sonnenschutz"]):
         return "subcontractor"
@@ -2089,6 +2115,11 @@ def _product_name(text: str) -> str:
     if "FERMACELL" in text and "10mm Gipsfaserplatte" in text:
         return "FERMACELL 10mm Gipsfaserplatte"
     lower_text = text.lower()
+    if "konzept 54" in lower_text:
+        if "technischer wärmepumpen-support" in lower_text:
+            return "Technischer Wärmepumpen-Support"
+        if "pumpen baugruppe hps" in lower_text:
+            return "Pumpen Baugruppe HPS"
     if "rieprecht" in lower_text:
         if "baumisch" in lower_text:
             return "Baumisch Container"
