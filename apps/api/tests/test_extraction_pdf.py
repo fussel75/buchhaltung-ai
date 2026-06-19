@@ -1605,3 +1605,76 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_amount"], Decimal("134.81"))
         self.assertEqual(result["gross_amount"], Decimal("844.33"))
         self.assertEqual(result["warnings"], [])
+
+    def test_europlanen_invoice_reads_object_material_totals_and_due_date(self):
+        text = """
+        Euro Planen Handel und Service GmbH · Große Brunnenstraße 63a · 22763 Hamburg
+        Rechnung:
+        50489
+        Objekt:
+        Industrieplanen 8x12m + 8x10m
+        Wir berechnen gemäß Ihrer Bestellung wie folgt:
+        FristD-Bau ZuB GmbH & Co. KG
+        Haldesdorfer Straße 44 - Hinterhof
+        22179 Hamburg
+        Hamburg, 30.10.2025
+        Projekt:
+        43564
+        Leistungsdatum: 23.10.2025
+        Lieferschein 55317-0
+        001
+        1,000
+        Stck
+        31016: Industrieplane 8x12 trans
+        110,40
+        110,40
+        002
+        1,000
+        Stck
+        31015: Industrieplane 8x10 trans
+        92,00
+        92,00
+        003
+        1,000
+        Stck
+        Versand per Paketdienst
+        44,00
+        44,00
+        Leistungswert netto
+        246,40
+        MwSt 19%
+        46,82
+        Gesamtleistung brutto
+        293,22
+        Zahlungsbedingungen:
+        Zahlbar innerhalb 10 Kalendertagen, spätestens jedoch bis zum 10.11.2025, netto ohne Abzüge.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung 50489.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "europlanen.pdf",
+            "size_bytes": 112233,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Euro Planen Handel und Service GmbH")
+        self.assertEqual(result["invoice_number"], "50489")
+        self.assertEqual(result["customer_reference"], "Industrieplanen 8x12m + 8x10m")
+        self.assertEqual(result["invoice_date"], "2025-10-30")
+        self.assertEqual(result["due_date"], "2025-11-10")
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Industrieplanen 8x12m + 8x10m")
+        self.assertEqual(result["net_amount"], Decimal("246.40"))
+        self.assertEqual(result["tax_amount"], Decimal("46.82"))
+        self.assertEqual(result["gross_amount"], Decimal("293.22"))
+        self.assertEqual(result["warnings"], [])

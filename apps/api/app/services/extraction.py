@@ -513,6 +513,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"\bRechnung\s+([0-9]{2}-[0-9]{5,})\b",
     ) or _find_text(
         text,
+        r"Rechnung:\s*\n\s*([0-9]{4,})\b",
+    ) or _find_text(
+        text,
         r"RechnungsNr\.\s*:\s*([0-9]+)\s+\d{2}\.\d{2}\.\d{2,4}",
     ) or _find_text(
         text,
@@ -546,6 +549,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     invoice_date = _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Hamburg,\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
         r"Kunden-Nr\.\s*:\s*\n\s*[0-9]+[^\n]*\n\s*(\d{2}\.\d{2}\.\d{4})\s*\n\s*Rechnung\s+[0-9]{2}-[0-9]{5,}",
@@ -593,6 +599,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"Zahlung ohne Abzug bis\s+(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"Rechnungsbetrag bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+zu begleichen")
+        or _find_date(text, r"sp[^\s,]*testens jedoch bis zum\s+(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
         or _find_date(text, r"fr[üÃ¼]hestens am\s+(\d{2}\.\d{2}\.\d{4})")
@@ -1430,6 +1437,19 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "tax_amount": _money_to_decimal(konzept54_total.group(2)),
             "gross_amount": _money_to_decimal(konzept54_total.group(3)),
         }
+    europlanen_total = search(
+        r"Leistungswert netto\s+([0-9.]+,\d{2})[\s\S]*?"
+        r"MwSt\s+19%\s+([0-9.]+,\d{2})[\s\S]*?"
+        r"Gesamtleistung brutto\s+([0-9.]+,\d{2})",
+        text,
+    )
+    if europlanen_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(europlanen_total.group(1)),
+            "tax_amount": _money_to_decimal(europlanen_total.group(2)),
+            "gross_amount": _money_to_decimal(europlanen_total.group(3)),
+        }
     af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
     if af_elektro_total:
         gross_amount = _money_to_decimal(af_elektro_total.group(1))
@@ -1749,6 +1769,8 @@ def _find_customer_reference(text: str) -> str | None:
     ) or search(
         r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text
     ) or search(
+        r"Objekt:\s*(.+?)(?:\n|$)", text
+    ) or search(
         r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
         text,
     ) or search(
@@ -1809,6 +1831,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Rieprecht GmbH"
     if "konzept-54.de" in lower_text or "konzept 54 gmbh" in lower_text:
         return "konzept 54 GmbH & Co.KG"
+    if "euro planen handel und service gmbh" in lower_text:
+        return "Euro Planen Handel und Service GmbH"
     if "af-elektro gmbh" in lower_text and "info@af-elektro.de" in lower_text:
         return "AF-Elektro GmbH"
     if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
@@ -1955,6 +1979,8 @@ def _cost_category(
         return "general_overhead"
     if any(term in haystack for term in ["maison gebäudeservice", "maison gebaeudeservice", "allgemeine reinigungsarbeiten"]):
         return "general_overhead"
+    if any(term in haystack for term in ["euro planen", "industrieplane", "versand per paketdienst"]):
+        return "material"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
         return "material"
     if any(term in haystack for term in ["büroshop24", "bueroshop24", "epson tinte", "kleinmengenzuschlag"]):
@@ -2120,6 +2146,11 @@ def _product_name(text: str) -> str:
             return "Technischer Wärmepumpen-Support"
         if "pumpen baugruppe hps" in lower_text:
             return "Pumpen Baugruppe HPS"
+    if "euro planen handel und service" in lower_text:
+        if "industrieplane 8x12" in lower_text and "industrieplane 8x10" in lower_text:
+            return "Industrieplanen 8x12m + 8x10m"
+        if "industrieplane" in lower_text:
+            return "Industrieplane"
     if "rieprecht" in lower_text:
         if "baumisch" in lower_text:
             return "Baumisch Container"
