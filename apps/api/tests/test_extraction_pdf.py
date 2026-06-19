@@ -1256,6 +1256,115 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_amount"], Decimal("67.92"))
         self.assertEqual(result["gross_amount"], Decimal("425.39"))
 
+    def test_roennfeld_invoice_reads_zero_tax_customer_project_and_due_date(self):
+        text = """
+        Rönnfeld | Kieler Str. 9 | 25451 Quickborn
+        Rönnfeld ROLLLADEN UND MARKISEN GmbH
+        info@ roennfeld-rollladenbau.de | www.roennfeld-rollladenbau.de
+        FriStD-Bau ZuB GmbH & Co KG Zimmerei & BaufirmaHaldesdorferstraße 4422179 Hamburg
+        RechnungBestellreferenz:Ihre Kundennummer Unser Vorgang DatumQ010267R25-3590518.12.2025
+        Pos       BeschreibungMengeEPGP
+        BV: Farmsener Landstraße 36B, Hamburg
+        01Raffstore Fassadensystem - Drahtseilgeführt Lamellen gebördelt inkl. Motorbedienung 227,5 cm x 236,0 cm2687,001374,00
+        Zwischensumme1702,00Rabatt: -10 %-170,2003Montage ohne E-Anschluss 2110,00220,00 Gesamtbetrag1.751,80 €zuzüglich MwSt. 0 % Endbetrag1.751,80 €
+        Zahlen Sie bitte bis zum 28. Dezember 2025ohne Abzug
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "R25-35905.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "roennfeld-invoice.pdf",
+            "size_bytes": 1180072,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "FaLastr36b",
+            "label": "Farmsener Landstraße 36b",
+            "kind": "construction_project",
+            "project_number": "25-00006",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Farmsener Landstraße" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rönnfeld ROLLLADEN UND MARKISEN GmbH")
+        self.assertEqual(result["document_type"], "incoming_invoice")
+        self.assertEqual(result["invoice_number"], "R25-35905")
+        self.assertEqual(result["customer_number"], "Q010267")
+        self.assertEqual(result["invoice_date"], "2025-12-18")
+        self.assertEqual(result["due_date"], "2025-12-28")
+        self.assertEqual(result["assignment_code"], "FaLastr36b")
+        self.assertEqual(result["project_number"], "25-00006")
+        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["net_amount"], Decimal("1751.80"))
+        self.assertEqual(result["tax_amount"], Decimal("0.00"))
+        self.assertEqual(result["gross_amount"], Decimal("1751.80"))
+        self.assertEqual(result["warnings"], [])
+
+    def test_roennfeld_credit_note_reads_negative_zero_tax_amounts(self):
+        text = """
+        Rönnfeld ROLLLADEN UND MARKISEN GmbH
+        www.roennfeld-rollladenbau.de
+        Rechnungsberichtigung zur Rechnung R25-35462Ihre Kundennummer Unser Vorgang DatumQ010267R25-3584509.12.2025
+        Pos       BeschreibungMengeEPGP
+        BV: Eckerkamp 58, Hamburg01anteilige Gutschrift zur Rechnung R25-35462 v.30.09.20251-200,00-200,00 Gesamtbetrag-200,00 €zuzüglich MwSt. 0 % Endbetrag-200,00 €
+        Verrechnen Sie bitte diese Rechnungsberichtigung mit Ihrer nächsten Zahlung.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "R25-35845.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "roennfeld-credit.pdf",
+            "size_bytes": 1176160,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Ekkp58",
+            "label": "Eckerkamp 58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Eckerkamp 58" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rönnfeld ROLLLADEN UND MARKISEN GmbH")
+        self.assertEqual(result["document_type"], "credit_note")
+        self.assertEqual(result["invoice_number"], "R25-35845")
+        self.assertEqual(result["customer_number"], "Q010267")
+        self.assertEqual(result["invoice_date"], "2025-12-09")
+        self.assertEqual(result["assignment_code"], "Ekkp58")
+        self.assertEqual(result["product_name"], "anteilige Gutschrift zur Rechnung R25-35462")
+        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["net_amount"], Decimal("-200.00"))
+        self.assertEqual(result["tax_amount"], Decimal("0.00"))
+        self.assertEqual(result["gross_amount"], Decimal("-200.00"))
+        self.assertEqual(result["warnings"], [])
+
     def test_foerch_reads_customer_reference_from_column_text(self):
         text = """
         THEO FOERCH GmbH & Co. KG

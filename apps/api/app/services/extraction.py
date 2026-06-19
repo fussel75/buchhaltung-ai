@@ -513,6 +513,12 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"RechnungsNr\.\s*:\s*([0-9]+)\s+\d{2}\.\d{2}\.\d{2,4}",
     ) or _find_text(
         text,
+        r"Ihre Kundennummer Unser Vorgang Datum\s*Q[0-9]+\s*(R\d{2}-\d{5})",
+    ) or _find_text(
+        text,
+        r"Kunde:\s*Q[0-9]+Rechnung:\s*(R\d{2}-\d{5})",
+    ) or _find_text(
+        text,
         r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*([0-9]{6,})\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}",
     ) or _find_text(
         text,
@@ -548,6 +554,12 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"RechnungsNr\.\s*\.\s*:\s*[0-9]{2}[\s\S]{0,400}?(\d{2}\.\d{2}\.\d{2,4})",
     ) or _find_date(
         text,
+        r"Ihre Kundennummer Unser Vorgang Datum\s*Q[0-9]+\s*R\d{2}-\d{5}\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Kunde:\s*Q[0-9]+Rechnung:\s*R\d{2}-\d{5}Datum:\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
         r"Rechnungs-Nr\.\s+Kunden-Nr\.\s+Rg\.-/Liefer-Datum\s+Auftrags-Nr\..*?\n\s*[^\n]+\n\s*[0-9]{6,}\s+[0-9]{6,}\s+(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
@@ -576,6 +588,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
         or _find_date(text, r"fr[üÃ¼]hestens am\s+(\d{2}\.\d{2}\.\d{4})")
+        or _find_roennfeld_due_date(text)
     )
     allocation_lines = _find_allocation_lines(document["tenant_id"], text)
     visible_discount = _find_visible_discount_terms(text)
@@ -1255,6 +1268,33 @@ def _invoice_date_from_filename(filename: str) -> str | None:
     return _find_date(Path(filename).stem, r"(\d{2}\.\d{2}\.\d{4})")
 
 
+def _find_roennfeld_due_date(text: str) -> str | None:
+    match = search(
+        r"Zahlen Sie bitte bis zum\s+(\d{1,2})\.\s+([A-Za-zÄÖÜäöüß]+)\s+(\d{4})\s*ohne Abzug",
+        text,
+    )
+    if not match:
+        return None
+    month = {
+        "januar": "01",
+        "februar": "02",
+        "märz": "03",
+        "maerz": "03",
+        "april": "04",
+        "mai": "05",
+        "juni": "06",
+        "juli": "07",
+        "august": "08",
+        "september": "09",
+        "oktober": "10",
+        "november": "11",
+        "dezember": "12",
+    }.get(match.group(2).lower())
+    if not month:
+        return None
+    return f"{match.group(3)}-{month}-{match.group(1).zfill(2)}"
+
+
 def _find_money_after_label(text: str, label: str) -> Decimal | None:
     pattern = rf"{label}[^\n]*?([0-9.]+,\d{{2}})"
     return _find_money(text, pattern)
@@ -1264,6 +1304,8 @@ def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Ihre Kundennummer Unser Vorgang Datum\s*(Q[0-9]+)")
+        or _find_text(text, r"Kunde:\s*(Q[0-9]+)Rechnung:")
         or _find_text(text, r"([0-9]{6,})\s*Kundennummer:")
         or _find_text(text, r"\n\s*([0-9]{6,})\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*(?:GS|RE)\d{6,}")
         or _find_text(text, r"Kunden-Nr\.?:\s*([A-Z0-9-]+?)(?=Auftrag|Lieferschein|Rechnung|\s|$)")
@@ -1285,6 +1327,18 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    roennfeld_total = search(
+        r"Gesamtbetrag\s*(-?[0-9.]+,\d{2})\s*€\s*zuzüglich MwSt\.\s*0\s*%\s*Endbetrag\s*(-?[0-9.]+,\d{2})",
+        text,
+    )
+    if roennfeld_total:
+        gross_amount = _money_to_decimal_signed(roennfeld_total.group(2))
+        return {
+            "discount_base": None,
+            "net_amount": gross_amount,
+            "tax_amount": Decimal("0.00"),
+            "gross_amount": gross_amount,
+        }
     eindruck24_total = search(
         r"Gesamt Netto\s*\(19,00\s*%\)\s*([0-9.]+,\d{2})\s*.*?"
         r"zzgl\.\s*MwSt\s*\(19,00\s*%\)\s*([0-9.]+,\d{2})\s*.*?"
@@ -1718,6 +1772,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG"
     if "auslieferungslager" in lower_text and "barmbek" in lower_text and "0515834/086" in text:
         return "Rolf Dammers oHG"
+    if "roennfeld-rollladenbau.de" in lower_text or "rönnfeld" in lower_text:
+        return "Rönnfeld ROLLLADEN UND MARKISEN GmbH"
     if "kundennr" in lower_text and "reisender" in lower_text and "btr nl" in lower_text:
         return "HaHo Holz"
     if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
@@ -1824,6 +1880,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["rönnfeld", "roennfeld", "rollladen", "raffstore", "markisen", "sonnenschutz"]):
+        return "subcontractor"
     if any(term in haystack for term in ["af-elektro", "a. franz elektrotechnik", "elektroinstallation", "heizkreisverteiler"]):
         return "subcontractor"
     if any(term in haystack for term in ["eindruck24", "druck bis", "sparker", "flex medium"]):
@@ -1983,6 +2041,12 @@ def _clean_af_elektro_product_name(value: str) -> str:
 
 
 def _product_name(text: str) -> str:
+    roennfeld_product = search(r"(Raffstore Fassadensystem\s*-\s*[^0-9\n]+)", text)
+    if roennfeld_product:
+        return _clean_product_name(roennfeld_product.group(1))
+    roennfeld_credit = _find_text(text, r"(anteilige Gutschrift zur Rechnung\s+R\d{2}-\d{5})")
+    if roennfeld_credit:
+        return roennfeld_credit
     if "PE-Folie 200 my" in text:
         return "PE-Folie 200 my / Baustoffe"
     if "Maler-Abdeckvlies 50qm" in text:
