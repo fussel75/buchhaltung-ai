@@ -2,6 +2,7 @@ from decimal import Decimal
 from csv import DictWriter
 from datetime import date
 from io import BytesIO, StringIO
+from pathlib import Path
 from re import sub
 from typing import Any, Literal
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -225,6 +226,13 @@ def _safe_archive_name(filename: str, fallback_suffix: str = ".pdf") -> str:
     if "." not in stemmed and fallback_suffix:
         stemmed = f"{stemmed}{fallback_suffix}"
     return stemmed[:220]
+
+
+def _is_pdf_document(document: dict[str, Any]) -> bool:
+    content_type = str(document.get("content_type") or "").split(";", 1)[0].strip().lower()
+    if content_type == "application/pdf":
+        return True
+    return Path(str(document.get("original_filename") or "")).suffix.lower() == ".pdf"
 
 
 def _zip_documents(documents: list[dict[str, Any]], archive_name: str) -> StreamingResponse:
@@ -579,7 +587,7 @@ def get_document_file(
 @router.get("/{document_id}/preview")
 def get_document_preview_meta(document_id: UUID, request: Request) -> dict[str, Any]:
     document = require_document_access(request, document_id)
-    if document.get("content_type") != "application/pdf":
+    if not _is_pdf_document(document):
         raise HTTPException(status_code=415, detail="Vorschau-Metadaten sind nur für PDFs verfügbar.")
 
     try:
@@ -595,7 +603,7 @@ def get_document_preview_meta(document_id: UUID, request: Request) -> dict[str, 
 @router.get("/{document_id}/preview/pages/{page_number}")
 def get_document_preview_page(document_id: UUID, page_number: int, request: Request) -> StreamingResponse:
     document = require_document_access(request, document_id)
-    if document.get("content_type") != "application/pdf":
+    if not _is_pdf_document(document):
         raise HTTPException(status_code=415, detail="Vorschau-Seiten sind nur für PDFs verfügbar.")
 
     try:
@@ -617,7 +625,7 @@ def get_document_preview_page(document_id: UUID, page_number: int, request: Requ
 @router.get("/{document_id}/preview/pages/{page_number}/text")
 def get_document_preview_page_text(document_id: UUID, page_number: int, request: Request) -> JSONResponse:
     document = require_document_access(request, document_id)
-    if document.get("content_type") != "application/pdf":
+    if not _is_pdf_document(document):
         raise HTTPException(status_code=415, detail="Vorschau-Text ist nur für PDFs verfügbar.")
 
     try:

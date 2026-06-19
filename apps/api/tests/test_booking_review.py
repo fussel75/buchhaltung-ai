@@ -2023,6 +2023,24 @@ class BookingSuggestionTests(TestCase):
             any(statement == "delete from document_payment_decisions where document_id = %s" for statement, _ in cursor.statements)
         )
 
+    def test_pdf_preview_detection_accepts_octet_stream_pdf_attachment(self):
+        self.assertTrue(
+            documents_route._is_pdf_document(
+                {
+                    "original_filename": "773934-606.pdf",
+                    "content_type": "application/octet-stream",
+                }
+            )
+        )
+        self.assertFalse(
+            documents_route._is_pdf_document(
+                {
+                    "original_filename": "rechnung.xml",
+                    "content_type": "application/octet-stream",
+                }
+            )
+        )
+
     def test_update_extraction_resets_review_artifacts(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"

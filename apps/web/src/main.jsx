@@ -2401,7 +2401,7 @@ function DocumentPreview({ document }) {
   const fileUrl = apiUrl(`/documents/${document.id}/file?disposition=inline`);
   const contentType = document.content_type || "";
   const isImage = contentType.startsWith("image/");
-  const isPdf = contentType === "application/pdf";
+  const isPdf = contentType === "application/pdf" || String(document.original_filename || "").toLowerCase().endsWith(".pdf");
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(isPdf ? null : 1);
   const [previewError, setPreviewError] = useState("");
