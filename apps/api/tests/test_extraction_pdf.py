@@ -1041,6 +1041,92 @@ class ExtractionPdfTests(TestCase):
         self.assertIsNone(result["assignment_code"])
         self.assertEqual(result["assignment_type"], "general_cost")
 
+    def test_holz_junge_credit_note_reads_negative_table_amounts(self):
+        text = """
+        Holz Junge GmbH
+        G U T S C H R I F T
+        Rechnungs-Nr.: 26200874
+        Kunden-Nr.: 109324
+        Datum: 28.01.2026
+        skontofähiger Betrag Netto MwSt-% MwSt Endbetrag EUR
+        -632,32 -642,40 19,00 -122,06 -764,46
+        11.02.2026 3,00% Skonto = -18,97
+        ohne Abzug27.02.2026 -764,46
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Kreditrechnung_26200874_W5607Z.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "holz-junge-credit.pdf",
+            "size_bytes": 715000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Holz Junge GmbH")
+        self.assertEqual(result["document_type"], "credit_note")
+        self.assertEqual(result["net_amount"], Decimal("-642.40"))
+        self.assertEqual(result["tax_amount"], Decimal("-122.06"))
+        self.assertEqual(result["gross_amount"], Decimal("-764.46"))
+        self.assertEqual(result["discount_amount"], Decimal("-18.97"))
+        self.assertEqual(result["discount_due_date"], "2026-02-11")
+        self.assertEqual(result["payment_terms"][0]["label"], "Gutschrift verrechnen")
+
+    def test_haho_holz_invoice_reads_customer_date_totals_and_discount(self):
+        text = """
+        FriStD-Bau ZuB GmbH &Co.KG
+        RechnungsNr. .: 25       25/ /005898 005898 30.04.25
+        KundenNr.  . .:   43535
+        Versandart . .: Abholung
+        Reisender  . .: Lennart Werner
+        R E C H N U N G
+        BTR NL
+        BV: Meistertwiete 5
+        0020 010106020000001 1
+        Fi-BSH gehob.,gefast, foliert     6,0cm       cm   20,0cm
+        1 ST  1200,0cm    0,144 CBM       750,00      108,00
+        Zahlung  bis 14.05.25  mit 2 % Skonto   =      2,57 EUR Netto-Betrag    EUR     108,00
+                 bis  1.06.25  netto                            19,00 % Mwst    EUR      20,52
+                                                                Rechnungsbetrag EUR     128,52
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "R-25005898-  43535.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "haho-holz.pdf",
+            "size_bytes": 715000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "HaHo Holz")
+        self.assertEqual(result["invoice_number"], "25005898")
+        self.assertEqual(result["customer_number"], "43535")
+        self.assertEqual(result["invoice_date"], "2025-04-30")
+        self.assertEqual(result["due_date"], "2025-06-01")
+        self.assertEqual(result["discount_due_date"], "2025-05-14")
+        self.assertEqual(result["discount_percent"], Decimal("2.00"))
+        self.assertEqual(result["discount_amount"], Decimal("2.57"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("125.95"))
+        self.assertEqual(result["net_amount"], Decimal("108.00"))
+        self.assertEqual(result["tax_amount"], Decimal("20.52"))
+        self.assertEqual(result["gross_amount"], Decimal("128.52"))
+        self.assertEqual(result["product_name"], "Fi-BSH gehob.,gefast, foliert 6,0cm cm 20,0cm")
+
     def test_foerch_reads_customer_reference_from_column_text(self):
         text = """
         THEO FOERCH GmbH & Co. KG
