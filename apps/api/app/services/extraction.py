@@ -1354,6 +1354,7 @@ def _find_customer_number(text: str) -> str | None:
         or _find_text(text, r"KD-Nr\.\s+Rechn\.Nr\.\s+Datum\s+Blatt\s*\n\s*480\s+(FRHA05)\s+[0-9]{6,}\s+\d{2}\.\d{2}\.\d{4}")
         or _find_text(text, r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kundennr\.?\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"KundenNr\.\s*\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(
@@ -1775,6 +1776,8 @@ def _find_customer_reference(text: str) -> str | None:
     ) or search(
         r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text
     ) or search(
+        r"Bestelldaten:\s*(.+?)(?:\n|$)", text
+    ) or search(
         r"Objekt:\s*(.+?)(?:\n|$)", text
     ) or search(
         r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
@@ -1861,6 +1864,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Rolf Dammers oHG"
     if "roennfeld-rollladenbau.de" in lower_text or "rönnfeld" in lower_text:
         return "Rönnfeld ROLLLADEN UND MARKISEN GmbH"
+    if "dammers" in lower_text and ("alles f" in lower_text or "dach" in lower_text):
+        return "Rolf Dammers oHG"
     if "kundennr" in lower_text and "reisender" in lower_text and "btr nl" in lower_text:
         return "HaHo Holz"
     if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
