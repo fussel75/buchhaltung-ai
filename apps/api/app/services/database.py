@@ -3323,24 +3323,55 @@ def find_assignment_unit_by_text(tenant_id: str, text: str | None) -> dict[str, 
     if not text:
         return None
     normalized_text = _normalize_match_text(text)
+    best_match: tuple[int, dict[str, Any]] | None = None
     for assignment in list_assignment_units(tenant_id):
         if not assignment["is_active"]:
             continue
-        candidates = [
-            assignment["code"],
-            assignment["label"],
-            assignment.get("project_number"),
-            assignment.get("order_number"),
-            assignment.get("description"),
-            assignment.get("client_name"),
-            assignment.get("address_line"),
-            assignment.get("external_id"),
-            _assignment_address_text(assignment),
-            *assignment["aliases"],
-        ]
-        if any(_normalize_match_text(candidate) in normalized_text for candidate in candidates if candidate):
-            return assignment
+        score = _assignment_match_score(assignment, normalized_text)
+        if score and (not best_match or score > best_match[0]):
+            best_match = (score, assignment)
+    if best_match and best_match[0] >= 80:
+        return best_match[1]
     return None
+
+
+def _assignment_match_score(assignment: dict[str, Any], normalized_text: str) -> int:
+    weighted_candidates = [
+        (assignment.get("project_number"), 220),
+        (assignment.get("order_number"), 180),
+        (assignment.get("code"), 170),
+        (assignment.get("label"), 150),
+        (_assignment_address_text(assignment), 150),
+        (assignment.get("address_line"), 130),
+        (assignment.get("customer_number"), 95),
+        (assignment.get("external_id"), 80),
+        (assignment.get("client_name"), 55),
+        (assignment.get("description"), 45),
+    ]
+    weighted_candidates.extend((alias, 120) for alias in assignment.get("aliases") or [])
+
+    score = 0
+    for candidate, weight in weighted_candidates:
+        normalized_candidate = _normalize_assignment_candidate(candidate)
+        if normalized_candidate and normalized_candidate in normalized_text:
+            score += weight
+    return score
+
+
+def _normalize_assignment_candidate(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = _normalize_match_text(value)
+    if not normalized:
+        return None
+    # Avoid broad matches such as "Hamburg", "22175" or tiny fragments.
+    if len(normalized) < 4:
+        return None
+    if re_search(r"^\d{5}$", normalized):
+        return None
+    if normalized in {"hamburg", "aktiv", "abgeschlossen", "bauvorhaben"}:
+        return None
+    return normalized
 
 
 def get_assignment_unit_by_code(tenant_id: str, code: str | None) -> dict[str, Any] | None:

@@ -2733,6 +2733,74 @@ class BookingSuggestionTests(TestCase):
                 assignment,
             )
 
+    def test_assignment_lookup_prefers_strong_project_signal(self):
+        weak_assignment = {
+            "code": "Ekkp58",
+            "label": "Ekkp58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "order_number": "25-00007",
+            "customer_number": "11305",
+            "description": "Anbau und Dachsanierung",
+            "client_name": "Iris Wormsbächer",
+            "source_status": "Abgeschlossen",
+            "address_line": "Eckerkamp 58",
+            "postal_code": "22391",
+            "city": "Hamburg",
+            "external_id": "project-ek",
+            "aliases": [],
+            "is_active": True,
+        }
+        strong_assignment = {
+            "code": "Buwg4",
+            "label": "Buwg4",
+            "kind": "construction_project",
+            "project_number": "25-00009",
+            "order_number": "25-00012",
+            "customer_number": "10794",
+            "description": "Dachsanierung EFH",
+            "client_name": "Ralf Esch",
+            "source_status": "Aktiv",
+            "address_line": "Bucheckerweg 4",
+            "postal_code": "22175",
+            "city": "Hamburg",
+            "external_id": "project-buwg",
+            "aliases": ["Bucheckerweg 4 22175 Hamburg"],
+            "is_active": True,
+        }
+
+        invoice_text = "Rechnung Dachsanierung Hamburg\nBestelldaten: Bucheckerweg 4\n22175 Hamburg"
+
+        with patch.object(database_service, "list_assignment_units", return_value=[weak_assignment, strong_assignment]):
+            self.assertEqual(
+                database_service.find_assignment_unit_by_text("demo-mandant", invoice_text),
+                strong_assignment,
+            )
+
+    def test_assignment_lookup_ignores_weak_description_only(self):
+        assignment = {
+            "code": "Ekkp58",
+            "label": "Ekkp58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "order_number": "25-00007",
+            "customer_number": "11305",
+            "description": "Dachsanierung",
+            "client_name": "Iris Wormsbächer",
+            "source_status": "Abgeschlossen",
+            "address_line": "Eckerkamp 58",
+            "postal_code": "22391",
+            "city": "Hamburg",
+            "external_id": "project-ek",
+            "aliases": [],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            self.assertIsNone(
+                database_service.find_assignment_unit_by_text("demo-mandant", "Materialrechnung für Dachsanierung in Hamburg"),
+            )
+
     def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
         document = {
             "id": str(uuid4()),
