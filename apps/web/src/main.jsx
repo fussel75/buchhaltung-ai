@@ -254,8 +254,12 @@ function UploadApp() {
     }),
     [documents],
   );
+  const problemDocuments = useMemo(
+    () => documents.filter(isProblemExtraction),
+    [documents],
+  );
   const filteredDocuments = useMemo(
-    () => documents.filter((document) => reviewFilter === "all" || document.status === reviewFilter),
+    () => documents.filter((document) => reviewFilter === "all" || (reviewFilter === "problems" ? isProblemExtraction(document) : document.status === reviewFilter)),
     [documents, reviewFilter],
   );
   const extractableDocuments = useMemo(
@@ -1600,6 +1604,9 @@ function UploadApp() {
               <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => setReviewFilter("review_approved")}>
                 Freigegeben {queueStats.approved}
               </button>
+              <button type="button" className={reviewFilter === "problems" ? "active" : ""} onClick={() => setReviewFilter("problems")}>
+                Probleme {problemDocuments.length}
+              </button>
             </div>
           </div>
           <div className="queue-tools">
@@ -1720,6 +1727,7 @@ function UploadApp() {
           <div className="queue">
             {filteredDocuments.map((document) => {
               const isExpanded = expandedDocumentIds.includes(document.id);
+              const problemReasons = problemExtractionReasons(document);
               return (
               <article key={document.id} className="document-card" data-document-id={document.id}>
                 <div className="document-head">
@@ -1741,6 +1749,11 @@ function UploadApp() {
                         <span>{formatMoney(document.extraction?.gross_amount)}</span>
                         {document.extraction?.warnings?.length ? <span>{document.extraction.warnings.length} Hinweise</span> : null}
                       </div>
+                      {problemReasons.length ? (
+                        <div className="problem-reasons" aria-label="Extraktionsprobleme">
+                          {problemReasons.map((reason) => <span key={reason}>{reason}</span>)}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="document-actions">
@@ -6134,14 +6147,44 @@ function formatConfidence(value) {
   return `${Math.round(number * 100)} %`;
 }
 
-function isProblemExtraction(document) {
+function problemExtractionReasons(document) {
   const extraction = document?.extraction;
-  if (!extraction) return false;
+  if (!extraction) return [];
+  const reasons = [];
   const confidence = Number(extraction.confidence);
   const source = String(extraction.raw_result?.source || extraction.source || "").toLowerCase();
-  return source === "mock"
-    || (!Number.isNaN(confidence) && confidence < 0.8)
-    || Boolean(extraction.warnings?.length);
+  const rawResult = extraction.raw_result || {};
+
+  if (source === "mock") {
+    reasons.push("Mock-Erkennung");
+  }
+  if (!Number.isNaN(confidence) && confidence < 0.8) {
+    reasons.push(`Sicherheit ${Math.round(confidence * 100)} %`);
+  }
+  if (extraction.warnings?.length) {
+    reasons.push(`${extraction.warnings.length} Hinweise`);
+  }
+  if (!extraction.invoice_number) {
+    reasons.push("Rechnungsnummer fehlt");
+  }
+  if (!extraction.invoice_date) {
+    reasons.push("Datum fehlt");
+  }
+  if (extraction.gross_amount === null || extraction.gross_amount === undefined || extraction.gross_amount === "") {
+    reasons.push("Brutto fehlt");
+  }
+  if (
+    rawResult.assignment_type === "assignment_unresolved"
+    || (rawResult.delivery_address && !rawResult.assignment_code && !rawResult.project_number)
+  ) {
+    reasons.push("Zuordnung ungeklärt");
+  }
+
+  return reasons;
+}
+
+function isProblemExtraction(document) {
+  return problemExtractionReasons(document).length > 0;
 }
 
 function formatDate(value) {

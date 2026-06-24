@@ -1183,6 +1183,26 @@ button:disabled {
   background: #c7cdd4;
 }
 
+.problem-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.problem-reasons span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 0 8px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 0.73rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
 .document-head strong {
   overflow-wrap: anywhere;
 }
