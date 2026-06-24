@@ -274,6 +274,10 @@ function UploadApp() {
     () => documents.filter((document) => ["extracted", "review_ready"].includes(document.status) && document.extraction),
     [documents],
   );
+  const problemExtractionDocuments = useMemo(
+    () => reextractableDocuments.filter(isProblemExtraction),
+    [reextractableDocuments],
+  );
   const focusableReviewDocuments = useMemo(
     () => documents.filter((document) => document.extraction),
     [documents],
@@ -689,6 +693,63 @@ function UploadApp() {
       setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
   }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, reextractableDocuments, rememberBulkJob]);
+
+  const startProblemReextraction = useCallback(async () => {
+    const targets = problemExtractionDocuments;
+    if (!targets.length || isBulkExtracting) return;
+
+    const confirmed = window.confirm(
+      `${targets.length} Problembelege neu extrahieren? Vorhandene Buchungsvorschläge, Freigaben und Zahlungsentscheidungen dieser Belege werden verworfen.`,
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setNotice("");
+    setExtractionBatch({
+      state: "running",
+      total: targets.length,
+      done: 0,
+      current: targets[0]?.original_filename || "",
+      failed: 0,
+    });
+    setExtractingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
+
+    try {
+      const response = await apiFetch("/documents/bulk/reextract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: activeTenantId,
+          document_ids: targets.map((document) => document.id),
+          confirm: true,
+        }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result.detail, `Problem-Neu-Extraktion fehlgeschlagen: ${response.status}`));
+      }
+      const result = await response.json();
+      if (!result.job) {
+        setExtractionBatch(null);
+        setNotice("Keine Problembelege für Neu-Extraktion gefunden.");
+        return;
+      }
+      rememberBulkJob(result.job);
+      setExtractionBatch(batchStateFromJob(result.job));
+      const job = await waitForBulkJob(apiFetch, result.job.id, setExtractionBatch);
+      rememberBulkJob(job);
+      await loadBulkJobs();
+      await loadDocuments();
+      setNotice(`Problem-Neu-Extraktion abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.`);
+      if (job.failed_count) {
+        setError(formatBulkJobFailures(job, "Nicht neu extrahiert"));
+      }
+    } catch (extractError) {
+      setError(extractError.message);
+    } finally {
+      setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
+    }
+  }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, problemExtractionDocuments, rememberBulkJob]);
 
   const startBulkReviewPreparation = useCallback(async () => {
     const targets = reviewableDocuments;
@@ -1567,6 +1628,14 @@ function UploadApp() {
                 disabled={!reextractableDocuments.length || isBulkExtracting}
               >
                 {isBulkExtracting ? "Läuft..." : `Alle neu extrahieren (${reextractableDocuments.length})`}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={startProblemReextraction}
+                disabled={!problemExtractionDocuments.length || isBulkExtracting}
+              >
+                {isBulkExtracting ? "Läuft..." : `Problembelege neu (${problemExtractionDocuments.length})`}
               </button>
               <button
                 type="button"
@@ -6063,6 +6132,16 @@ function formatConfidence(value) {
   const number = Number(value);
   if (Number.isNaN(number)) return "-";
   return `${Math.round(number * 100)} %`;
+}
+
+function isProblemExtraction(document) {
+  const extraction = document?.extraction;
+  if (!extraction) return false;
+  const confidence = Number(extraction.confidence);
+  const source = String(extraction.raw_result?.source || extraction.source || "").toLowerCase();
+  return source === "mock"
+    || (!Number.isNaN(confidence) && confidence < 0.8)
+    || Boolean(extraction.warnings?.length);
 }
 
 function formatDate(value) {

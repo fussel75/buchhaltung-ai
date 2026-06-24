@@ -2240,6 +2240,44 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(user_context.exception.status_code, 403)
         self.assertEqual(confirm_context.exception.status_code, 400)
 
+    def test_bulk_reextraction_route_accepts_problem_document_subset(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkReextractRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+            confirm=True,
+        )
+        background_tasks = SimpleNamespace(add_task=lambda *args, **kwargs: None)
+        job = {"id": str(uuid4()), "requested_total": 1}
+
+        with (
+            patch.object(documents_route, "require_admin") as require_admin,
+            patch.object(documents_route, "_start_bulk_job", return_value={"job": job}) as start_job,
+        ):
+            result = documents_route.start_bulk_reextraction(payload, request, background_tasks)
+
+        require_admin.assert_called_once_with(request)
+        self.assertEqual(result["job"], job)
+        self.assertEqual(result["queued_count"], 1)
+        start_job.assert_called_once()
+        self.assertEqual(start_job.call_args.args[3], "reextract")
+
+    def test_bulk_reextraction_route_requires_confirmation_for_subset(self):
+        payload = documents_route.DocumentBulkReextractRequest(
+            tenant_id="demo-mandant",
+            document_ids=[uuid4()],
+            confirm=False,
+        )
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        background_tasks = SimpleNamespace(add_task=lambda *args, **kwargs: None)
+
+        with patch.object(documents_route, "require_admin"):
+            with self.assertRaises(HTTPException) as context:
+                documents_route.start_bulk_reextraction(payload, request, background_tasks)
+
+        self.assertEqual(context.exception.status_code, 400)
+
     def test_list_bulk_jobs_route_requires_tenant_access(self):
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
         jobs = [

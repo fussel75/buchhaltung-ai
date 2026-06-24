@@ -110,6 +110,10 @@ class DocumentBulkJobRequest(BaseModel):
     document_ids: list[UUID] = Field(min_length=1, max_length=1000)
 
 
+class DocumentBulkReextractRequest(DocumentBulkJobRequest):
+    confirm: bool = False
+
+
 class DocumentBulkAllRequest(BaseModel):
     tenant_id: str
     limit: int = Field(default=500, ge=1, le=1000)
@@ -520,6 +524,24 @@ def start_bulk_extraction_for_all(
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
     return _start_bulk_job_for_all(request, background_tasks, payload, "extract")
+
+
+@router.post("/bulk/reextract", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_reextraction(
+    payload: DocumentBulkReextractRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    require_admin(request)
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Bulk-Neu-Extraktion erfordert explizite Bestätigung.")
+    job_result = _start_bulk_job(
+        request,
+        background_tasks,
+        DocumentBulkJobRequest(tenant_id=payload.tenant_id, document_ids=payload.document_ids),
+        "reextract",
+    )
+    return job_result | {"queued_count": len(payload.document_ids)}
 
 
 @router.post("/bulk/reextract-all", status_code=status.HTTP_202_ACCEPTED)
