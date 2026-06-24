@@ -2713,6 +2713,18 @@ class BookingSuggestionTests(TestCase):
             is_active=True,
         )
 
+    def test_get_extraction_capabilities_returns_supported_suppliers(self):
+        request = SimpleNamespace(headers={}, state=SimpleNamespace())
+
+        with patch.object(masterdata_route, "require_admin"):
+            result = masterdata_route.get_extraction_capabilities(request)
+
+        suppliers = {capability["supplier_name"] for capability in result["capabilities"]}
+        self.assertIn("Holz Junge GmbH", suppliers)
+        self.assertIn("Rolf Dammers oHG", suppliers)
+        self.assertIn("Lüchau Baustoffe GmbH", suppliers)
+        self.assertTrue(all(capability["status"] for capability in result["capabilities"]))
+
     def test_assignment_lookup_does_not_match_city_or_postal_code_only(self):
         assignment = {
             "code": "Wewe20",

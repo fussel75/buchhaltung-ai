@@ -3617,6 +3617,7 @@ function MasterdataAdmin({
 }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const [supplierRules, setSupplierRules] = useState([]);
+  const [extractionCapabilities, setExtractionCapabilities] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
   const [bwaImports, setBwaImports] = useState([]);
   const [assignmentEditId, setAssignmentEditId] = useState(null);
@@ -3689,21 +3690,24 @@ function MasterdataAdmin({
   }, [tenantProfile]);
 
   const loadMasterdata = useCallback(async () => {
-    const [assignmentsResponse, suppliersResponse, accountingResponse, bwaResponse] = await Promise.all([
+    const [assignmentsResponse, suppliersResponse, capabilitiesResponse, accountingResponse, bwaResponse] = await Promise.all([
       apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`),
+      apiFetch("/masterdata/extraction-capabilities"),
       apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/bwa-imports?tenant_id=${encodeURIComponent(tenantId)}`),
     ]);
-    if (!assignmentsResponse.ok || !suppliersResponse.ok || !accountingResponse.ok || !bwaResponse.ok) {
+    if (!assignmentsResponse.ok || !suppliersResponse.ok || !capabilitiesResponse.ok || !accountingResponse.ok || !bwaResponse.ok) {
       throw new Error("Stammdaten konnten nicht geladen werden.");
     }
     const assignmentsResult = await assignmentsResponse.json();
     const suppliersResult = await suppliersResponse.json();
+    const capabilitiesResult = await capabilitiesResponse.json();
     const accountingResult = await accountingResponse.json();
     const bwaResult = await bwaResponse.json();
     setAssignmentUnits(assignmentsResult.assignment_units ?? []);
     setSupplierRules(suppliersResult.supplier_rules ?? []);
+    setExtractionCapabilities(capabilitiesResult.capabilities ?? []);
     setAccountingRules(accountingResult.accounting_rules ?? []);
     setBwaImports(bwaResult.bwa_imports ?? []);
   }, [apiFetch, tenantId]);
@@ -4533,6 +4537,35 @@ function MasterdataAdmin({
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Einlesen und Extraktion</p>
+              <h3>Abgedeckte Rechnungssteller</h3>
+            </div>
+            <StatusPill value={`${extractionCapabilities.length} Einträge`} />
+          </div>
+          <p className="form-hint">
+            Diese Liste zeigt, für welche Rechnungssteller es aktuell feste Erkennungsmerkmale oder belastbare Fallbacks gibt.
+          </p>
+          <div className="data-table capability-table">
+            <div className="data-row data-head">
+              <span>Rechnungssteller</span>
+              <span>Status</span>
+              <span>Erkennung</span>
+              <span>Abdeckung</span>
+            </div>
+            {extractionCapabilities.map((capability) => (
+              <div className="data-row" key={capability.supplier_name}>
+                <strong>{capability.supplier_name}</strong>
+                <StatusPill value={capability.status} tone={capability.status === "gut" ? "green" : "gray"} />
+                <span>{capability.recognition}</span>
+                <span>{capability.coverage}</span>
+              </div>
+            ))}
           </div>
         </section>
 

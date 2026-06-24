@@ -24,6 +24,115 @@ from app.services.database import (
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
 REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready"}
 
+EXTRACTION_CAPABILITIES = [
+    {
+        "supplier_name": "Holz Junge GmbH",
+        "status": "gut",
+        "recognition": "Dateiname Kreditrechnung, Holz-Junge-Text, Kundennummer",
+        "coverage": "Rechnungsdaten, Skonto, Bauvorhaben-Hinweise, Artikelkurztext",
+    },
+    {
+        "supplier_name": "HaHo Holz",
+        "status": "gut",
+        "recognition": "Kundennr/Reisender/Btr NL im Beleg",
+        "coverage": "Rechnungsdaten und Beträge, Projekthinweise über Text",
+    },
+    {
+        "supplier_name": "Lüchau Baustoffe GmbH",
+        "status": "gut",
+        "recognition": "Lieferantenname, Kunden-/Projektbezug, PDF-Text",
+        "coverage": "Rechnungsdaten, Skonto, Projektnummer/Projektname über Stammdaten",
+    },
+    {
+        "supplier_name": "Theo Foerch GmbH & Co. KG",
+        "status": "gut",
+        "recognition": "Förch/Foerch im Dateinamen oder Belegtext",
+        "coverage": "Rechnungsdaten, Kundennummer, Kundenreferenz, Skonto-Tabelle",
+    },
+    {
+        "supplier_name": "Arens & Stitz KG",
+        "status": "gut",
+        "recognition": "FRHA05 und GC-Gruppe-Merkmale",
+        "coverage": "Mehrseitige Skontodaten, Rechnungsdaten, Artikelkurztext",
+    },
+    {
+        "supplier_name": "Rolf Dammers oHG",
+        "status": "gut",
+        "recognition": "Dammers/Alles fürs Dach, Lager-/Kundennummer-Merkmale",
+        "coverage": "Rechnungsdaten, Kundennummer, Bestelldaten als Projekthinweis",
+    },
+    {
+        "supplier_name": "Georg Klindworth oHG",
+        "status": "gut",
+        "recognition": "RechnungAR-Dateiname und Kundennummer 0113042/504",
+        "coverage": "Rechnungsdaten, Skonto, Material-Kostenart",
+    },
+    {
+        "supplier_name": "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG",
+        "status": "gut",
+        "recognition": "Pietsch Hamburg-Ost Damaschke im Text",
+        "coverage": "Rechnungsdaten und Lieferantenstandard",
+    },
+    {
+        "supplier_name": "Enno Roggemann GmbH & Co. KG",
+        "status": "gut",
+        "recognition": "roggemann.de und Enno Roggemann GmbH",
+        "coverage": "Rechnungsdaten und Material-Kostenart",
+    },
+    {
+        "supplier_name": "AF-Elektro GmbH / A. Franz Elektrotechnik",
+        "status": "gut",
+        "recognition": "AF-Elektro/A. Franz Elektrotechnik und info@af-elektro.de",
+        "coverage": "Rechnungsdaten, Fremdleistungsbezug je Belegprüfung",
+    },
+    {
+        "supplier_name": "Eindruck24",
+        "status": "gut",
+        "recognition": "Eindruck24 und buchhaltung@eindruck24.de",
+        "coverage": "Rechnungsdaten, allgemeine Kosten/Material nach Beleg",
+    },
+    {
+        "supplier_name": "büroshop24 GmbH",
+        "status": "gut",
+        "recognition": "bueroshop24.de oder büroshop24 GmbH",
+        "coverage": "Rechnungsdaten, Gemeinkosten/Material nach Beleg",
+    },
+    {
+        "supplier_name": "DATEV",
+        "status": "gut",
+        "recognition": "DATEV-Rechnungsformat und Dateiname",
+        "coverage": "Abo-/Softwarekosten und Rechnungsdaten",
+    },
+    {
+        "supplier_name": "Mittwald CM Service GmbH & Co. KG",
+        "status": "gut",
+        "recognition": "Mittwald CM Service oder info@mittwald.de",
+        "coverage": "Hosting-/Softwarekosten und Rechnungsdaten",
+    },
+    {
+        "supplier_name": "I.B.E. Institut für betriebliches Entgeltmanagement GmbH",
+        "status": "gut",
+        "recognition": "Institutsname oder Primecard/Mariensstraße-Merkmale",
+        "coverage": "Dienstleistungs-/Gemeinkosten und Rechnungsdaten",
+    },
+    {
+        "supplier_name": "Maison Gebäudeservice",
+        "status": "gut",
+        "recognition": "Maison-Gebäudeservice-Rechnungsformat/Dateiname",
+        "coverage": "Fremdleistungsbelege und Rechnungsdaten",
+    },
+    {
+        "supplier_name": "Tankbelege",
+        "status": "bedingt",
+        "recognition": "Tankbeleg-/Fahrzeug-Dateiname und Scan/Fotobeleg-Fallback",
+        "coverage": "Fahrzeug/Tanken, Datum/Beträge teils über Dateiname oder OCR-nahe Texterkennung",
+    },
+]
+
+
+def list_extraction_capabilities() -> list[dict]:
+    return sorted(EXTRACTION_CAPABILITIES, key=lambda item: item["supplier_name"].casefold())
+
 
 def run_mock_extraction(
     document_id: UUID,

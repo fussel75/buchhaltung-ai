@@ -2643,6 +2643,10 @@ code {
   grid-template-columns: minmax(180px, 1.35fr) minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(190px, 1.1fr) minmax(100px, 0.6fr) minmax(130px, 0.75fr);
 }
 
+.capability-table .data-row {
+  grid-template-columns: minmax(190px, 0.95fr) minmax(88px, 0.35fr) minmax(230px, 1.1fr) minmax(260px, 1.25fr);
+}
+
 .accounting-table .data-row {
   grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.8fr) minmax(135px, 0.9fr) minmax(90px, 0.6fr) minmax(105px, 0.7fr) minmax(105px, 0.7fr) minmax(95px, 0.65fr) minmax(90px, 0.55fr) minmax(125px, 0.75fr);
 }
@@ -2886,6 +2890,7 @@ code {
   .bwa-upload,
   .assignment-table .data-row,
   .supplier-table .data-row,
+  .capability-table .data-row,
   .bwa-table .data-row,
   .accounting-table .data-row,
   .payment-row,

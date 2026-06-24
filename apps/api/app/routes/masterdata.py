@@ -25,6 +25,7 @@ from app.services.database import (
     upsert_tenant_profile,
 )
 from app.services.bwa import analyze_bwa_file
+from app.services.extraction import list_extraction_capabilities
 from app.services.partner_app import PartnerAppConfigError, PartnerAppFetchError, fetch_partner_assignment_units
 from app.services.storage import UploadRejectedError, delete_stored_document, store_bwa_document
 
@@ -398,6 +399,12 @@ def get_supplier_rules(
 ) -> dict:
     require_admin(request)
     return {"supplier_rules": list_supplier_rules(_normalize_tenant_id(tenant_id))}
+
+
+@router.get("/extraction-capabilities")
+def get_extraction_capabilities(request: Request) -> dict:
+    require_admin(request)
+    return {"capabilities": list_extraction_capabilities()}
 
 
 @router.post("/supplier-rules", status_code=status.HTTP_201_CREATED)
