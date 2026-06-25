@@ -929,6 +929,61 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["cost_category"], "material")
         self.assertIn("Dachlatte", result["product_name"])
 
+    def test_dammers_invoice_tolerates_logo_spaced_text_and_filename_number(self):
+        text = """
+        D A M M E R S
+        Alles fÃ¼rs Dach
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB GmbH & Co KG
+        Datum          :    12.06.2026 - 08:46
+        Kunden Nr      :           0515834/086
+        Bestelldaten: Bucheckerweg 4
+        ART-NR BEZEICHNUNG                   MENGE    EINZELPREIS RAB    NETTOWERT
+        75556                                20,00 St     5,10 St           102,00
+        Thorben Peters Dachlatte 40 x 60 S10 rot
+        Summe Warenwert                                            EUR     331,88
+        + 19,00 % Mwst.                                            EUR      63,06
+        Rechnungsbetrag (zahlbar bis spÃ¤testens 12.07.26 o. Abzug) EUR     394,94
+        zahlbar bis zum 22.06.26 abzÃ¼glich EUR 11,85 Skonto
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "776511-606.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "25-00009",
+            "label": "Buwg4",
+            "kind": "construction_project",
+            "project_number": "25-00009",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def assignment_lookup(_tenant_id, hint):
+            if hint and "Bucheckerweg 4" in hint:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=assignment_lookup),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["invoice_number"], "776511-606")
+        self.assertEqual(result["customer_number"], "0515834/086")
+        self.assertEqual(result["assignment_code"], "Buwg4")
+        self.assertEqual(result["project_number"], "25-00009")
+        self.assertEqual(result["net_amount"], Decimal("331.88"))
+        self.assertEqual(result["gross_amount"], Decimal("394.94"))
+
     def test_foerch_invoice_uses_filename_and_derives_net_amount(self):
         text = """
         THEO FOERCH GmbH & Co. KG

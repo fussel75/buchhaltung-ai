@@ -1404,6 +1404,9 @@ def _invoice_number_from_filename(filename: str) -> str | None:
     match = search(r"(?:rechnung|rg)[_-]?([0-9]{6,})", stem, flags=0)
     if match:
         return match.group(1)
+    match = search(r"\b([0-9]{5,}-[0-9]{2,})\b", stem)
+    if match:
+        return match.group(1)
     match = search(r"\b([0-9]{8,})\b", stem)
     return match.group(1) if match else None
 
@@ -1448,6 +1451,7 @@ def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Rg\.-Datum\s+Kunden-Nr\.[^\n]*\n\s*\d{2}\.\d{2}\.\d{4}\s+([0-9]{5})\b")
         or _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"Kunden\s*-?\s*Nr\.?\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*:\s*\n\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Steuer-ID\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Ihre Kundennummer Unser Vorgang Datum\s*(Q[0-9]+)")
@@ -1940,9 +1944,14 @@ def _resolve_assignment_for_delivery_addresses(tenant_id: str, delivery_addresse
     return None
 
 
+def _compact_search_text(value: str) -> str:
+    return sub(r"[^a-z0-9äöüß]+", "", value.lower())
+
+
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
+    compact_text = _compact_search_text(text)
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
@@ -1973,7 +1982,10 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Rolf Dammers oHG"
     if "roennfeld-rollladenbau.de" in lower_text or "rönnfeld" in lower_text:
         return "Rönnfeld ROLLLADEN UND MARKISEN GmbH"
-    if "dammers" in lower_text and ("alles f" in lower_text or "dach" in lower_text):
+    if (
+        ("dammers" in compact_text and ("allesf" in compact_text or "dach" in compact_text))
+        or ("cobadach" in compact_text and "kundennr" in compact_text)
+    ):
         return "Rolf Dammers oHG"
     if "kundennr" in lower_text and "reisender" in lower_text and "btr nl" in lower_text:
         return "HaHo Holz"
