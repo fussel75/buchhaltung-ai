@@ -122,6 +122,12 @@ EXTRACTION_CAPABILITIES = [
         "coverage": "Fremdleistungsbelege und Rechnungsdaten",
     },
     {
+        "supplier_name": "Böhm Malereibetrieb GmbH",
+        "status": "bedingt",
+        "recognition": "Böhm/Maler L. Böhm im Dateinamen oder Belegtext",
+        "coverage": "Lieferant, Belegnummer/Datum aus Dateiname, Bauvorhaben-Hinweis aus Dateiname",
+    },
+    {
         "supplier_name": "Tankbelege",
         "status": "bedingt",
         "recognition": "Tankbeleg-/Fahrzeug-Dateiname und Scan/Fotobeleg-Fallback",
@@ -326,7 +332,7 @@ def _build_cii_xml_result(
     # Some supplier XML files do not carry construction-site delivery text,
     # so the project assignment is enriched from the human-readable PDF.
     delivery_address = _xml_delivery_address(root, ns) or _find_delivery_address(text)
-    customer_reference = _find_customer_reference(text)
+    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
     discount_due_date = None
     due_date = (
         visible_discount.get("due_date")
@@ -497,7 +503,7 @@ def _build_ubl_xml_result(
     discount_amount = _signed_discount_amount(discount_amount, gross_amount)
 
     delivery_address = _ubl_delivery_address(root, ns) or _find_delivery_address(text)
-    customer_reference = _find_customer_reference(text)
+    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
@@ -794,7 +800,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         discounted_payable_amount = (gross_amount - discount_amount).quantize(Decimal("0.01"))
     delivery_addresses = _find_delivery_addresses(text)
     delivery_address = delivery_addresses[0] if delivery_addresses else _find_delivery_address(text)
-    customer_reference = _find_customer_reference(text)
+    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
     supplier_name = _supplier_name(document, text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
@@ -1401,7 +1407,7 @@ def _find_rieprecht_invoice_date(text: str) -> str | None:
 
 def _invoice_number_from_filename(filename: str) -> str | None:
     stem = Path(filename).stem.lower()
-    match = search(r"(?:rechnung|rg)[_-]?([0-9]{6,})", stem, flags=0)
+    match = search(r"(?:rechnung|erg|rg)[ _-]*([0-9]{6,})", stem, flags=0)
     if match:
         return match.group(1)
     match = search(r"\b([0-9]{5,}-[0-9]{2,})\b", stem)
@@ -1412,7 +1418,16 @@ def _invoice_number_from_filename(filename: str) -> str | None:
 
 
 def _invoice_date_from_filename(filename: str) -> str | None:
-    return _find_date(Path(filename).stem, r"(\d{2}\.\d{2}\.\d{4})")
+    stem = Path(filename).stem
+    return _find_date(stem, r"(\d{2}\.\d{2}\.\d{4})") or _find_iso_date(stem)
+
+
+def _find_iso_date(text: str) -> str | None:
+    match = search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", text)
+    if not match:
+        return None
+    year, month, day = match.groups()
+    return f"{year}-{month}-{day}"
 
 
 def _find_roennfeld_due_date(text: str) -> str | None:
@@ -1906,6 +1921,14 @@ def _find_customer_reference(text: str) -> str | None:
     return value or None
 
 
+def _find_assignment_hint_from_filename(filename: str) -> str | None:
+    stem = Path(filename).stem
+    return _find_text(stem, r"\bBV\s+([^,]+)") or _find_text(
+        stem,
+        r"\b(?:Bauvorhaben|Projekt)\s+([^,]+)",
+    )
+
+
 def _find_allocation_lines(tenant_id: str, text: str) -> list[dict[str, str | None]]:
     normalized_text = sub(r"\s+", " ", text)
     allocations = []
@@ -1951,7 +1974,7 @@ def _compact_search_text(value: str) -> str:
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
-    compact_text = _compact_search_text(text)
+    compact_text = _compact_search_text(" ".join([document["original_filename"], text]))
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
@@ -1964,6 +1987,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "AF-Elektro GmbH"
     if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
         return "A. Franz Elektrotechnik"
+    if "böhm" in original or "boehm" in original or "böhmmalereibetrieb" in compact_text or "malerlböhm" in compact_text:
+        return "Böhm Malereibetrieb GmbH"
     if "eindruck24" in lower_text and "buchhaltung@eindruck24.de" in lower_text:
         return "Eindruck24"
     if "mittwald cm service" in lower_text or "info@mittwald.de" in lower_text:
@@ -2096,6 +2121,8 @@ def _cost_category(
     if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung"]):
         return "subcontractor"
     if any(term in haystack for term in ["konzept 54", "wärmepumpen-support", "waermepumpen-support", "kundendienst"]):
+        return "subcontractor"
+    if any(term in haystack for term in ["böhm malereibetrieb", "boehm malereibetrieb", "maler l. böhm", "maler l. boehm"]):
         return "subcontractor"
     if any(term in haystack for term in ["rönnfeld", "roennfeld", "rollladen", "raffstore", "markisen", "sonnenschutz"]):
         return "subcontractor"

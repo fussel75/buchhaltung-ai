@@ -1745,6 +1745,51 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["gross_amount"], Decimal("844.33"))
         self.assertEqual(result["warnings"], [])
 
+    def test_boehm_invoice_uses_clean_filename_for_supplier_date_and_assignment(self):
+        text = """
+        Böhm Malereibetrieb GmbH
+        Malerarbeiten und WDVS
+        Leistungszeitraum Juni 2026
+        Diese Rechnung wurde aus einem bereits sortierten Dateinamen importiert.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "ERg 2600148, BV Wewe20, Maler L. Böhm, 2026-06-25.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "boehm.pdf",
+            "size_bytes": 142000,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Wewe20",
+            "label": "Weseler Weg 20",
+            "kind": "construction_project",
+            "project_number": "25-00008",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Wewe20" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Böhm Malereibetrieb GmbH")
+        self.assertEqual(result["invoice_number"], "2600148")
+        self.assertEqual(result["invoice_date"], "2026-06-25")
+        self.assertEqual(result["customer_reference"], "Wewe20")
+        self.assertEqual(result["assignment_code"], "Wewe20")
+        self.assertEqual(result["project_number"], "25-00008")
+        self.assertEqual(result["cost_category"], "subcontractor")
+
     def test_europlanen_invoice_reads_object_material_totals_and_due_date(self):
         text = """
         Euro Planen Handel und Service GmbH · Große Brunnenstraße 63a · 22763 Hamburg
