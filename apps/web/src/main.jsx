@@ -2036,6 +2036,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [sortConfig, setSortConfig] = useState({ key: "project_number", direction: "asc" });
 
   const loadProjects = useCallback(async () => {
@@ -2097,6 +2098,8 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
     const needle = search.trim().toLowerCase();
     return assignmentUnits.filter((project) => {
       if (kindFilter !== "all" && project.kind !== kindFilter) return false;
+      if (statusFilter === "active" && !project.is_active) return false;
+      if (statusFilter === "inactive" && project.is_active) return false;
       if (!needle) return true;
       const haystack = [
         project.code,
@@ -2115,7 +2118,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(needle);
     });
-  }, [assignmentUnits, kindFilter, search]);
+  }, [assignmentUnits, kindFilter, search, statusFilter]);
   const sortedProjects = useMemo(() => {
     const direction = sortConfig.direction === "desc" ? -1 : 1;
     return [...filteredProjects].sort((left, right) => {
@@ -2125,6 +2128,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
     });
   }, [filteredProjects, sortConfig, tenantProfile]);
   const activeCount = assignmentUnits.filter((project) => project.is_active).length;
+  const inactiveCount = assignmentUnits.length - activeCount;
   const withProjectNumber = assignmentUnits.filter((project) => project.project_number).length;
   function changeProjectSort(key) {
     setSortConfig((current) => ({
@@ -2147,6 +2151,7 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
       <section className="project-overview">
         <Metric label="Gesamt" value={assignmentUnits.length} />
         <Metric label="Aktiv" value={activeCount} />
+        <Metric label="Inaktiv" value={inactiveCount} />
         <Metric label="Mit Projektnummer" value={withProjectNumber} />
         <Metric label="Sichtbar" value={filteredProjects.length} />
       </section>
@@ -2183,6 +2188,14 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
               {projectKinds.map((kind) => (
                 <option key={kind} value={kind}>{formatAssignmentKind(kind, tenantProfile)}</option>
               ))}
+            </select>
+          </label>
+          <label>
+            Status
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">Alle Status</option>
+              <option value="active">Aktiv</option>
+              <option value="inactive">Inaktiv / abgeschlossen</option>
             </select>
           </label>
         </div>

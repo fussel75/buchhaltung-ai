@@ -625,7 +625,7 @@ button:disabled {
 
 .project-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 260px);
+  grid-template-columns: minmax(240px, 1fr) minmax(170px, 240px) minmax(170px, 240px);
   gap: 12px;
   align-items: end;
 }
