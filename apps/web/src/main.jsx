@@ -2308,6 +2308,25 @@ function compareProjectValues(left, right) {
   return leftText.localeCompare(rightText, "de-DE", { numeric: true, sensitivity: "base" });
 }
 
+function formatAssignmentPickerLabel(assignment) {
+  return [
+    assignment.project_number,
+    assignment.review_code,
+    assignment.address_line,
+    assignment.is_active === false ? "abgeschlossen" : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function formatAssignmentPickerDetails(assignment) {
+  return [
+    assignment.review_code,
+    assignment.project_number,
+    assignment.address_line,
+    assignment.client_name,
+    assignment.is_active === false ? "abgeschlossen" : null,
+  ].filter(Boolean).join(", ");
+}
+
 function BulkJobHistory({ jobs }) {
   const activeCount = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
   return (
@@ -2362,13 +2381,16 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
   const isApproved = document.status === "review_approved";
   const assignmentOptions = useMemo(
     () => assignmentUnits
-      .filter((assignment) => assignment.is_active !== false)
       .map((assignment) => ({
         ...assignment,
         review_code: reviewAssignmentCode(assignment),
       }))
       .filter((assignment) => assignment.review_code || assignment.project_number)
-      .sort((left, right) => compareProjectValues(left.project_number || left.review_code, right.project_number || right.review_code)),
+      .sort((left, right) => {
+        const inactiveCompare = Number(left.is_active === false) - Number(right.is_active === false);
+        if (inactiveCompare !== 0) return inactiveCompare;
+        return compareProjectValues(left.project_number || left.review_code, right.project_number || right.review_code);
+      }),
     [assignmentUnits],
   );
   const selectedAssignmentId = useMemo(() => {
@@ -2475,7 +2497,7 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
             <option value="">{assignmentOptions.length ? "Projekt auswählen" : "Keine Stammdaten geladen"}</option>
             {assignmentOptions.map((assignment) => (
               <option key={`assignment-picker-${assignment.id}`} value={assignment.id}>
-                {[assignment.project_number, assignment.review_code, assignment.address_line].filter(Boolean).join(" · ")}
+                {formatAssignmentPickerLabel(assignment)}
               </option>
             ))}
           </select>
@@ -2486,7 +2508,7 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
           <datalist id={`assignment-code-options-${document.id}`}>
             {assignmentOptions.map((assignment) => (
               <option key={`code-${assignment.id}`} value={assignment.review_code}>
-                {[assignment.project_number, assignment.address_line, assignment.client_name].filter(Boolean).join(", ")}
+                {formatAssignmentPickerDetails(assignment)}
               </option>
             ))}
           </datalist>
@@ -2496,7 +2518,7 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
           <datalist id={`project-number-options-${document.id}`}>
             {assignmentOptions.filter((assignment) => assignment.project_number).map((assignment) => (
               <option key={`project-${assignment.id}`} value={assignment.project_number}>
-                {[assignment.review_code, assignment.address_line, assignment.client_name].filter(Boolean).join(", ")}
+                {formatAssignmentPickerDetails(assignment)}
               </option>
             ))}
           </datalist>
