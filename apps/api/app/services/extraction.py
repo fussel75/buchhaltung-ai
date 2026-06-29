@@ -1936,15 +1936,18 @@ def _find_discount_days(text: str) -> int | None:
 
 
 def _find_dammers_due_date(text: str) -> str | None:
-    return _find_date(text, r"zahlbar bis\s+sp[äÃ¤]testens\s+(\d{2}\.\d{2}\.\d{2})")
+    return _find_date(text, r"zahlbar bis\s+sp\S{1,8}testens\s+(\d{2}\.\d{2}\.\d{2})")
 
 
 def _find_dammers_discount_due_date(text: str) -> str | None:
-    return _find_date(text, r"zahlbar bis zum\s+(\d{2}\.\d{2}\.\d{2})\s+abz[üÃ¼]glich\s+EUR\s+[0-9.]+,\d{2}\s+Skonto")
+    return _find_date(
+        text,
+        r"zahlbar bis zum\s+(\d{2}\.\d{2}\.\d{2})\s+abz\S{1,8}glich\s+EUR\s+[0-9.]+,\d{2}\s+Skonto",
+    )
 
 
 def _find_dammers_discount_amount(text: str) -> Decimal | None:
-    return _find_money(text, r"abz[üÃ¼]glich\s+EUR\s+([0-9.]+,\d{2})\s+Skonto")
+    return _find_money(text, r"abz\S{1,8}glich\s+EUR\s+([0-9.]+,\d{2})\s+Skonto")
 
 
 def _find_pietsch_discount_terms(text: str) -> dict[str, Decimal | str | None]:
@@ -2160,6 +2163,7 @@ def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
     compact_text = _compact_search_text(" ".join([document["original_filename"], text]))
+    dammers_filename = _dammers_invoice_from_filename(document["original_filename"])
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
@@ -2192,6 +2196,13 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Rolf Dammers oHG"
     if "roennfeld-rollladenbau.de" in lower_text or "rönnfeld" in lower_text:
         return "Rönnfeld ROLLLADEN UND MARKISEN GmbH"
+    if dammers_filename and (
+        "0515834" in text
+        or "cobadach" in compact_text
+        or "allesf" in compact_text
+        or "auslieferungslager" in lower_text
+    ):
+        return "Rolf Dammers oHG"
     if (
         ("dammers" in compact_text and ("allesf" in compact_text or "dach" in compact_text))
         or ("cobadach" in compact_text and "kundennr" in compact_text)
