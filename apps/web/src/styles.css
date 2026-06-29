@@ -980,6 +980,10 @@ button:disabled {
   font-size: 0.88rem;
 }
 
+.preview-field-value {
+  min-width: 0;
+}
+
 .preview-field.numeric strong {
   white-space: nowrap;
 }
@@ -2277,6 +2281,23 @@ code {
 .approval-line-row strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.assignment-line-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.assignment-line-summary strong {
+  font-size: 0.9rem;
+}
+
+.assignment-line-summary small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 720;
 }
 
 .approval-actions {

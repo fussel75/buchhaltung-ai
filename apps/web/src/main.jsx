@@ -3627,7 +3627,12 @@ function ApprovalDialog({
               <div className="approval-line-row" key={suggestion.id}>
                 <strong>{suggestion.line_no}</strong>
                 <span>{suggestion.description || "-"}</span>
-                <span>{[suggestion.assignment_code, formatAssignmentKind(suggestion.assignment_kind, tenantProfile)].filter(Boolean).join(" / ") || "-"}</span>
+                <AssignmentLineSummary
+                  assignmentCode={suggestion.assignment_code}
+                  assignmentKind={suggestion.assignment_kind}
+                  projectNumber={suggestion.assignment_project_number}
+                  tenantProfile={tenantProfile}
+                />
                 <span>{formatCostCategory(suggestion.cost_category)}</span>
                 <span>{formatMoney(suggestion.net_amount)}</span>
                 <span>{formatMoney(suggestion.tax_amount)}</span>
@@ -5198,6 +5203,20 @@ function ProjectSummary({ rawResult, tenantProfile }) {
   return <span className="project-summary">{lines.join("\n")}</span>;
 }
 
+function AssignmentLineSummary({ assignmentCode, assignmentKind, projectNumber, tenantProfile }) {
+  const label = assignmentCode
+    ? formatAssignmentCode(assignmentCode, assignmentKind, tenantProfile)
+    : formatAssignmentKind(assignmentKind, tenantProfile);
+  if (!label && !projectNumber) return <span>-</span>;
+
+  return (
+    <span className="assignment-line-summary">
+      <strong>{label || "-"}</strong>
+      <small>{projectNumber ? `Projektnr. ${projectNumber}` : "Projektnr. -"}</small>
+    </span>
+  );
+}
+
 function AllocationLines({ lines, tenantProfile }) {
   if (!lines?.length) return null;
 
@@ -5591,8 +5610,17 @@ function BookingPreviewLine({ row }) {
         </div>
       </div>
       <div className="booking-preview-line-fields">
-        <PreviewField label="Zuordnung" value={[formatAssignmentKind(row.assignment_kind), row.assignment_code].filter(Boolean).join(" ") || "-"} />
-        <PreviewField label="Projektnr." value={row.assignment_project_number || "-"} />
+        <PreviewField
+          label="Projekt"
+          value={(
+            <AssignmentLineSummary
+              assignmentCode={row.assignment_code}
+              assignmentKind={row.assignment_kind}
+              projectNumber={row.assignment_project_number}
+              tenantProfile={defaultTenantProfile("construction")}
+            />
+          )}
+        />
         <PreviewField label="Kostenart" value={formatCostCategory(row.cost_category)} />
         <PreviewField label="Konten" value={formatAccountPair(row)} />
         <PreviewField label="Steuer" value={[row.tax_key, row.tax_rate ? `${row.tax_rate} %` : null].filter(Boolean).join(" / ") || "-"} />
@@ -5625,10 +5653,11 @@ function BookingPreviewLine({ row }) {
 }
 
 function PreviewField({ label, value, numeric = false }) {
+  const isNodeValue = typeof value === "object" && value !== null;
   return (
     <div className={numeric ? "preview-field numeric" : "preview-field"}>
       <span>{label}</span>
-      <strong>{value || "-"}</strong>
+      {isNodeValue ? <div className="preview-field-value">{value}</div> : <strong>{value || "-"}</strong>}
     </div>
   );
 }
