@@ -1232,6 +1232,31 @@ button:disabled {
   text-align: center;
 }
 
+.problem-summary button.active {
+  border-color: #fb923c;
+  box-shadow: 0 0 0 2px #fed7aa;
+}
+
+.active-problem-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #8a3a14;
+  background: #fff7ed;
+  font-size: 0.84rem;
+  font-weight: 760;
+}
+
+.active-problem-filter button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
 .document-head strong {
   overflow-wrap: anywhere;
 }

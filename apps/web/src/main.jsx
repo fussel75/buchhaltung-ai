@@ -225,6 +225,7 @@ function UploadApp() {
   const [reviewBatch, setReviewBatch] = useState(null);
   const [bulkJobs, setBulkJobs] = useState([]);
   const [reviewFilter, setReviewFilter] = useState("all");
+  const [problemReasonFilter, setProblemReasonFilter] = useState("");
   const [expandedDocumentIds, setExpandedDocumentIds] = useState([]);
   const [approvalDocumentId, setApprovalDocumentId] = useState(null);
   const [focusedReviewDocumentId, setFocusedReviewDocumentId] = useState(null);
@@ -263,8 +264,12 @@ function UploadApp() {
     [problemDocuments],
   );
   const filteredDocuments = useMemo(
-    () => documents.filter((document) => reviewFilter === "all" || (reviewFilter === "problems" ? isProblemExtraction(document) : document.status === reviewFilter)),
-    [documents, reviewFilter],
+    () => documents.filter((document) => {
+      if (reviewFilter === "all") return true;
+      if (reviewFilter === "problems") return documentMatchesProblemSummary(document, problemReasonFilter);
+      return document.status === reviewFilter;
+    }),
+    [documents, problemReasonFilter, reviewFilter],
   );
   const extractableDocuments = useMemo(
     () => filteredDocuments.filter((document) => !document.extraction && document.status === "review_pending"),
@@ -1593,29 +1598,34 @@ function UploadApp() {
               <span>{filteredDocuments.length} von {documents.length} Belegen</span>
             </div>
             <div className="filter-tabs" aria-label="Review-Filter">
-              <button type="button" className={reviewFilter === "all" ? "active" : ""} onClick={() => setReviewFilter("all")}>
+              <button type="button" className={reviewFilter === "all" ? "active" : ""} onClick={() => { setReviewFilter("all"); setProblemReasonFilter(""); }}>
                 Alle
               </button>
-              <button type="button" className={reviewFilter === "review_pending" ? "active" : ""} onClick={() => setReviewFilter("review_pending")}>
+              <button type="button" className={reviewFilter === "review_pending" ? "active" : ""} onClick={() => { setReviewFilter("review_pending"); setProblemReasonFilter(""); }}>
                 Offen {queueStats.pending}
               </button>
-              <button type="button" className={reviewFilter === "extracted" ? "active" : ""} onClick={() => setReviewFilter("extracted")}>
+              <button type="button" className={reviewFilter === "extracted" ? "active" : ""} onClick={() => { setReviewFilter("extracted"); setProblemReasonFilter(""); }}>
                 Extrahiert {queueStats.extracted}
               </button>
-              <button type="button" className={reviewFilter === "review_ready" ? "active" : ""} onClick={() => setReviewFilter("review_ready")}>
+              <button type="button" className={reviewFilter === "review_ready" ? "active" : ""} onClick={() => { setReviewFilter("review_ready"); setProblemReasonFilter(""); }}>
                 Vorschlag {queueStats.ready}
               </button>
-              <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => setReviewFilter("review_approved")}>
+              <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => { setReviewFilter("review_approved"); setProblemReasonFilter(""); }}>
                 Freigegeben {queueStats.approved}
               </button>
-              <button type="button" className={reviewFilter === "problems" ? "active" : ""} onClick={() => setReviewFilter("problems")}>
+              <button type="button" className={reviewFilter === "problems" && !problemReasonFilter ? "active" : ""} onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(""); }}>
                 Probleme {problemDocuments.length}
               </button>
             </div>
             {problemSummary.length ? (
               <div className="problem-summary" aria-label="Häufige Extraktionsprobleme">
                 {problemSummary.map((item) => (
-                  <button type="button" key={item.reason} onClick={() => setReviewFilter("problems")}>
+                  <button
+                    type="button"
+                    className={reviewFilter === "problems" && problemReasonFilter === item.reason ? "active" : ""}
+                    key={item.reason}
+                    onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(item.reason); }}
+                  >
                     <span>{item.reason}</span>
                     <strong>{item.count}</strong>
                   </button>
@@ -1738,6 +1748,15 @@ function UploadApp() {
         ) : filteredDocuments.length === 0 ? (
           <p className="empty">Keine Belege in diesem Filter.</p>
         ) : (
+          <>
+          {reviewFilter === "problems" && problemReasonFilter ? (
+            <div className="active-problem-filter">
+              <span>Problemfilter: {problemReasonFilter}</span>
+              <button type="button" className="secondary-button" onClick={() => setProblemReasonFilter("")}>
+                Alle Problembelege
+              </button>
+            </div>
+          ) : null}
           <div className="queue">
             {filteredDocuments.map((document) => {
               const isExpanded = expandedDocumentIds.includes(document.id);
@@ -1946,6 +1965,7 @@ function UploadApp() {
               );
             })}
           </div>
+          </>
         )}
           </section>
         </section>
@@ -6232,6 +6252,12 @@ function problemExtractionReasons(document) {
 
 function isProblemExtraction(document) {
   return problemExtractionReasons(document).length > 0;
+}
+
+function documentMatchesProblemSummary(document, summaryReason) {
+  const reasons = problemExtractionReasons(document);
+  if (!summaryReason) return reasons.length > 0;
+  return reasons.some((reason) => problemExtractionSummaryKey(reason) === summaryReason);
 }
 
 function summarizeProblemExtractionReasons(documents) {
