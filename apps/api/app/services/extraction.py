@@ -75,6 +75,30 @@ EXTRACTION_CAPABILITIES = [
         "coverage": "Rechnungsdaten und Lieferantenstandard",
     },
     {
+        "supplier_name": "Rieprecht GmbH",
+        "status": "gut",
+        "recognition": "Rieprecht GmbH, rieprecht-gmbh.de und RIEP-Dateinamen",
+        "coverage": "Rechnungsdaten, Fälligkeit, Container-/Transportpositionen und Projektzuordnung über Text",
+    },
+    {
+        "supplier_name": "Rönnfeld ROLLLADEN UND MARKISEN GmbH",
+        "status": "gut",
+        "recognition": "Rönnfeld/roennfeld-rollladenbau.de und R25-Belegformat",
+        "coverage": "Rechnungen und Gutschriften, 0%-USt, Kundenreferenz, BV-Hinweise",
+    },
+    {
+        "supplier_name": "konzept 54 GmbH & Co.KG",
+        "status": "gut",
+        "recognition": "konzept-54.de, Kunden-Nr. 10019 und Projekt-/Supporttexte",
+        "coverage": "Rechnungsdaten, Projektbezug und Kostenart nach Leistungsinhalt statt pauschal nach Lieferant",
+    },
+    {
+        "supplier_name": "Euro Planen Handel und Service GmbH",
+        "status": "gut",
+        "recognition": "Euro Planen Handel und Service GmbH und Objekt-/Projektfelder",
+        "coverage": "Rechnungsdaten, Fälligkeit, Objekt/Artikel und Material-Kostenart",
+    },
+    {
         "supplier_name": "Enno Roggemann GmbH & Co. KG",
         "status": "gut",
         "recognition": "roggemann.de und Enno Roggemann GmbH",
