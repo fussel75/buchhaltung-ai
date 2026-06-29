@@ -2803,6 +2803,44 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(mapped["source_status"], "Abgeschlossen")
         self.assertFalse(mapped["is_active"])
 
+    def test_partner_project_mapping_accepts_boolean_active_status(self):
+        mapped = partner_app_service._project_to_assignment_unit(
+            {
+                "id": "project-closed-bool",
+                "projectNumber": "25-00007",
+                "name": "Ekkp58",
+                "address": "Eckerkamp 58 Hamburg 22391",
+                "status": "Aktiv",
+                "isActive": False,
+            }
+        )
+
+        self.assertEqual(mapped["project_number"], "25-00007")
+        self.assertFalse(mapped["is_active"])
+
+    def test_partner_project_mapping_accepts_completion_flags_as_inactive(self):
+        inactive_examples = [
+            {"completed": True},
+            {"isCompleted": True},
+            {"closed": True},
+            {"closedAt": "2026-06-01T12:00:00Z"},
+            {"endDate": "2026-06-01"},
+        ]
+
+        for extra_fields in inactive_examples:
+            with self.subTest(extra_fields=extra_fields):
+                mapped = partner_app_service._project_to_assignment_unit(
+                    {
+                        "id": f"project-{len(extra_fields)}",
+                        "projectNumber": "25-00007",
+                        "name": "Ekkp58",
+                        "address": "Eckerkamp 58 Hamburg 22391",
+                        **extra_fields,
+                    }
+                )
+
+                self.assertFalse(mapped["is_active"])
+
     def test_partner_app_base_url_must_be_public_https(self):
         invalid_urls = [
             "http://fristd-bau.replit.app",

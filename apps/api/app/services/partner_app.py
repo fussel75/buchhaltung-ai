@@ -147,7 +147,7 @@ def _project_to_assignment_unit(project: dict[str, Any]) -> dict[str, Any]:
         "external_id": _first_text(project, "id", "externalId", "external_id"),
         "revenue_relevant": _bool_value(project.get("revenueRelevant"), default=True),
         "aliases": aliases,
-        "is_active": _project_is_active(source_status),
+        "is_active": _project_is_active(source_status, project),
     }
 
 
@@ -197,10 +197,22 @@ def _unique_texts(values: list[str | None]) -> list[str]:
     return result
 
 
-def _project_is_active(status: str | None) -> bool:
+def _project_is_active(status: str | None, project: dict[str, Any] | None = None) -> bool:
+    project = project or {}
+    for key in ("isActive", "is_active", "active"):
+        if key in project:
+            return _bool_value(project.get(key), default=True)
+    for key in ("isInactive", "is_inactive", "completed", "complete", "isCompleted", "is_completed", "closed"):
+        if key in project:
+            return not _bool_value(project.get(key), default=False)
+    for key in ("closedAt", "closed_at", "completedAt", "completed_at", "archivedAt", "archived_at"):
+        if _first_text(project, key):
+            return False
+
     normalized = _normalize_status(status)
     if not normalized:
-        return True
+        end_date = _first_text(project, "endDate", "end_date", "completedDate", "completed_date")
+        return not bool(end_date)
     inactive_statuses = {
         "archived",
         "archive",
