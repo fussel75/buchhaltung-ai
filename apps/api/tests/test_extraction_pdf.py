@@ -15,6 +15,17 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def test_pdf_text_extraction_uses_pymupdf_when_pypdf_text_is_too_short(self):
+        pymupdf_text = "DAMMERS\n" + ("Rechnungstext " * 12)
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text_pypdf", return_value=""),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf", return_value=pymupdf_text),
+        ):
+            text = extraction_service._extract_pdf_text("dammers.pdf")
+
+        self.assertEqual(text, pymupdf_text)
+
     def test_pdf_filename_with_octet_stream_uses_pdf_extraction(self):
         document = {
             "tenant_id": "demo-mandant",

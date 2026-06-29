@@ -1187,8 +1187,32 @@ def _tank_receipt_driver_from_filename(stem: str) -> str | None:
 
 
 def _extract_pdf_text(storage_path: str) -> str:
+    text = _extract_pdf_text_pypdf(storage_path)
+    if len(text.strip()) >= 80:
+        return text
+    fallback_text = _extract_pdf_text_pymupdf(storage_path)
+    if len(fallback_text.strip()) > len(text.strip()):
+        return fallback_text
+    return text
+
+
+def _extract_pdf_text_pypdf(storage_path: str) -> str:
     reader = _read_pdf(storage_path)
     return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _extract_pdf_text_pymupdf(storage_path: str) -> str:
+    try:
+        import fitz
+    except ImportError:
+        return ""
+
+    pdf_path = get_settings().storage_root / storage_path
+    if not pdf_path.is_file():
+        return ""
+
+    with fitz.open(pdf_path) as pdf:
+        return "\n".join((page.get_text("text") or "").strip() for page in pdf)
 
 
 def _find_embedded_invoice_xml(storage_path: str) -> tuple[str, bytes] | None:
