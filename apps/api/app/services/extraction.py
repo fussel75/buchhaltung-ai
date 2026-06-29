@@ -756,6 +756,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         or _find_date(text, r"Zahlung ohne Abzug bis\s+(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"Rechnungsbetrag bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+zu begleichen")
         or _find_date(text, r"sp[^\s,]*testens jedoch bis zum\s+(\d{2}\.\d{2}\.\d{4})")
+        or _find_date(text, r"bis\s+sp[^\s,]*testens\s+zum\s+(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"zahlbar bis spätestens\s+(\d{2}\.\d{2}\.\d{2})")
         or _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+abzgl\.")
         or _find_date(text, r"fr[üÃ¼]hestens am\s+(\d{2}\.\d{2}\.\d{4})")
@@ -1668,6 +1669,7 @@ def _find_customer_number(text: str) -> str | None:
         or _find_text(text, r"Kundennr\.?\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"KundenNr\.\s*\.\s*\.\s*:\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kundennummer\s*:?\s*([0-9][0-9/.-]*)")
+        or _find_text(text, r"\d{2}\.\d{2}\.\d{4}\s*([0-9]{4,})\s*Kunden\s+Nummer")
         or _find_text(
             text,
             r"Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*\d{2}\.\d{2}\.\d{4}\s*\n\s*([0-9][0-9/.-]*)",
@@ -1767,6 +1769,14 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "net_amount": _money_to_decimal(europlanen_total.group(1)),
             "tax_amount": _money_to_decimal(europlanen_total.group(2)),
             "gross_amount": _money_to_decimal(europlanen_total.group(3)),
+        }
+    boehm_total = search(r"Nettosumme\s+([0-9.]+,\d{2})\s*€", text)
+    if boehm_total and ("maler-boehm.de" in text.lower() or "malereibetrieb" in text.lower()):
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(boehm_total.group(1)),
+            "tax_amount": None,
+            "gross_amount": None,
         }
     af_elektro_total = search(r"Gesamtbetrag\s+([0-9.]+,\d{2})\s*€[\s\S]*?§13b", text)
     if af_elektro_total:
@@ -2523,6 +2533,9 @@ def _clean_af_elektro_product_name(value: str) -> str:
 
 
 def _product_name(text: str) -> str:
+    boehm_product = _find_text(text, r"BV\s+[^:\n]+:\s*([^\n]+?)(?:Rechnung|\d{2}\.\d{2}\.\d{4}|$)")
+    if boehm_product and ("maler-boehm.de" in text.lower() or "malereibetrieb" in text.lower()):
+        return _clean_product_name(boehm_product) or boehm_product
     roennfeld_product = search(r"(Raffstore Fassadensystem\s*-\s*[^0-9\n]+)", text)
     if roennfeld_product:
         return _clean_product_name(roennfeld_product.group(1))

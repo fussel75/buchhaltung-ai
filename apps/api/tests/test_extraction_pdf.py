@@ -1948,7 +1948,18 @@ class ExtractionPdfTests(TestCase):
         text = """
         Böhm Malereibetrieb GmbH
         Malerarbeiten und WDVS
-        Leistungszeitraum Juni 2026
+        Sehr geehrter Herr Ronny Friedrich,wir danken für Ihren Auftrag und berechnen Ihnen die Ausführung im (Juni) per 25.06.2026 wie folgt:
+        Pos.Bezeichnung EinzelpreisMenge EinheitGesamtpreis
+        1 Baustelleneinrichtung, An- und Abfuhr aller benötigten Materialien, Geräte und Maschinen 110,00 € 1,00 Stk. 110,00 €
+        Zwischensumme 3.221,03 € Abschlag vom Netto Nachlass - 3 % von 3.221,03 € - 96,63 €
+        Nettosumme 3.124,40 €
+        Firma FirStD-Bau ZuB GmbH & Co.KG Haldesdorferstrasse 44 D-22179 Hamburg
+        Böhm Malereibetrieb GmbH * Pollhornweg 15 * 21107 Hamburg
+        25.06.202612988Kunden Nummer:
+        BV Weseler Weg 20 :Spachtelarbeiten im DachausbauRechnung 2600148 Original
+        --- Projekt-Nummer:00014/25
+        Pollhornweg 15 21107 Hamburg Telefon: 040 / 51 33 03 68 E-Mail : info@maler-boehm.de
+        Zahlbar bitte per Überweisung unter Angabe der Kunden- und Rechnungs-Nummer bis spätestens zum 05.07.2026 auf unten genanntes Konto.
         Diese Rechnung wurde aus einem bereits sortierten Dateinamen importiert.
         """
         document = {
@@ -1983,11 +1994,17 @@ class ExtractionPdfTests(TestCase):
 
         self.assertEqual(result["supplier_name"], "Böhm Malereibetrieb GmbH")
         self.assertEqual(result["invoice_number"], "2600148")
+        self.assertEqual(result["customer_number"], "12988")
         self.assertEqual(result["invoice_date"], "2026-06-25")
+        self.assertEqual(result["due_date"], "2026-07-05")
         self.assertEqual(result["customer_reference"], "Wewe20")
         self.assertEqual(result["assignment_code"], "Wewe20")
         self.assertEqual(result["project_number"], "25-00008")
         self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["product_name"], "Spachtelarbeiten im Dachausbau")
+        self.assertEqual(result["net_amount"], Decimal("3124.40"))
+        self.assertIsNone(result["tax_amount"])
+        self.assertIsNone(result["gross_amount"])
 
     def test_europlanen_invoice_reads_object_material_totals_and_due_date(self):
         text = """
