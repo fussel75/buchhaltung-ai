@@ -2061,11 +2061,7 @@ def build_booking_export_rows(documents: list[dict[str, Any]]) -> list[dict[str,
         if not assignment_code:
             return None
         if tenant_id not in project_number_maps:
-            project_number_maps[tenant_id] = {
-                _normalize_assignment_code_key(unit["code"]): unit.get("project_number")
-                for unit in list_assignment_units(tenant_id)
-                if _normalize_assignment_code_key(unit["code"])
-            }
+            project_number_maps[tenant_id] = _assignment_project_number_lookup_map(list_assignment_units(tenant_id))
         return project_number_maps[tenant_id].get(assignment_code)
 
     for document in documents:
@@ -2182,6 +2178,22 @@ def _assignment_project_number(tenant_id: str | None, assignment_code: str | Non
         return None
     assignment = get_assignment_unit_by_code(tenant_id, assignment_code)
     return assignment.get("project_number") if assignment else None
+
+
+def _assignment_project_number_lookup_map(assignment_units: list[dict[str, Any]]) -> dict[str, str | None]:
+    lookup: dict[str, str | None] = {}
+    for unit in assignment_units:
+        project_number = unit.get("project_number")
+        for value in (
+            unit.get("code"),
+            unit.get("label"),
+            project_number,
+            *(unit.get("aliases") or []),
+        ):
+            key = _normalize_assignment_code_key(value)
+            if key and key not in lookup:
+                lookup[key] = project_number
+    return lookup
 
 
 def _normalize_assignment_code_key(code: str | None) -> str | None:

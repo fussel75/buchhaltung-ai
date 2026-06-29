@@ -1198,6 +1198,68 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(rows[1]["payment_decision_source"], "gewählt")
         self.assertEqual(validate_booking_export_rows(rows), [])
 
+    def test_booking_export_project_number_matches_assignment_label_and_aliases(self):
+        document_id = uuid4()
+        with patch.object(database_service, "list_accounting_rules", return_value=[]), patch.object(
+            database_service,
+            "list_assignment_units",
+            return_value=[
+                {
+                    "code": "BV 26-00007",
+                    "label": "Hk92",
+                    "project_number": "26-00007",
+                    "aliases": ["Heukoppel 92"],
+                }
+            ],
+        ):
+            rows = build_booking_export_rows(
+                [
+                    {
+                        "id": str(document_id),
+                        "tenant_id": "demo-mandant",
+                        "original_filename": "rechnung.pdf",
+                        "normalized_filename": "ERg rechnung.pdf",
+                        "status": "review_approved",
+                        "extraction": {
+                            "supplier_name": "Lieferant GmbH",
+                            "invoice_number": "R-1",
+                            "invoice_date": "2026-06-11",
+                            "currency": "EUR",
+                            "raw_result": {"document_type": "incoming_invoice"},
+                        },
+                        "booking_suggestions": [
+                            {
+                                "line_no": 1,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "assignment_kind": "construction_project",
+                                "assignment_code": "Hk92",
+                                "description": "Material",
+                                "net_amount": "50.00",
+                                "tax_amount": "9.50",
+                                "gross_amount": "59.50",
+                            },
+                            {
+                                "line_no": 2,
+                                "booking_type": "incoming_invoice",
+                                "cost_category": "material",
+                                "assignment_kind": "construction_project",
+                                "assignment_code": "Heukoppel 92",
+                                "description": "Material",
+                                "net_amount": "10.00",
+                                "tax_amount": "1.90",
+                                "gross_amount": "11.90",
+                            },
+                        ],
+                        "payment_decision": None,
+                    }
+                ]
+            )
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["assignment_project_number"], "26-00007")
+        self.assertEqual(rows[1]["assignment_project_number"], "26-00007")
+
     def test_booking_export_rows_use_tenant_accounting_defaults(self):
         document_id = uuid4()
         tenant_profile = {
