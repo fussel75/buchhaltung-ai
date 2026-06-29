@@ -34,6 +34,44 @@ class ExtractionPdfTests(TestCase):
 
         self.assertEqual(result["source"], "pdf_text_rules")
 
+    def test_scanned_dammers_invoice_uses_filename_fallback_without_mock_amounts(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "776511-606.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "dammers.pdf",
+            "created_at": "2026-06-17T10:00:00+00:00",
+            "size_bytes": 39494,
+            "sha256": "abc",
+        }
+        supplier_rule = {
+            "supplier_name": "Rolf Dammers oHG",
+            "customer_number": "0515834/086",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=supplier_rule),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["source"], "pdf_scan_filename_rules")
+        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["invoice_number"], "776511-606")
+        self.assertEqual(result["customer_number"], "0515834/086")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["assignment_type"], "assignment_unresolved")
+        self.assertIsNone(result["net_amount"])
+        self.assertIsNone(result["tax_amount"])
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("OCR", " ".join(result["warnings"]))
+        self.assertEqual(result["confidence"], Decimal("0.50"))
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 776511-606, Bauvorhaben ungeklärt, Rolf Dammers oHG, Eingangsrechnung, ohne Datum.pdf",
+        )
+
     def test_af_elektro_invoice_reads_reverse_charge_discount_and_project_address(self):
         text = """
         AF-Elektro GmbH

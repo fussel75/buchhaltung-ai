@@ -646,6 +646,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         tank_receipt = _build_scanned_tank_receipt_result(document)
         if tank_receipt:
             return tank_receipt
+        dammers_invoice = _build_scanned_dammers_invoice_result(document)
+        if dammers_invoice:
+            return dammers_invoice
         result = _build_mock_result(document)
         result["warnings"] = [
             "PDF-Text konnte nicht ausreichend gelesen werden. OCR wird für diesen Belegtyp benötigt.",
@@ -1046,6 +1049,102 @@ def _build_scanned_tank_receipt_result(document: dict) -> dict | None:
         "source": "pdf_scan_filename_rules",
         "vehicle": vehicle,
         "driver": driver,
+    }
+
+
+def _build_scanned_dammers_invoice_result(document: dict) -> dict | None:
+    parsed = _dammers_invoice_from_filename(document["original_filename"])
+    if not parsed:
+        return None
+
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    supplier_name = "Rolf Dammers oHG"
+    invoice_number = parsed["invoice_number"]
+    invoice_date = parsed.get("invoice_date")
+    customer_number = None
+    supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, None, "")
+    if supplier_rule:
+        supplier_name = supplier_rule["supplier_name"]
+        customer_number = supplier_rule["customer_number"]
+    normalized_filename = _normalized_invoice_filename(
+        invoice_number=invoice_number,
+        assignment=None,
+        assignment_type="assignment_unresolved",
+        tenant_profile=tenant_profile,
+        supplier_name=supplier_name,
+        product_name="Eingangsrechnung",
+        invoice_date=invoice_date,
+    )
+    warnings = [
+        "Dammers-Scan: Lieferant und Belegnummer aus Dateiname erkannt; Beträge, Datum, Skonto und Zuordnung brauchen OCR oder manuelle Prüfung.",
+    ]
+    if customer_number:
+        warnings.append("Kundennummer aus Lieferantenregel übernommen.")
+
+    return {
+        "supplier_name": supplier_name,
+        "invoice_number": invoice_number,
+        "customer_number": customer_number,
+        "customer_reference": None,
+        "invoice_date": invoice_date,
+        "due_date": None,
+        "discount_due_date": None,
+        "service_period": invoice_date[:7] if invoice_date else None,
+        "delivery_address": None,
+        "delivery_addresses": [],
+        "allocation_lines": [],
+        "assignment_code": None,
+        "assignment_label": None,
+        "assignment_kind": None,
+        "assignment_revenue_relevant": None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
+        "project_code": None,
+        "project_number": None,
+        "project_name": None,
+        "assignment_type": "assignment_unresolved",
+        "cost_category": "material",
+        "product_name": None,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "document_type": "incoming_invoice",
+        "payment_terms": _payment_terms(
+            gross_amount=None,
+            due_date=None,
+            discount_due_date=None,
+            discount_base=None,
+            discount_percent=None,
+            discount_amount=None,
+            discounted_payable_amount=None,
+            is_credit_note=False,
+        ),
+        "currency": "EUR",
+        "confidence": Decimal("0.50"),
+        "warnings": warnings,
+        "normalized_filename": normalized_filename,
+        "source": "pdf_scan_filename_rules",
+    }
+
+
+def _dammers_invoice_from_filename(filename: str) -> dict | None:
+    stem = Path(filename).stem
+    match = search(r"\b([0-9]{6}-60[0-9])\b", stem)
+    if not match:
+        return None
+    return {
+        "invoice_number": match.group(1),
+        "invoice_date": _invoice_date_from_filename(filename),
     }
 
 
