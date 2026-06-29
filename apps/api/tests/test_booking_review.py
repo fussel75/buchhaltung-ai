@@ -2931,6 +2931,14 @@ class BookingSuggestionTests(TestCase):
         self.assertIn("konzept 54 GmbH & Co.KG", suppliers)
         self.assertIn("Euro Planen Handel und Service GmbH", suppliers)
         self.assertTrue(all(capability["status"] for capability in result["capabilities"]))
+        boehm = next(
+            capability
+            for capability in result["capabilities"]
+            if capability["supplier_name"] == "Böhm Malereibetrieb GmbH"
+        )
+        self.assertEqual(boehm["status"], "gut")
+        self.assertIn("Nettosumme", boehm["coverage"])
+        self.assertIn("Fälligkeit", boehm["coverage"])
 
     def test_assignment_lookup_does_not_match_city_or_postal_code_only(self):
         assignment = {

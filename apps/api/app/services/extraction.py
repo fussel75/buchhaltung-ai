@@ -148,9 +148,9 @@ EXTRACTION_CAPABILITIES = [
     },
     {
         "supplier_name": "Böhm Malereibetrieb GmbH",
-        "status": "bedingt",
+        "status": "gut",
         "recognition": "Böhm/Maler L. Böhm im Dateinamen oder Belegtext",
-        "coverage": "Lieferant, Belegnummer/Datum aus Dateiname, Bauvorhaben-Hinweis aus Dateiname",
+        "coverage": "Lieferant, Belegnummer, Datum, Kundennummer, Fälligkeit, Nettosumme, Leistungsbezeichnung und Bauvorhaben-Hinweis",
     },
     {
         "supplier_name": "Tankbelege",
