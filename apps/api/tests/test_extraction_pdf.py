@@ -1064,6 +1064,63 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["net_amount"], Decimal("331.88"))
         self.assertEqual(result["gross_amount"], Decimal("394.94"))
 
+    def test_dammers_invoice_uses_reference_address_for_assignment(self):
+        text = """
+        DAMMERS
+        Alles fÃ¼rs Dach
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB  GmbH & Co KG
+        Haldesdorfer Str. 44
+        Nummer         :            776511-606
+        Datum          :    12.06.2026 - 08:46
+        Kundennr.      :           0515834/086
+        Bestelldaten:
+        Bucheckerweg 4
+        22175 Hamburg
+        ART-NR BEZEICHNUNG                   MENGE    EINZELPREIS RAB    NETTOWERT
+        75556                                20,00 St     5,10 St           102,00
+        Thorben Peters Dachlatte 40 x 60 S10 rot
+        Summe Warenwert                                            EUR     331,88
+        + 19,00 % Mwst.                                            EUR      63,06
+        Rechnungsbetrag (zahlbar bis spÃ¤testens 12.07.26 o. Abzug) EUR     394,94
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "776511-606.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "25-00009",
+            "label": "Buwg4",
+            "kind": "construction_project",
+            "project_number": "25-00009",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def assignment_lookup(_tenant_id, hint):
+            if hint == "Bucheckerweg 4, 22175 Hamburg":
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=assignment_lookup),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["customer_reference"], "Bucheckerweg 4")
+        self.assertEqual(result["delivery_address"], "Bucheckerweg 4, 22175 Hamburg")
+        self.assertEqual(result["assignment_code"], "Buwg4")
+        self.assertEqual(result["project_name"], "Buwg4")
+        self.assertEqual(result["project_number"], "25-00009")
+        self.assertEqual(result["assignment_match"]["source"], "Lieferadresse")
+
     def test_dammers_invoice_uses_filename_and_customer_number_when_logo_ocr_is_missing(self):
         text = """
         Firma                            RECHNUNG

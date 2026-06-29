@@ -835,7 +835,11 @@ def _build_pdf_text_result(document: dict) -> dict:
     if discounted_payable_amount is None and gross_amount is not None and discount_amount is not None:
         discounted_payable_amount = (gross_amount - discount_amount).quantize(Decimal("0.01"))
     delivery_addresses = _find_delivery_addresses(text)
-    delivery_address = delivery_addresses[0] if delivery_addresses else _find_delivery_address(text)
+    delivery_address = (
+        delivery_addresses[0]
+        if delivery_addresses
+        else (_find_delivery_address(text) or _find_reference_delivery_address(text))
+    )
     customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
     supplier_name = _supplier_name(document, text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
@@ -2117,6 +2121,17 @@ def _find_customer_reference(text: str) -> str | None:
         return None
     value = match.group(1).strip(" :-\t")
     return value or None
+
+
+def _find_reference_delivery_address(text: str) -> str | None:
+    match = search(
+        r"(?:Bestelldaten|Kundenreferenz|Kommissionsangaben)\s*:?\s*\n?\s*"
+        r"([^\n]*?\d+[A-Za-zÄÖÜäöüß]?)\s*\n\s*(\d{5}\s+[^\n]+)",
+        text,
+    )
+    if not match:
+        return None
+    return _normalize_inline_address(f"{match.group(1).strip()} {match.group(2).strip()}")
 
 
 def _find_assignment_hint_from_filename(filename: str) -> str | None:
