@@ -2549,6 +2549,56 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(cursor.statements[2][1], ("demo-mandant", "26-00007", assignment_id))
         self.assertEqual(assignment["code"], "Hk92")
 
+    def test_list_assignment_units_hides_duplicate_project_numbers_preferring_partner_data(self):
+        old_id = uuid4()
+        partner_id = uuid4()
+        common = {
+            "tenant_id": "demo-mandant",
+            "label": "AgHd90",
+            "kind": "construction_project",
+            "project_number": "26-00008",
+            "address_line": "Altengammer Hauptdeich 90",
+            "postal_code": "21039",
+            "city": "Hamburg",
+            "revenue_relevant": True,
+            "aliases": [],
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+        old_row = {
+            **common,
+            "id": old_id,
+            "code": "BV 26-00008",
+            "order_number": None,
+            "customer_number": None,
+            "description": None,
+            "client_name": None,
+            "source_status": None,
+            "external_id": None,
+        }
+        partner_row = {
+            **common,
+            "id": partner_id,
+            "code": "AgHd90",
+            "order_number": "26-00004",
+            "customer_number": "11345",
+            "description": "Sanitärarbeiten",
+            "client_name": "Jytte Buhk",
+            "source_status": "Aktiv",
+            "external_id": "project-aghd90",
+        }
+        cursor = RecordingCursor(fetchall_result=[old_row, partner_row])
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            assignments = database_service.list_assignment_units("demo-mandant")
+
+        self.assertEqual(len(assignments), 1)
+        self.assertEqual(assignments[0]["id"], str(partner_id))
+        self.assertEqual(assignments[0]["code"], "AgHd90")
+        self.assertEqual(assignments[0]["order_number"], "26-00004")
+        self.assertEqual(assignments[0]["customer_number"], "11345")
+
     def test_assignment_lookup_accepts_project_label_as_review_code(self):
         assignment_id = uuid4()
         row = {

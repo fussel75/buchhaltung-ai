@@ -2972,7 +2972,49 @@ def list_assignment_units(tenant_id: str) -> list[dict[str, Any]]:
                 """,
                 (tenant_id,),
             )
-            return [_serialize_assignment_unit(row) for row in cursor.fetchall()]
+            return [_serialize_assignment_unit(row) for row in _deduplicate_assignment_unit_rows(cursor.fetchall())]
+
+
+def _deduplicate_assignment_unit_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique_rows: list[dict[str, Any]] = []
+    project_rows: dict[str, dict[str, Any]] = {}
+    project_positions: dict[str, int] = {}
+
+    for row in rows:
+        project_key = _normalize_assignment_code_key(row.get("project_number"))
+        if not project_key:
+            unique_rows.append(row)
+            continue
+
+        existing = project_rows.get(project_key)
+        if existing is None:
+            project_positions[project_key] = len(unique_rows)
+            project_rows[project_key] = row
+            unique_rows.append(row)
+            continue
+
+        if _assignment_unit_row_score(row) > _assignment_unit_row_score(existing):
+            project_rows[project_key] = row
+            unique_rows[project_positions[project_key]] = row
+
+    return unique_rows
+
+
+def _assignment_unit_row_score(row: dict[str, Any]) -> tuple[int, int, int]:
+    partner_score = 1 if row.get("external_id") else 0
+    detail_fields = [
+        row.get("order_number"),
+        row.get("customer_number"),
+        row.get("description"),
+        row.get("client_name"),
+        row.get("source_status"),
+        row.get("address_line"),
+        row.get("postal_code"),
+        row.get("city"),
+    ]
+    detail_score = sum(1 for value in detail_fields if value)
+    active_score = 1 if row.get("is_active") else 0
+    return (partner_score, detail_score, active_score)
 
 
 def list_bwa_imports(tenant_id: str) -> list[dict[str, Any]]:
