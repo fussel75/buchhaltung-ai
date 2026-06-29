@@ -2573,6 +2573,68 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(assignment["label"], "Hk92")
         self.assertEqual(assignment["project_number"], "26-00007")
 
+    def test_assignment_text_match_skips_inactive_projects(self):
+        inactive_assignment = {
+            "id": str(uuid4()),
+            "code": "Ekkp58",
+            "label": "Ekkp58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "order_number": "25-00007",
+            "customer_number": "11305",
+            "description": "Anbau",
+            "client_name": "Iris Wormsbächer",
+            "source_status": "Abgeschlossen",
+            "address_line": "Eckerkamp 58",
+            "postal_code": "22391",
+            "city": "Hamburg",
+            "external_id": "project-closed",
+            "revenue_relevant": True,
+            "aliases": ["Eckerkamp 58 Hamburg 22391"],
+            "is_active": False,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[inactive_assignment]):
+            match = database_service.find_assignment_unit_match_by_text(
+                "demo-mandant",
+                "Lieferung Baustelle Eckerkamp 58 Hamburg 22391",
+            )
+
+        self.assertIsNone(match)
+
+    def test_assignment_text_match_returns_reasons_for_review(self):
+        assignment = {
+            "id": str(uuid4()),
+            "code": "Hk92",
+            "label": "Hk92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "order_number": "26-00001",
+            "customer_number": "11124",
+            "description": "Wärmepumpe",
+            "client_name": "Christoph Balschat",
+            "source_status": "Aktiv",
+            "address_line": "Heukoppel 92",
+            "postal_code": "22179",
+            "city": "Hamburg",
+            "external_id": "project-active",
+            "revenue_relevant": True,
+            "aliases": ["Heukoppel 92 22179 Hamburg"],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            match = database_service.find_assignment_unit_match_by_text(
+                "demo-mandant",
+                "Kommission Hk92, Projektnummer 26-00007, Heukoppel 92 22179 Hamburg",
+            )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match["assignment"]["label"], "Hk92")
+        self.assertGreaterEqual(match["score"], 80)
+        self.assertIn("Projektnummer", match["reasons"])
+        self.assertIn("Projektname", match["reasons"])
+
     def test_assignment_sync_token_allows_partner_api_without_session(self):
         request = SimpleNamespace(headers={"authorization": "Bearer sync-token"}, state=SimpleNamespace())
 

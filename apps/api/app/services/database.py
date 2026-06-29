@@ -3320,42 +3320,54 @@ def update_assignment_unit(
 
 
 def find_assignment_unit_by_text(tenant_id: str, text: str | None) -> dict[str, Any] | None:
+    match = find_assignment_unit_match_by_text(tenant_id, text)
+    return match["assignment"] if match else None
+
+
+def find_assignment_unit_match_by_text(tenant_id: str, text: str | None) -> dict[str, Any] | None:
     if not text:
         return None
     normalized_text = _normalize_match_text(text)
-    best_match: tuple[int, dict[str, Any]] | None = None
+    best_match: tuple[int, dict[str, Any], list[str]] | None = None
     for assignment in list_assignment_units(tenant_id):
         if not assignment["is_active"]:
             continue
-        score = _assignment_match_score(assignment, normalized_text)
+        score, reasons = _assignment_match_score(assignment, normalized_text)
         if score and (not best_match or score > best_match[0]):
-            best_match = (score, assignment)
+            best_match = (score, assignment, reasons)
     if best_match and best_match[0] >= 80:
-        return best_match[1]
+        return {
+            "assignment": best_match[1],
+            "score": best_match[0],
+            "reasons": best_match[2],
+        }
     return None
 
 
-def _assignment_match_score(assignment: dict[str, Any], normalized_text: str) -> int:
+def _assignment_match_score(assignment: dict[str, Any], normalized_text: str) -> tuple[int, list[str]]:
     weighted_candidates = [
-        (assignment.get("project_number"), 220),
-        (assignment.get("order_number"), 180),
-        (assignment.get("code"), 170),
-        (assignment.get("label"), 150),
-        (_assignment_address_text(assignment), 150),
-        (assignment.get("address_line"), 130),
-        (assignment.get("customer_number"), 95),
-        (assignment.get("external_id"), 80),
-        (assignment.get("client_name"), 55),
-        (assignment.get("description"), 45),
+        ("Projektnummer", assignment.get("project_number"), 220),
+        ("Auftragsnummer", assignment.get("order_number"), 180),
+        ("Projektcode", assignment.get("code"), 170),
+        ("Projektname", assignment.get("label"), 150),
+        ("Projektadresse", _assignment_address_text(assignment), 150),
+        ("Adresse", assignment.get("address_line"), 130),
+        ("Kundennummer", assignment.get("customer_number"), 95),
+        ("Externe ID", assignment.get("external_id"), 80),
+        ("Bauherr", assignment.get("client_name"), 55),
+        ("Beschreibung", assignment.get("description"), 45),
     ]
-    weighted_candidates.extend((alias, 120) for alias in assignment.get("aliases") or [])
+    weighted_candidates.extend(("Alias", alias, 120) for alias in assignment.get("aliases") or [])
 
     score = 0
-    for candidate, weight in weighted_candidates:
+    reasons: list[str] = []
+    for label, candidate, weight in weighted_candidates:
         normalized_candidate = _normalize_assignment_candidate(candidate)
         if normalized_candidate and normalized_candidate in normalized_text:
             score += weight
-    return score
+            if label not in reasons:
+                reasons.append(label)
+    return score, reasons
 
 
 def _normalize_assignment_candidate(value: str | None) -> str | None:

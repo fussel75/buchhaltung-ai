@@ -12,6 +12,7 @@ from pypdf import PdfReader
 from app.config import get_settings
 from app.services.cost_categories import VALID_COST_CATEGORIES, split_cost_category_values
 from app.services.database import (
+    find_assignment_unit_match_by_text,
     find_assignment_unit_by_text,
     find_supplier_rule,
     get_assignment_unit_by_code,
@@ -349,7 +350,8 @@ def _build_cii_xml_result(
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment = assignment_match["assignment"] if assignment_match else None
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
@@ -420,6 +422,7 @@ def _build_cii_xml_result(
         "project_number": _project_number(assignment),
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
+        "assignment_match": _assignment_match_payload(assignment_match),
         "cost_category": cost_category,
         "product_name": product_name,
         "net_amount": net_amount,
@@ -508,7 +511,8 @@ def _build_ubl_xml_result(
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment = assignment_match["assignment"] if assignment_match else None
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_type = _assignment_type(delivery_address, assignment)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
@@ -576,6 +580,7 @@ def _build_ubl_xml_result(
         "project_number": _project_number(assignment),
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
+        "assignment_match": _assignment_match_payload(assignment_match),
         "cost_category": cost_category,
         "product_name": product_name,
         "net_amount": net_amount,
@@ -806,9 +811,12 @@ def _build_pdf_text_result(document: dict) -> dict:
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
-    assignment = _assignment_unit(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment = assignment_match["assignment"] if assignment_match else None
     if not assignment and delivery_addresses:
         assignment = _resolve_assignment_for_delivery_addresses(document["tenant_id"], delivery_addresses)
+        if assignment:
+            assignment_match = {"assignment": assignment, "score": None, "reasons": ["Lieferadresse"]}
     product_name = _product_name(text)
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     allocation_lines_resolved = bool(allocation_lines) and all(
@@ -871,6 +879,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "project_number": _project_number(assignment),
         "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
         "assignment_type": assignment_type,
+        "assignment_match": _assignment_match_payload(assignment_match),
         "cost_category": cost_category,
         "product_name": product_name,
         "net_amount": net_amount,
@@ -2042,11 +2051,39 @@ def _assignment_unit(
     customer_reference: str | None,
     text: str,
 ) -> dict | None:
+    match = _assignment_unit_match(tenant_id, delivery_address, customer_reference, text)
+    return match["assignment"] if match else None
+
+
+def _assignment_unit_match(
+    tenant_id: str,
+    delivery_address: str | None,
+    customer_reference: str | None,
+    text: str,
+) -> dict | None:
     for explicit_hint in (customer_reference, delivery_address):
-        assignment = find_assignment_unit_by_text(tenant_id, explicit_hint)
-        if assignment and assignment["is_active"]:
-            return assignment
-    return find_assignment_unit_by_text(tenant_id, text[:4000])
+        match = find_assignment_unit_match_by_text(tenant_id, explicit_hint)
+        if match and match["assignment"]["is_active"]:
+            match["source"] = "Kundenreferenz" if explicit_hint == customer_reference else "Lieferadresse"
+            return match
+    match = find_assignment_unit_match_by_text(tenant_id, text[:4000])
+    if match:
+        match["source"] = "Belegtext"
+    return match
+
+
+def _assignment_match_payload(match: dict | None) -> dict | None:
+    if not match:
+        return None
+    assignment = match.get("assignment") or {}
+    return {
+        "code": _assignment_code(assignment),
+        "label": assignment.get("label"),
+        "project_number": assignment.get("project_number"),
+        "score": match.get("score"),
+        "source": match.get("source"),
+        "reasons": match.get("reasons") or [],
+    }
 
 
 def _legacy_project_code(assignment: dict | None) -> str | None:
@@ -2120,7 +2157,7 @@ def _cost_category(
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
     if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung"]):
         return "subcontractor"
-    if any(term in haystack for term in ["konzept 54", "wärmepumpen-support", "waermepumpen-support", "kundendienst"]):
+    if any(term in haystack for term in ["wärmepumpen-support", "waermepumpen-support", "kundendienst"]):
         return "subcontractor"
     if any(term in haystack for term in ["böhm malereibetrieb", "boehm malereibetrieb", "maler l. böhm", "maler l. boehm"]):
         return "subcontractor"

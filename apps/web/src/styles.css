@@ -2414,6 +2414,27 @@ code {
   font-weight: 700;
 }
 
+.match-note {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  border: 1px solid #cfe0f5;
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: #1f3b5f;
+  background: #f5f9ff;
+  font-size: 0.82rem;
+}
+
+.match-note strong {
+  color: #0d1726;
+}
+
+.match-note span,
+.match-note small {
+  color: #52657d;
+}
+
 .extraction-edit-grid {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   border-top: 0;

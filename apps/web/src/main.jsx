@@ -1871,6 +1871,7 @@ function UploadApp() {
                               isSaving={savingExtractionIds.includes(document.id)}
                               onSave={saveExtraction}
                             />
+                            <AssignmentMatchNote rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />
 
                             {document.extraction?.warnings?.length ? (
                               <ul className="warnings">
@@ -2489,6 +2490,24 @@ function AssignmentKindOptions() {
       <option value="subscription">Abo/Vertrag</option>
       <option value="department">Bereich</option>
     </>
+  );
+}
+
+function AssignmentMatchNote({ rawResult, tenantProfile }) {
+  const match = rawResult?.assignment_match;
+  if (!match) return null;
+  const label = [match.project_number, match.label || match.code].filter(Boolean).join(" / ");
+  const reasons = Array.isArray(match.reasons) ? match.reasons.filter(Boolean) : [];
+  return (
+    <div className="match-note">
+      <strong>{tenantProfile.assignment_label_singular} erkannt: {label || "-"}</strong>
+      <span>
+        {[match.source ? `Quelle: ${match.source}` : null, match.score ? `Score: ${match.score}` : null]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+      {reasons.length ? <small>Treffer über {reasons.join(", ")}</small> : null}
+    </div>
   );
 }
 
