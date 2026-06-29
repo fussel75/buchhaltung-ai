@@ -288,9 +288,10 @@ function UploadApp() {
     [documents],
   );
   const problemExtractionDocuments = useMemo(
-    () => reextractableDocuments.filter(isProblemExtraction),
-    [reextractableDocuments],
+    () => reextractableDocuments.filter((document) => documentMatchesProblemSummary(document, problemReasonFilter)),
+    [problemReasonFilter, reextractableDocuments],
   );
+  const problemReextractionLabel = problemReasonFilter ? `Problembelege neu: ${problemReasonFilter}` : "Problembelege neu";
   const focusableReviewDocuments = useMemo(
     () => documents.filter((document) => document.extraction),
     [documents],
@@ -711,8 +712,9 @@ function UploadApp() {
     const targets = problemExtractionDocuments;
     if (!targets.length || isBulkExtracting) return;
 
+    const scopeLabel = problemReasonFilter ? ` mit "${problemReasonFilter}"` : "";
     const confirmed = window.confirm(
-      `${targets.length} Problembelege neu extrahieren? Vorhandene Buchungsvorschläge, Freigaben und Zahlungsentscheidungen dieser Belege werden verworfen.`,
+      `${targets.length} Problembelege${scopeLabel} neu extrahieren? Vorhandene Buchungsvorschläge, Freigaben und Zahlungsentscheidungen dieser Belege werden verworfen.`,
     );
     if (!confirmed) return;
 
@@ -753,7 +755,7 @@ function UploadApp() {
       rememberBulkJob(job);
       await loadBulkJobs();
       await loadDocuments();
-      setNotice(`Problem-Neu-Extraktion abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.`);
+      setNotice(`Problem-Neu-Extraktion${scopeLabel} abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.`);
       if (job.failed_count) {
         setError(formatBulkJobFailures(job, "Nicht neu extrahiert"));
       }
@@ -762,7 +764,7 @@ function UploadApp() {
     } finally {
       setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
-  }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, problemExtractionDocuments, rememberBulkJob]);
+  }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, problemExtractionDocuments, problemReasonFilter, rememberBulkJob]);
 
   const startBulkReviewPreparation = useCallback(async () => {
     const targets = reviewableDocuments;
@@ -1666,7 +1668,7 @@ function UploadApp() {
                 onClick={startProblemReextraction}
                 disabled={!problemExtractionDocuments.length || isBulkExtracting}
               >
-                {isBulkExtracting ? "Läuft..." : `Problembelege neu (${problemExtractionDocuments.length})`}
+                {isBulkExtracting ? "Läuft..." : `${problemReextractionLabel} (${problemExtractionDocuments.length})`}
               </button>
               <button
                 type="button"
