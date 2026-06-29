@@ -26,6 +26,28 @@ class ExtractionPdfTests(TestCase):
 
         self.assertEqual(text, pymupdf_text)
 
+    def test_pdf_text_extraction_uses_ocr_when_regular_text_is_too_short(self):
+        ocr_text = "DAMMERS\n" + ("OCR Rechnungstext " * 12)
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text_pypdf", return_value=""),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf", return_value=""),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf_ocr", return_value=ocr_text),
+        ):
+            text = extraction_service._extract_pdf_text("dammers.pdf")
+
+        self.assertEqual(text, ocr_text)
+
+    def test_pdf_text_extraction_keeps_regular_text_when_ocr_is_unavailable(self):
+        with (
+            patch.object(extraction_service, "_extract_pdf_text_pypdf", return_value="kurz"),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf", return_value=""),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf_ocr", return_value=""),
+        ):
+            text = extraction_service._extract_pdf_text("dammers.pdf")
+
+        self.assertEqual(text, "kurz")
+
     def test_pdf_filename_with_octet_stream_uses_pdf_extraction(self):
         document = {
             "tenant_id": "demo-mandant",

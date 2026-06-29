@@ -1193,6 +1193,9 @@ def _extract_pdf_text(storage_path: str) -> str:
     fallback_text = _extract_pdf_text_pymupdf(storage_path)
     if len(fallback_text.strip()) > len(text.strip()):
         return fallback_text
+    ocr_text = _extract_pdf_text_pymupdf_ocr(storage_path)
+    if len(ocr_text.strip()) > len(text.strip()):
+        return ocr_text
     return text
 
 
@@ -1213,6 +1216,27 @@ def _extract_pdf_text_pymupdf(storage_path: str) -> str:
 
     with fitz.open(pdf_path) as pdf:
         return "\n".join((page.get_text("text") or "").strip() for page in pdf)
+
+
+def _extract_pdf_text_pymupdf_ocr(storage_path: str) -> str:
+    try:
+        import fitz
+    except ImportError:
+        return ""
+
+    pdf_path = get_settings().storage_root / storage_path
+    if not pdf_path.is_file():
+        return ""
+
+    page_texts = []
+    try:
+        with fitz.open(pdf_path) as pdf:
+            for page in pdf:
+                textpage = page.get_textpage_ocr(full=True, dpi=200)
+                page_texts.append((page.get_text("text", textpage=textpage) or "").strip())
+    except (RuntimeError, ValueError, OSError):
+        return ""
+    return "\n".join(page_texts)
 
 
 def _find_embedded_invoice_xml(storage_path: str) -> tuple[str, bytes] | None:
