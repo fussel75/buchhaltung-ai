@@ -2191,6 +2191,32 @@ class BookingSuggestionTests(TestCase):
             )
         )
 
+    def test_document_serialization_normalizes_octet_stream_pdf_for_ui(self):
+        now = datetime.now(UTC)
+        document = database_service._serialize_document(
+            {
+                "id": uuid4(),
+                "tenant_id": "demo-mandant",
+                "original_filename": "773934-606.pdf",
+                "normalized_filename": None,
+                "content_type": "application/octet-stream",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "storage_path": "demo/originals/773934-606.pdf",
+                "status": "review_pending",
+                "processing_job_id": None,
+                "processing_started_at": None,
+                "duplicate_of": None,
+                "created_at": now,
+                "updated_at": now,
+                "extraction": None,
+                "booking_suggestions": [],
+                "payment_decision": None,
+            }
+        )
+
+        self.assertEqual(document["content_type"], "application/pdf")
+
     def test_update_extraction_resets_review_artifacts(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"

@@ -43,6 +43,7 @@ from app.services.preview import PreviewError, extract_pdf_preview_text, pdf_pag
 from app.services.storage import (
     delete_stored_document,
     delete_stored_document_path,
+    effective_content_type,
     resolve_stored_document_path,
     store_original_document,
     UploadRejectedError,
@@ -601,7 +602,10 @@ def get_document_file(
 
     return FileResponse(
         path,
-        media_type=document.get("content_type") or "application/pdf",
+        media_type=effective_content_type(
+            document.get("original_filename"),
+            document.get("content_type"),
+        ),
         filename=_download_filename(document),
         content_disposition_type=disposition,
         headers={"X-Content-Type-Options": "nosniff"},

@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from app.config import get_settings
 from app.services.cost_categories import COST_CATEGORY_LABELS, VALID_COST_CATEGORIES, split_cost_category_values
-from app.services.storage import StoredDocument, rename_stored_document
+from app.services.storage import StoredDocument, effective_content_type, rename_stored_document
 
 VALID_ACCOUNTING_FRAMEWORKS = {"SKR03", "SKR04"}
 BULK_JOB_ACTIONS = {"extract", "reextract", "prepare_review"}
@@ -3859,7 +3859,7 @@ def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
         "tenant_id": row["tenant_id"],
         "original_filename": row["original_filename"],
         "normalized_filename": row.get("normalized_filename"),
-        "content_type": row["content_type"],
+        "content_type": effective_content_type(row["original_filename"], row["content_type"]),
         "sha256": row["sha256"],
         "size_bytes": row["size_bytes"],
         "storage_path": row["storage_path"],
@@ -4051,7 +4051,7 @@ def _serialize_bwa_import(row: dict[str, Any]) -> dict[str, Any]:
         "id": str(row["id"]),
         "tenant_id": row["tenant_id"],
         "original_filename": row["original_filename"],
-        "content_type": row["content_type"],
+        "content_type": effective_content_type(row["original_filename"], row["content_type"]),
         "sha256": row["sha256"],
         "size_bytes": row["size_bytes"],
         "storage_path": row["storage_path"],

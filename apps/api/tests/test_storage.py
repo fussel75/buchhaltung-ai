@@ -10,7 +10,7 @@ from unittest.mock import patch
 from starlette.datastructures import Headers, UploadFile
 
 from app.services import storage as storage_service
-from app.services.storage import UploadRejectedError, store_original_document
+from app.services.storage import UploadRejectedError, effective_content_type, store_original_document
 
 
 def upload_file(filename: str, content_type: str, content: bytes) -> UploadFile:
@@ -47,6 +47,10 @@ class StorageTests(TestCase):
                 )
 
             self.assertEqual(stored.content_type, "application/pdf")
+
+    def test_effective_content_type_preserves_specific_content_type(self):
+        self.assertEqual(effective_content_type("rechnung.pdf", "application/xml"), "application/xml")
+        self.assertEqual(effective_content_type("rechnung.pdf", "application/octet-stream"), "application/pdf")
 
     def test_store_original_document_rejects_disallowed_extension(self):
         with TemporaryDirectory() as directory:

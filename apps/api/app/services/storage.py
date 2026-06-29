@@ -102,7 +102,7 @@ async def _store_uploaded_file(
     settings = get_settings()
     now = datetime.now(UTC)
     suffix = _safe_suffix(file.filename)
-    content_type = _safe_content_type(file.content_type, suffix)
+    content_type = effective_content_type(file.filename, file.content_type)
     _validate_upload_type(suffix, content_type, allowed_suffixes, allowed_content_types)
 
     relative_dir = Path(_safe_tenant_segment(tenant_id)) / bucket / f"{now:%Y}" / f"{now:%m}"
@@ -145,6 +145,10 @@ async def _store_uploaded_file(
         size_bytes=size_bytes,
         storage_path=target.relative_to(settings.storage_root),
     )
+
+
+def effective_content_type(filename: str | None, content_type: str | None) -> str:
+    return _safe_content_type(content_type, _safe_suffix(filename))
 
 
 def _safe_content_type(content_type: str | None, suffix: str | None = None) -> str:
