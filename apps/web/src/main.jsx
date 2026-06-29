@@ -258,6 +258,10 @@ function UploadApp() {
     () => documents.filter(isProblemExtraction),
     [documents],
   );
+  const problemSummary = useMemo(
+    () => summarizeProblemExtractionReasons(problemDocuments),
+    [problemDocuments],
+  );
   const filteredDocuments = useMemo(
     () => documents.filter((document) => reviewFilter === "all" || (reviewFilter === "problems" ? isProblemExtraction(document) : document.status === reviewFilter)),
     [documents, reviewFilter],
@@ -1608,6 +1612,16 @@ function UploadApp() {
                 Probleme {problemDocuments.length}
               </button>
             </div>
+            {problemSummary.length ? (
+              <div className="problem-summary" aria-label="Häufige Extraktionsprobleme">
+                {problemSummary.map((item) => (
+                  <button type="button" key={item.reason} onClick={() => setReviewFilter("problems")}>
+                    <span>{item.reason}</span>
+                    <strong>{item.count}</strong>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div className="queue-tools">
             <div className="queue-primary-actions">
@@ -6218,6 +6232,18 @@ function problemExtractionReasons(document) {
 
 function isProblemExtraction(document) {
   return problemExtractionReasons(document).length > 0;
+}
+
+function summarizeProblemExtractionReasons(documents) {
+  const counts = new Map();
+  documents.forEach((document) => {
+    problemExtractionReasons(document).forEach((reason) => {
+      counts.set(reason, (counts.get(reason) || 0) + 1);
+    });
+  });
+  return Array.from(counts, ([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason, "de"))
+    .slice(0, 6);
 }
 
 function formatDate(value) {

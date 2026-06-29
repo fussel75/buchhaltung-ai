@@ -1203,6 +1203,35 @@ button:disabled {
   line-height: 1;
 }
 
+.problem-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 680px;
+}
+
+.problem-summary button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-color: #fed7aa;
+  color: #8a3a14;
+  background: #fff7ed;
+  font-size: 0.78rem;
+}
+
+.problem-summary button strong {
+  min-width: 18px;
+  border-radius: 999px;
+  padding: 2px 5px;
+  color: #7c2d12;
+  background: #ffedd5;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .document-head strong {
   overflow-wrap: anywhere;
 }
