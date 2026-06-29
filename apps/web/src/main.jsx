@@ -6238,12 +6238,19 @@ function summarizeProblemExtractionReasons(documents) {
   const counts = new Map();
   documents.forEach((document) => {
     problemExtractionReasons(document).forEach((reason) => {
-      counts.set(reason, (counts.get(reason) || 0) + 1);
+      const summaryKey = problemExtractionSummaryKey(reason);
+      counts.set(summaryKey, (counts.get(summaryKey) || 0) + 1);
     });
   });
   return Array.from(counts, ([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason, "de"))
     .slice(0, 6);
+}
+
+function problemExtractionSummaryKey(reason) {
+  if (/^Sicherheit\s+\d+\s*%$/.test(reason)) return "Niedrige Sicherheit";
+  if (/^\d+\s+Hinweise$/.test(reason)) return "Offene Hinweise";
+  return reason;
 }
 
 function formatDate(value) {
