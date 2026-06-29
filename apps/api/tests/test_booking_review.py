@@ -250,6 +250,40 @@ class BwaImportTests(TestCase):
 
 
 class BookingSuggestionTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._real_list_assignment_units = database_service.list_assignment_units
+        self._real_get_assignment_unit_by_code = database_service.get_assignment_unit_by_code
+        self.tenant_profile_patch = patch.object(database_service, "get_tenant_profile", return_value=None)
+        self.assignment_units_patch = patch.object(database_service, "list_assignment_units", return_value=self._assignment_units())
+        self.assignment_by_code_patch = patch.object(
+            database_service,
+            "get_assignment_unit_by_code",
+            side_effect=self._assignment_unit_by_code,
+        )
+        self.tenant_profile_patch.start()
+        self.assignment_units_patch.start()
+        self.assignment_by_code_patch.start()
+        self.addCleanup(self.tenant_profile_patch.stop)
+        self.addCleanup(self.assignment_units_patch.stop)
+        self.addCleanup(self.assignment_by_code_patch.stop)
+
+    @staticmethod
+    def _assignment_units():
+        return [
+            {"code": "Wewe20", "label": "Weseler Weg 20", "project_number": "25-00008", "is_active": True},
+            {"code": "Hk92", "label": "Heukoppel 92", "project_number": "26-00007", "is_active": True},
+            {"code": "Neula51", "label": "Neusurenland 51", "project_number": "26-00001", "is_active": True},
+        ]
+
+    @classmethod
+    def _assignment_unit_by_code(cls, _tenant_id, code):
+        normalized = str(code or "").strip().lower()
+        for assignment in cls._assignment_units():
+            if assignment["code"].lower() == normalized or str(assignment.get("project_number") or "").lower() == normalized:
+                return assignment
+        return None
+
     def test_split_suggestions_allocate_tax_proportionally(self):
         document = {
             "id": str(uuid4()),
@@ -2590,7 +2624,10 @@ class BookingSuggestionTests(TestCase):
         }
         cursor = RecordingCursor(fetchall_result=[old_row, partner_row])
 
-        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+        with (
+            patch.object(database_service, "list_assignment_units", side_effect=self._real_list_assignment_units),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+        ):
             assignments = database_service.list_assignment_units("demo-mandant")
 
         self.assertEqual(len(assignments), 1)
@@ -2625,7 +2662,10 @@ class BookingSuggestionTests(TestCase):
         }
         cursor = SequenceCursor(fetchone_results=[None, None, row])
 
-        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+        with (
+            patch.object(database_service, "get_assignment_unit_by_code", side_effect=self._real_get_assignment_unit_by_code),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+        ):
             assignment = database_service.get_assignment_unit_by_code("demo-mandant", "Hk92")
 
         statements = [statement for statement, _params in cursor.statements]
