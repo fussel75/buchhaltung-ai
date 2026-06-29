@@ -2327,6 +2327,23 @@ function formatAssignmentPickerDetails(assignment) {
   ].filter(Boolean).join(", ");
 }
 
+function assignmentMatchesSearch(assignment, needle) {
+  return [
+    assignment.project_number,
+    assignment.review_code,
+    assignment.label,
+    assignment.address_line,
+    assignment.postal_code,
+    assignment.city,
+    assignment.client_name,
+    assignment.customer_number,
+    assignment.order_number,
+    assignment.description,
+    assignment.is_active === false ? "abgeschlossen inaktiv" : "aktiv",
+    ...(assignment.aliases || []),
+  ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+}
+
 function BulkJobHistory({ jobs }) {
   const activeCount = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
   return (
@@ -2370,6 +2387,7 @@ function BulkJobHistory({ jobs }) {
 
 function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isSaving, onDirtyChange, onSave }) {
   const [form, setForm] = useState(() => extractionFormFromDocument(document));
+  const [assignmentSearch, setAssignmentSearch] = useState("");
   const baselineForm = useMemo(
     () => extractionFormFromDocument(document),
     [document.id, document.extraction?.updated_at],
@@ -2393,14 +2411,26 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
       }),
     [assignmentUnits],
   );
-  const selectedAssignmentId = useMemo(() => {
-    const selected = findAssignmentOption(assignmentOptions, "project_number", form.project_number)
-      || findAssignmentOption(assignmentOptions, "assignment_code", form.assignment_code);
-    return selected?.id || "";
-  }, [assignmentOptions, form.assignment_code, form.project_number]);
+  const selectedAssignment = useMemo(
+    () => findAssignmentOption(assignmentOptions, "project_number", form.project_number)
+      || findAssignmentOption(assignmentOptions, "assignment_code", form.assignment_code),
+    [assignmentOptions, form.assignment_code, form.project_number],
+  );
+  const selectedAssignmentId = selectedAssignment?.id || "";
+  const filteredAssignmentOptions = useMemo(() => {
+    const needle = assignmentSearch.trim().toLowerCase();
+    const matches = needle
+      ? assignmentOptions.filter((assignment) => assignmentMatchesSearch(assignment, needle))
+      : assignmentOptions;
+    if (selectedAssignment && !matches.some((assignment) => assignment.id === selectedAssignment.id)) {
+      return [selectedAssignment, ...matches];
+    }
+    return matches;
+  }, [assignmentOptions, assignmentSearch, selectedAssignment]);
 
   useEffect(() => {
     setForm(baselineForm);
+    setAssignmentSearch("");
   }, [baselineForm]);
 
   useEffect(() => {
@@ -2489,19 +2519,30 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
           </select>
         </FormField>
         <FormField label={`${tenantProfile.assignment_label_singular} aus Stammdaten`} className="assignment-picker-field">
+          <input
+            className="assignment-search-input"
+            value={assignmentSearch}
+            onChange={(event) => setAssignmentSearch(event.target.value)}
+            placeholder="Projekt suchen: Nummer, Name, Adresse, Bauherr"
+            disabled={isApproved || assignmentOptions.length === 0}
+          />
           <select
             value={selectedAssignmentId}
             onChange={(event) => applyAssignmentSelection(event.target.value)}
-            disabled={isApproved || assignmentOptions.length === 0}
+            disabled={isApproved || filteredAssignmentOptions.length === 0}
           >
             <option value="">{assignmentOptions.length ? "Projekt auswählen" : "Keine Stammdaten geladen"}</option>
-            {assignmentOptions.map((assignment) => (
+            {filteredAssignmentOptions.map((assignment) => (
               <option key={`assignment-picker-${assignment.id}`} value={assignment.id}>
                 {formatAssignmentPickerLabel(assignment)}
               </option>
             ))}
           </select>
-          <small>Setzt Projektnr., {tenantProfile.assignment_code_label} und Zuordnungsart gemeinsam.</small>
+          <small>
+            {assignmentOptions.length
+              ? `${filteredAssignmentOptions.length} von ${assignmentOptions.length} Projekten sichtbar. Setzt Projektnr., ${tenantProfile.assignment_code_label} und Zuordnungsart gemeinsam.`
+              : "Noch keine Projektstammdaten geladen."}
+          </small>
         </FormField>
         <FormField label={tenantProfile.assignment_code_label}>
           <input name="assignment_code" list={`assignment-code-options-${document.id}`} placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />

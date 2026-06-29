@@ -2541,6 +2541,14 @@ code {
   grid-column: 1 / -1;
 }
 
+.assignment-picker-field {
+  gap: 6px;
+}
+
+.assignment-picker-field .assignment-search-input {
+  max-width: 100%;
+}
+
 .assignment-picker-field small {
   color: var(--muted);
   font-size: 0.72rem;
