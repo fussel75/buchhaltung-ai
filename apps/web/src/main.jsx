@@ -2388,6 +2388,7 @@ function BulkJobHistory({ jobs }) {
 function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isSaving, onDirtyChange, onSave }) {
   const [form, setForm] = useState(() => extractionFormFromDocument(document));
   const [assignmentSearch, setAssignmentSearch] = useState("");
+  const assignmentOptionRefs = useRef({});
   const baselineForm = useMemo(
     () => extractionFormFromDocument(document),
     [document.id, document.extraction?.updated_at],
@@ -2437,6 +2438,13 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
+  useEffect(() => {
+    const visibleIds = new Set(filteredAssignmentOptions.map((assignment) => assignment.id));
+    Object.keys(assignmentOptionRefs.current).forEach((id) => {
+      if (!visibleIds.has(id)) delete assignmentOptionRefs.current[id];
+    });
+  }, [filteredAssignmentOptions]);
+
   function updateField(field, value) {
     setForm((current) => {
       const next = { ...current, [field]: value };
@@ -2469,6 +2477,32 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
       project_number: assignment.project_number || "",
       assignment_kind: assignment.kind || current.assignment_kind,
     }));
+  }
+
+  function focusAssignmentOption(index) {
+    const assignment = filteredAssignmentOptions[index];
+    if (!assignment) return;
+    assignmentOptionRefs.current[assignment.id]?.focus();
+  }
+
+  function handleAssignmentKeyDown(event) {
+    if (!filteredAssignmentOptions.length) return;
+    const selectedIndex = filteredAssignmentOptions.findIndex((assignment) => assignment.id === selectedAssignmentId);
+    const focusedIndex = filteredAssignmentOptions.findIndex((assignment) => assignmentOptionRefs.current[assignment.id] === document.activeElement);
+    const currentIndex = focusedIndex >= 0 ? focusedIndex : (selectedIndex >= 0 ? selectedIndex : 0);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusAssignmentOption(focusedIndex >= 0 || selectedIndex >= 0 ? Math.min(currentIndex + 1, filteredAssignmentOptions.length - 1) : 0);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusAssignmentOption(Math.max(currentIndex - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      applyAssignmentSelection(filteredAssignmentOptions[currentIndex].id);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setAssignmentSearch("");
+    }
   }
 
   function submit(event) {
@@ -2523,10 +2557,16 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
             className="assignment-search-input"
             value={assignmentSearch}
             onChange={(event) => setAssignmentSearch(event.target.value)}
+            onKeyDown={handleAssignmentKeyDown}
             placeholder="Projekt suchen: Nummer, Name, Adresse, Bauherr"
             disabled={isApproved || assignmentOptions.length === 0}
           />
-          <div className="assignment-combobox" role="listbox" aria-label={`${tenantProfile.assignment_label_singular} auswählen`}>
+          <div
+            className="assignment-combobox"
+            role="listbox"
+            aria-label={`${tenantProfile.assignment_label_singular} auswählen`}
+            onKeyDown={handleAssignmentKeyDown}
+          >
             {filteredAssignmentOptions.length ? (
               filteredAssignmentOptions.map((assignment) => {
                 const isSelected = selectedAssignmentId === assignment.id;
@@ -2536,6 +2576,9 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
                     key={`assignment-picker-${assignment.id}`}
                     className={isSelected ? "selected" : ""}
                     onClick={() => applyAssignmentSelection(assignment.id)}
+                    ref={(element) => {
+                      if (element) assignmentOptionRefs.current[assignment.id] = element;
+                    }}
                     disabled={isApproved}
                     role="option"
                     aria-selected={isSelected}
