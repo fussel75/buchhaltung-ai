@@ -37,6 +37,17 @@ class StorageTests(TestCase):
             self.assertEqual(stored.content_type, "application/pdf")
             self.assertIn("demo-mandant", str(stored.storage_path))
 
+    def test_store_original_document_normalizes_octet_stream_pdf_by_suffix(self):
+        with TemporaryDirectory() as directory:
+            settings = SimpleNamespace(storage_root=Path(directory), max_upload_size_bytes=1024)
+            content = b"%PDF-1.7 from mail"
+            with patch.object(storage_service, "get_settings", return_value=settings):
+                stored = run(
+                    store_original_document(upload_file("773934-606.pdf", "application/octet-stream", content), "demo")
+                )
+
+            self.assertEqual(stored.content_type, "application/pdf")
+
     def test_store_original_document_rejects_disallowed_extension(self):
         with TemporaryDirectory() as directory:
             settings = SimpleNamespace(storage_root=Path(directory), max_upload_size_bytes=1024)

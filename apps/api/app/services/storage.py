@@ -30,6 +30,19 @@ ALLOWED_BWA_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/octet-stream",
 }
+CONTENT_TYPE_BY_SUFFIX = {
+    ".pdf": "application/pdf",
+    ".xml": "application/xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 @dataclass(frozen=True)
@@ -89,7 +102,7 @@ async def _store_uploaded_file(
     settings = get_settings()
     now = datetime.now(UTC)
     suffix = _safe_suffix(file.filename)
-    content_type = _safe_content_type(file.content_type)
+    content_type = _safe_content_type(file.content_type, suffix)
     _validate_upload_type(suffix, content_type, allowed_suffixes, allowed_content_types)
 
     relative_dir = Path(_safe_tenant_segment(tenant_id)) / bucket / f"{now:%Y}" / f"{now:%m}"
@@ -134,10 +147,13 @@ async def _store_uploaded_file(
     )
 
 
-def _safe_content_type(content_type: str | None) -> str:
-    if not content_type:
-        return "application/octet-stream"
-    return content_type.split(";", 1)[0].strip().lower() or "application/octet-stream"
+def _safe_content_type(content_type: str | None, suffix: str | None = None) -> str:
+    normalized = "application/octet-stream"
+    if content_type:
+        normalized = content_type.split(";", 1)[0].strip().lower() or "application/octet-stream"
+    if normalized == "application/octet-stream" and suffix:
+        return CONTENT_TYPE_BY_SUFFIX.get(suffix.lower(), normalized)
+    return normalized
 
 
 def _validate_upload_type(
