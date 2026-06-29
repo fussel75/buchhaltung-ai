@@ -740,6 +740,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"Belegdatum:\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
+        r"Belegdatum:\s*(?:\n\s*[A-Z]{1,5}\s*:\s*[A-Z0-9-]+)?\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
         r"Belegdatum:\s*\n\s*Kundennummer:\s*\n\s*[A-Z]{1,5}\d+\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
@@ -2088,6 +2091,8 @@ def _find_customer_reference(text: str) -> str | None:
     ) or search(
         r"Objekt:\s*(.+?)(?:\n|$)", text
     ) or search(
+        r"(?:Ihre Referenz:.*?,\s*)?Auftrag:\s*([0-9]{2}-[0-9]{5})\b", text
+    ) or search(
         r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
         text,
     ) or search(
@@ -2233,14 +2238,26 @@ def _assignment_unit_match(
     text: str,
 ) -> dict | None:
     for explicit_hint in (customer_reference, delivery_address):
-        match = find_assignment_unit_match_by_text(tenant_id, explicit_hint)
+        match = _find_assignment_unit_match(tenant_id, explicit_hint)
         if match and match["assignment"]["is_active"]:
             match["source"] = "Kundenreferenz" if explicit_hint == customer_reference else "Lieferadresse"
             return match
-    match = find_assignment_unit_match_by_text(tenant_id, text[:4000])
+    match = _find_assignment_unit_match(tenant_id, text[:4000])
     if match:
         match["source"] = "Belegtext"
     return match
+
+
+def _find_assignment_unit_match(tenant_id: str, lookup_text: str | None) -> dict | None:
+    if not lookup_text:
+        return None
+    match = find_assignment_unit_match_by_text(tenant_id, lookup_text)
+    if match:
+        return match
+    assignment = find_assignment_unit_by_text(tenant_id, lookup_text)
+    if not assignment:
+        return None
+    return {"assignment": assignment, "score": None, "reasons": []}
 
 
 def _assignment_match_payload(match: dict | None) -> dict | None:

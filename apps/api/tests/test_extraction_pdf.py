@@ -15,6 +15,15 @@ TENANT_PROFILE = {
 
 
 class ExtractionPdfTests(TestCase):
+    def setUp(self):
+        self.assignment_match_patcher = patch.object(
+            extraction_service,
+            "find_assignment_unit_match_by_text",
+            return_value=None,
+        )
+        self.assignment_match_patcher.start()
+        self.addCleanup(self.assignment_match_patcher.stop)
+
     def test_pdf_text_extraction_uses_pymupdf_when_pypdf_text_is_too_short(self):
         pymupdf_text = "DAMMERS\n" + ("Rechnungstext " * 12)
 
@@ -1387,11 +1396,18 @@ class ExtractionPdfTests(TestCase):
                 return assignment
             return None
 
+        def find_assignment_match(_tenant_id, lookup_text):
+            found = find_assignment(_tenant_id, lookup_text)
+            if found:
+                return {"assignment": found, "score": 100, "reasons": ["Lieferadresse"]}
+            return None
+
         with (
             patch.object(extraction_service, "_extract_pdf_text", return_value=text),
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
             patch.object(extraction_service, "find_supplier_rule", return_value=None),
             patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", side_effect=find_assignment_match),
         ):
             result = _build_pdf_text_result(document)
 
@@ -1454,6 +1470,7 @@ class ExtractionPdfTests(TestCase):
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
             patch.object(extraction_service, "find_supplier_rule", return_value=None),
             patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
         ):
             result = _build_pdf_text_result(document)
 
@@ -1465,6 +1482,74 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["net_amount"], Decimal("357.47"))
         self.assertEqual(result["tax_amount"], Decimal("67.92"))
         self.assertEqual(result["gross_amount"], Decimal("425.39"))
+
+    def test_luechau_invoice_maps_project_number_to_project_name_for_filename(self):
+        text = """
+        Lüchau Baustoffe GmbH, Rissener Str. 142, 22880 Wedel
+        FriStD-Bau ZuB GmbH & Co. KG
+        Rechnung Seite 1
+        Belegnummer: RE1586258
+        Belegdatum:
+        AT: AT1748901
+        11.06.2026
+        13803716 Kundennummer:
+        Ihre Referenz: Herr Schnawaber, Auftrag: 26-00007 vom 03.06.2026
+        252642 Maler-Abdeckvlies 50qm Premium 220g/qm RO
+        42,01 EIN
+        Netto: MwSt.: Brutto:
+        19% MwSt.: 50,13 9,52 59,65
+        Zahlbar bis 25.06.2026 abzgl. 3 % Skonto EUR 1,79 = EUR 57,86
+        skontierfähiger Betrag EUR 59,65
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "RE1586258.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "luechau-invoice.pdf",
+            "size_bytes": 120557,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "26-00007",
+            "label": "Hk92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment_match(_tenant_id, lookup_text):
+            if lookup_text and "26-00007" in lookup_text:
+                return {"assignment": assignment, "score": 100, "reasons": ["Projektnummer"]}
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", side_effect=find_assignment_match),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Lüchau Baustoffe GmbH")
+        self.assertEqual(result["invoice_number"], "RE1586258")
+        self.assertEqual(result["customer_number"], "13803716")
+        self.assertEqual(result["invoice_date"], "2026-06-11")
+        self.assertEqual(result["assignment_code"], "Hk92")
+        self.assertEqual(result["project_name"], "Hk92")
+        self.assertEqual(result["project_number"], "26-00007")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Maler-Abdeckvlies 50qm")
+        self.assertEqual(result["net_amount"], Decimal("50.13"))
+        self.assertEqual(result["tax_amount"], Decimal("9.52"))
+        self.assertEqual(result["gross_amount"], Decimal("59.65"))
+        self.assertEqual(result["discount_base"], Decimal("59.65"))
+        self.assertEqual(result["discount_amount"], Decimal("1.79"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("57.86"))
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg RE1586258, BV Hk92, Lüchau Baustoffe GmbH, Maler-Abdeckvlies 50qm, 2026-06-11.pdf",
+        )
 
     def test_roennfeld_invoice_reads_zero_tax_customer_project_and_due_date(self):
         text = """
