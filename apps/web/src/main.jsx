@@ -2979,6 +2979,7 @@ function ReviewFocusDialog({
                 onSave={onSaveExtraction}
               />
             </div>
+            <AssignmentMatchNote rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />
             {document.extraction?.warnings?.length ? (
               <ul className="warnings">
                 {document.extraction.warnings.map((warning, index) => (
