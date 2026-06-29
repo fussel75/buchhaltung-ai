@@ -1129,7 +1129,10 @@ def _manual_normalized_invoice_filename(document: dict[str, Any], extraction: di
     raw_result = extraction.get("raw_result") or {}
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_code = raw_result.get("assignment_code")
-    assignment = get_assignment_unit_by_code(document["tenant_id"], assignment_code)
+    assignment = get_assignment_unit_by_code(
+        document["tenant_id"],
+        assignment_code or raw_result.get("project_number"),
+    )
     assignment_type = raw_result.get("assignment_type")
     if not assignment_type:
         assignment_type = "assigned" if assignment else "general_cost"
@@ -1208,13 +1211,19 @@ def _filename_assignment_label(
 def _display_assignment_code(assignment: dict[str, Any]) -> str:
     code = assignment.get("code")
     label = assignment.get("label")
-    if code and _looks_like_project_number(code) and label and not _looks_like_project_number(label):
+    if code and _looks_like_project_number_or_prefixed_project_number(code) and label and not _looks_like_project_number(label):
         return label
     return code or label or "-"
 
 
 def _looks_like_project_number(value: str | None) -> bool:
     return bool(value and re_search(r"^\d{2,4}-\d{3,}$", value.strip()))
+
+
+def _looks_like_project_number_or_prefixed_project_number(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(re_search(r"^(?:[A-Za-zÄÖÜäöüß]{1,8}\s+)?\d{2,4}-\d{3,}$", value.strip()))
 
 
 def approve_document_review(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:

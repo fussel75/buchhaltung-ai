@@ -793,6 +793,47 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(filename, "ERg X-1, Allgemeine Kosten, XML Lieferant GmbH, E-Rechnung, 2026-05-21.xml")
 
+    def test_manual_normalized_filename_resolves_project_number_to_project_name(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "storage_path": "demo-mandant/rechnung.pdf",
+        }
+        extraction = {
+            "supplier_name": "Lüchau Baustoffe GmbH",
+            "invoice_number": "RE1586258",
+            "invoice_date": "2026-06-11",
+            "raw_result": {
+                "project_number": "26-00007",
+                "item_summary": "Maler-Abdeckvlies 50qm",
+            },
+        }
+        assignment = {
+            "code": "BV 26-00007",
+            "label": "Hk92",
+            "project_number": "26-00007",
+        }
+
+        with (
+            patch.object(
+                database_service,
+                "ensure_tenant_profile",
+                return_value={
+                    "assignment_label_singular": "Bauvorhaben",
+                    "assignment_label_plural": "Bauvorhaben",
+                    "assignment_code_prefix": "BV",
+                },
+            ),
+            patch.object(database_service, "get_assignment_unit_by_code", return_value=assignment) as get_assignment,
+        ):
+            filename = database_service._manual_normalized_invoice_filename(document, extraction)
+
+        get_assignment.assert_called_once_with("demo-mandant", "26-00007")
+        self.assertEqual(
+            filename,
+            "ERg RE1586258, BV Hk92, Lüchau Baustoffe GmbH, Maler-Abdeckvlies 50qm, 2026-06-11.pdf",
+        )
+
     def test_manual_assignment_type_keeps_split_and_unresolved(self):
         self.assertEqual(
             database_service._manual_assignment_type(
