@@ -2549,6 +2549,60 @@ code {
   max-width: 100%;
 }
 
+.assignment-combobox {
+  display: grid;
+  gap: 4px;
+  max-height: 178px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 4px;
+}
+
+.assignment-combobox button {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.35fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 6px 8px;
+  box-shadow: none;
+}
+
+.assignment-combobox button:hover,
+.assignment-combobox button:focus-visible {
+  border-color: #bdd4ee;
+  background: #f5f9ff;
+}
+
+.assignment-combobox button.selected {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
+.assignment-combobox button span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignment-combobox p {
+  margin: 0;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .assignment-picker-field small {
   color: var(--muted);
   font-size: 0.72rem;
@@ -3150,6 +3204,15 @@ code {
   .payment-row,
   .booking-edit-row {
     min-width: 0;
+  }
+
+  .assignment-combobox button {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .assignment-combobox button span {
+    white-space: normal;
   }
 
   .project-overview,

@@ -2526,18 +2526,29 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
             placeholder="Projekt suchen: Nummer, Name, Adresse, Bauherr"
             disabled={isApproved || assignmentOptions.length === 0}
           />
-          <select
-            value={selectedAssignmentId}
-            onChange={(event) => applyAssignmentSelection(event.target.value)}
-            disabled={isApproved || filteredAssignmentOptions.length === 0}
-          >
-            <option value="">{assignmentOptions.length ? "Projekt auswählen" : "Keine Stammdaten geladen"}</option>
-            {filteredAssignmentOptions.map((assignment) => (
-              <option key={`assignment-picker-${assignment.id}`} value={assignment.id}>
-                {formatAssignmentPickerLabel(assignment)}
-              </option>
-            ))}
-          </select>
+          <div className="assignment-combobox" role="listbox" aria-label={`${tenantProfile.assignment_label_singular} auswählen`}>
+            {filteredAssignmentOptions.length ? (
+              filteredAssignmentOptions.map((assignment) => {
+                const isSelected = selectedAssignmentId === assignment.id;
+                return (
+                  <button
+                    type="button"
+                    key={`assignment-picker-${assignment.id}`}
+                    className={isSelected ? "selected" : ""}
+                    onClick={() => applyAssignmentSelection(assignment.id)}
+                    disabled={isApproved}
+                    role="option"
+                    aria-selected={isSelected}
+                  >
+                    <strong>{assignment.review_code || assignment.label || assignment.project_number}</strong>
+                    <span>{formatAssignmentPickerDetails(assignment)}</span>
+                  </button>
+                );
+              })
+            ) : (
+              <p>{assignmentOptions.length ? "Keine passenden Projekte gefunden." : "Keine Stammdaten geladen."}</p>
+            )}
+          </div>
           <small>
             {assignmentOptions.length
               ? `${filteredAssignmentOptions.length} von ${assignmentOptions.length} Projekten sichtbar. Setzt Projektnr., ${tenantProfile.assignment_code_label} und Zuordnungsart gemeinsam.`
