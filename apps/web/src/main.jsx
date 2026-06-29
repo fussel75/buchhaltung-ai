@@ -2370,6 +2370,11 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
       .sort((left, right) => compareProjectValues(left.project_number || left.review_code, right.project_number || right.review_code)),
     [assignmentUnits],
   );
+  const selectedAssignmentId = useMemo(() => {
+    const selected = findAssignmentOption(assignmentOptions, "project_number", form.project_number)
+      || findAssignmentOption(assignmentOptions, "assignment_code", form.assignment_code);
+    return selected?.id || "";
+  }, [assignmentOptions, form.assignment_code, form.project_number]);
 
   useEffect(() => {
     setForm(baselineForm);
@@ -2400,6 +2405,17 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
       }
       return next;
     });
+  }
+
+  function applyAssignmentSelection(assignmentId) {
+    const assignment = assignmentOptions.find((option) => option.id === assignmentId);
+    if (!assignment) return;
+    setForm((current) => ({
+      ...current,
+      assignment_code: assignment.review_code || assignment.code || "",
+      project_number: assignment.project_number || "",
+      assignment_kind: assignment.kind || current.assignment_kind,
+    }));
   }
 
   function submit(event) {
@@ -2448,6 +2464,21 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
               <option key={category} value={category}>{label}</option>
             ))}
           </select>
+        </FormField>
+        <FormField label={`${tenantProfile.assignment_label_singular} aus Stammdaten`} className="assignment-picker-field">
+          <select
+            value={selectedAssignmentId}
+            onChange={(event) => applyAssignmentSelection(event.target.value)}
+            disabled={isApproved || assignmentOptions.length === 0}
+          >
+            <option value="">{assignmentOptions.length ? "Projekt auswählen" : "Keine Stammdaten geladen"}</option>
+            {assignmentOptions.map((assignment) => (
+              <option key={`assignment-picker-${assignment.id}`} value={assignment.id}>
+                {[assignment.project_number, assignment.review_code, assignment.address_line].filter(Boolean).join(" · ")}
+              </option>
+            ))}
+          </select>
+          <small>Setzt Projektnr., {tenantProfile.assignment_code_label} und Zuordnungsart gemeinsam.</small>
         </FormField>
         <FormField label={tenantProfile.assignment_code_label}>
           <input name="assignment_code" list={`assignment-code-options-${document.id}`} placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
@@ -5092,9 +5123,9 @@ function MasterdataAdmin({
   );
 }
 
-function FormField({ label, children, error }) {
+function FormField({ label, children, error, className = "" }) {
   return (
-    <div className="form-field">
+    <div className={`form-field ${className}`.trim()}>
       <span>{label}</span>
       {children}
       {error ? <small className="field-error">{error}</small> : null}

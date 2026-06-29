@@ -2501,8 +2501,18 @@ code {
 }
 
 .extraction-edit-grid > .form-field:nth-child(1),
-.extraction-edit-grid > .form-field:nth-child(18) {
+.extraction-edit-grid > .form-field:nth-child(19) {
   grid-column: span 6;
+}
+
+.extraction-edit-grid > .assignment-picker-field {
+  grid-column: 1 / -1;
+}
+
+.assignment-picker-field small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.3;
 }
 
 .extraction-edit-form input,
