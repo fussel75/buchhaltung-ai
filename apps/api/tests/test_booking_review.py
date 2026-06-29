@@ -419,6 +419,19 @@ class BookingSuggestionTests(TestCase):
                 gross_amount="119.00",
             )
 
+    def test_booking_update_keeps_project_number(self):
+        payload = BookingSuggestionUpdate(
+            booking_type="incoming_invoice",
+            assignment_code="Hk92",
+            project_number=" 26-00007 ",
+            assignment_kind="construction_project",
+            net_amount="100.00",
+            tax_amount="19.00",
+            gross_amount="119.00",
+        )
+
+        self.assertEqual(payload.normalized()["project_number"], "26-00007")
+
     def test_normalized_invoice_filename_is_windows_safe(self):
         filename = _normalized_invoice_filename(
             invoice_number="RE1574023",

@@ -1930,6 +1930,7 @@ function UploadApp() {
                             document={document}
                             suggestions={document.booking_suggestions}
                             tenantProfile={tenantProfile}
+                            assignmentUnits={assignmentUnits}
                             highlightedLineNo={highlightedBookingTarget?.documentId === document.id ? highlightedBookingTarget.lineNo : ""}
                             onSave={saveBookingSuggestion}
                             savingIds={savingSuggestionIds}
@@ -3069,6 +3070,7 @@ function ReviewFocusDialog({
             document={document}
             suggestions={document.booking_suggestions}
             tenantProfile={tenantProfile}
+            assignmentUnits={assignmentUnits}
             highlightedLineNo={focusTarget?.lineNo || ""}
             onSave={onSaveSuggestion}
             savingIds={savingSuggestionIds}
@@ -5263,8 +5265,19 @@ function PaymentTerms({ document, rawResult, onSelect, isSaving }) {
   );
 }
 
-function BookingSuggestions({ document, suggestions, tenantProfile, highlightedLineNo = "", onSave, savingIds = [] }) {
+function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUnits = [], highlightedLineNo = "", onSave, savingIds = [] }) {
   const [drafts, setDrafts] = useState({});
+  const assignmentOptions = useMemo(
+    () => assignmentUnits
+      .filter((assignment) => assignment.is_active !== false)
+      .map((assignment) => ({
+        ...assignment,
+        review_code: reviewAssignmentCode(assignment),
+      }))
+      .filter((assignment) => assignment.review_code || assignment.project_number)
+      .sort((left, right) => compareProjectValues(left.project_number || left.review_code, right.project_number || right.review_code)),
+    [assignmentUnits],
+  );
 
   useEffect(() => {
     setDrafts(
@@ -5286,6 +5299,22 @@ function BookingSuggestions({ document, suggestions, tenantProfile, highlightedL
         ...patch,
       },
     }));
+  }
+
+  function selectedAssignmentIdForDraft(draft) {
+    const selected = findAssignmentOption(assignmentOptions, "project_number", draft.project_number)
+      || findAssignmentOption(assignmentOptions, "assignment_code", draft.assignment_code);
+    return selected?.id || "";
+  }
+
+  function applyAssignmentToDraft(suggestionId, assignmentId) {
+    const assignment = assignmentOptions.find((option) => option.id === assignmentId);
+    if (!assignment) return;
+    updateDraft(suggestionId, {
+      assignment_code: assignment.review_code || assignment.code || "",
+      project_number: assignment.project_number || "",
+      assignment_kind: assignment.kind || "",
+    });
   }
 
   return (
@@ -5325,6 +5354,20 @@ function BookingSuggestions({ document, suggestions, tenantProfile, highlightedL
                 aria-label={`Beschreibung Zeile ${suggestion.line_no}`}
               />
               <div className="assignment-edit">
+                <select
+                  className="assignment-pick-select"
+                  value={selectedAssignmentIdForDraft(draft)}
+                  onChange={(event) => applyAssignmentToDraft(suggestion.id, event.target.value)}
+                  disabled={isLocked || assignmentOptions.length === 0}
+                  aria-label={`Projekt aus Stammdaten Zeile ${suggestion.line_no}`}
+                >
+                  <option value="">{assignmentOptions.length ? "Projekt wählen" : "Keine Stammdaten"}</option>
+                  {assignmentOptions.map((assignment) => (
+                    <option key={`booking-assignment-${suggestion.id}-${assignment.id}`} value={assignment.id}>
+                      {[assignment.project_number, assignment.review_code].filter(Boolean).join(" · ")}
+                    </option>
+                  ))}
+                </select>
                 <input
                   value={draft.assignment_code}
                   onChange={(event) => updateDraft(suggestion.id, { assignment_code: event.target.value })}
@@ -5346,7 +5389,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, highlightedL
                   <option value="subscription">Abo/Vertrag</option>
                   <option value="department">Bereich</option>
                 </select>
-                <small>Projektnr. {suggestion.assignment_project_number || "-"}</small>
+                <small>Projektnr. {draft.project_number || suggestion.assignment_project_number || "-"}</small>
               </div>
               <select
                 value={draft.cost_category}
@@ -5617,6 +5660,7 @@ function bookingSuggestionDraft(suggestion) {
     booking_type: suggestion.booking_type || "incoming_invoice",
     cost_category: suggestion.cost_category || "",
     assignment_code: suggestion.assignment_code || "",
+    project_number: suggestion.assignment_project_number || "",
     assignment_kind: suggestion.assignment_kind || "",
     description: suggestion.description || "",
     net_amount: moneyDraftValue(suggestion.net_amount),
@@ -5683,6 +5727,7 @@ function normalizeBookingSuggestion(values) {
     booking_type: values.booking_type || "incoming_invoice",
     cost_category: values.cost_category || null,
     assignment_code: values.assignment_code?.trim() || null,
+    project_number: values.project_number?.trim() || null,
     assignment_kind: values.assignment_kind || null,
     description: values.description?.trim() || null,
     net_amount: decimalOrNull(values.net_amount),

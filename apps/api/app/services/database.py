@@ -1917,7 +1917,7 @@ def update_booking_suggestion(
         raise ValueError("approved document cannot be edited")
 
     now = datetime.now(UTC)
-    assignment_project_number = _assignment_project_number(document["tenant_id"], values.get("assignment_code"))
+    assignment_project_number = values.get("project_number") or _assignment_project_number(document["tenant_id"], values.get("assignment_code"))
     with _connect() as connection:
         with connection.cursor() as cursor:
             cursor.execute(

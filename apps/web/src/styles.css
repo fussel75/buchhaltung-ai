@@ -2424,6 +2424,17 @@ code {
   min-width: 0;
 }
 
+.assignment-edit .assignment-pick-select,
+.assignment-edit small {
+  grid-column: 1 / -1;
+}
+
+.assignment-edit small {
+  color: var(--muted);
+  font-size: 0.73rem;
+  line-height: 1.25;
+}
+
 .booking-head,
 .data-head {
   min-height: 40px;

@@ -146,11 +146,13 @@ class BookingSuggestionUpdate(BaseModel):
 
     def normalized(self) -> dict[str, Any]:
         assignment_code = self.assignment_code.strip() if self.assignment_code else None
+        project_number = self.project_number.strip() if self.project_number else None
         description = self.description.strip() if self.description else None
         return {
             "booking_type": self.booking_type,
             "cost_category": self.cost_category,
             "assignment_code": assignment_code or None,
+            "project_number": project_number or None,
             "assignment_kind": self.assignment_kind,
             "description": description or None,
             "net_amount": self.net_amount,
