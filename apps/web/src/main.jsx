@@ -6449,6 +6449,9 @@ function problemExtractionReasons(document) {
   if (source === "mock") {
     reasons.push("Mock-Erkennung");
   }
+  if (source === "pdf_unreadable") {
+    reasons.push("PDF nicht lesbar");
+  }
   if (!Number.isNaN(confidence) && confidence < 0.8) {
     reasons.push(`Sicherheit ${Math.round(confidence * 100)} %`);
   }
