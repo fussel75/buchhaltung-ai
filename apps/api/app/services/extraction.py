@@ -1310,7 +1310,7 @@ def _extract_pdf_text_pymupdf_ocr(storage_path: str) -> str:
     try:
         with fitz.open(pdf_path) as pdf:
             for page in pdf:
-                textpage = page.get_textpage_ocr(full=True, dpi=200)
+                textpage = page.get_textpage_ocr(full=True, dpi=200, language="deu+eng")
                 page_texts.append((page.get_text("text", textpage=textpage) or "").strip())
     except (RuntimeError, ValueError, OSError):
         return ""

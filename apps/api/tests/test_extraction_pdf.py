@@ -1,6 +1,9 @@
 from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.services import extraction as extraction_service
 from app.services.extraction import _build_pdf_text_result
@@ -56,6 +59,33 @@ class ExtractionPdfTests(TestCase):
             text = extraction_service._extract_pdf_text("dammers.pdf")
 
         self.assertEqual(text, "kurz")
+
+    def test_pymupdf_ocr_uses_german_and_english_languages(self):
+        class FakePdf:
+            def __init__(self, pages):
+                self.pages = pages
+
+            def __enter__(self):
+                return self.pages
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        with TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "scan.pdf").write_bytes(b"%PDF")
+            page = Mock()
+            page.get_textpage_ocr.return_value = "ocr-page"
+            page.get_text.return_value = "Rechnung mit Umlauten äöü"
+            fake_fitz = SimpleNamespace(open=Mock(return_value=FakePdf([page])))
+
+            with (
+                patch.dict("sys.modules", {"fitz": fake_fitz}),
+                patch.object(extraction_service, "get_settings", return_value=SimpleNamespace(storage_root=Path(tmp_dir))),
+            ):
+                text = extraction_service._extract_pdf_text_pymupdf_ocr("scan.pdf")
+
+        self.assertEqual(text, "Rechnung mit Umlauten äöü")
+        page.get_textpage_ocr.assert_called_once_with(full=True, dpi=200, language="deu+eng")
 
     def test_pdf_filename_with_octet_stream_uses_pdf_extraction(self):
         document = {
