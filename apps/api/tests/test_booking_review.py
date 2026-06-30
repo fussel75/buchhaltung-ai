@@ -2345,6 +2345,23 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(context.exception.status_code, 409)
         self.assertEqual(context.exception.detail["documents"][0]["reason"], "Beleg ist nicht offen für Extraktion.")
 
+    def test_document_list_accepts_large_batch_limit(self):
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+
+        with (
+            patch.object(documents_route, "require_tenant_access"),
+            patch.object(documents_route, "list_documents", return_value=[]) as list_documents,
+        ):
+            result = documents_route.get_documents(request, tenant_id=" demo-mandant ", limit=1000)
+
+        self.assertEqual(result, {"documents": []})
+        list_documents.assert_called_once_with(tenant_id="demo-mandant", limit=1000)
+
+    def test_bulk_all_request_defaults_to_large_batch(self):
+        payload = documents_route.DocumentBulkAllRequest(tenant_id="demo-mandant")
+
+        self.assertEqual(payload.limit, 1000)
+
     def test_bulk_reextraction_validation_accepts_extracted_work_items(self):
         document_id = uuid4()
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))

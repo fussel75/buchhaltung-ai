@@ -573,7 +573,7 @@ def list_documents_for_month(tenant_id: str, year: int, month: int) -> list[dict
                     and coalesce(e.invoice_date, d.created_at::date) >= %s
                     and coalesce(e.invoice_date, d.created_at::date) < %s
                 order by coalesce(e.invoice_date, d.created_at::date) desc, d.created_at desc
-                limit 500
+                limit 1000
                 """,
                 (tenant_id, start_date, end_date),
             )

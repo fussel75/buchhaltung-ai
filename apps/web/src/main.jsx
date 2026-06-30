@@ -325,7 +325,7 @@ function UploadApp() {
       return [];
     }
 
-    const response = await apiFetch(`/documents?tenant_id=${encodeURIComponent(activeTenantId)}&limit=500`);
+    const response = await apiFetch(`/documents?tenant_id=${encodeURIComponent(activeTenantId)}&limit=1000`);
 
     if (!response.ok) {
       throw new Error(`Review-Queue konnte nicht geladen werden: ${response.status}`);
@@ -626,7 +626,7 @@ function UploadApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tenant_id: activeTenantId,
-          limit: 500,
+          limit: 1000,
         }),
       });
       if (!response.ok) {
@@ -677,7 +677,7 @@ function UploadApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tenant_id: activeTenantId,
-          limit: 500,
+          limit: 1000,
           confirm: true,
         }),
       });

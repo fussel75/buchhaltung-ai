@@ -117,7 +117,7 @@ class DocumentBulkReextractRequest(DocumentBulkJobRequest):
 
 class DocumentBulkAllRequest(BaseModel):
     tenant_id: str
-    limit: int = Field(default=500, ge=1, le=1000)
+    limit: int = Field(default=1000, ge=1, le=1000)
     confirm: bool = False
 
 
@@ -378,7 +378,7 @@ async def upload_document(
 def get_documents(
     request: Request,
     tenant_id: str = Query("demo-mandant", min_length=1),
-    limit: int = Query(500, ge=1, le=1000),
+    limit: int = Query(1000, ge=1, le=1000),
 ) -> dict[str, list[dict[str, Any]]]:
     tenant_id = _normalize_tenant_id(tenant_id)
     require_tenant_access(request, tenant_id)
