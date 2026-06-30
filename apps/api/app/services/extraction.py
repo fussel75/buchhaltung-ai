@@ -645,11 +645,11 @@ def _build_pdf_text_result(document: dict) -> dict:
     if len(text.strip()) < 80:
         tank_receipt = _build_scanned_tank_receipt_result(document)
         if tank_receipt:
-            return tank_receipt
+            return _with_pdf_text_diagnostics(tank_receipt, text)
         dammers_invoice = _build_scanned_dammers_invoice_result(document)
         if dammers_invoice:
-            return dammers_invoice
-        return _build_unreadable_pdf_result(document)
+            return _with_pdf_text_diagnostics(dammers_invoice, text)
+        return _with_pdf_text_diagnostics(_build_unreadable_pdf_result(document), text)
 
     invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
@@ -886,7 +886,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
 
-    return {
+    return _with_pdf_text_diagnostics({
         "supplier_name": supplier_name,
         "invoice_number": invoice_number,
         "customer_number": customer_number,
@@ -940,7 +940,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "warnings": warnings,
         "normalized_filename": normalized_filename,
         "source": "pdf_text_rules",
-    }
+    }, text)
 
 
 def _build_mock_result(document: dict) -> dict:
@@ -1267,14 +1267,27 @@ def _tank_receipt_driver_from_filename(stem: str) -> str | None:
 def _extract_pdf_text(storage_path: str) -> str:
     text = _extract_pdf_text_pypdf(storage_path)
     if len(text.strip()) >= 80:
-        return text
+        return ExtractedPdfText(text, "pypdf")
     fallback_text = _extract_pdf_text_pymupdf(storage_path)
     if len(fallback_text.strip()) > len(text.strip()):
-        return fallback_text
+        return ExtractedPdfText(fallback_text, "pymupdf")
     ocr_text = _extract_pdf_text_pymupdf_ocr(storage_path)
     if len(ocr_text.strip()) > len(text.strip()):
-        return ocr_text
-    return text
+        return ExtractedPdfText(ocr_text, "pymupdf_ocr")
+    return ExtractedPdfText(text, "pypdf_short")
+
+
+class ExtractedPdfText(str):
+    def __new__(cls, value: str, source: str):
+        obj = str.__new__(cls, value)
+        obj.source = source
+        return obj
+
+
+def _with_pdf_text_diagnostics(result: dict, text: str) -> dict:
+    result["pdf_text_source"] = getattr(text, "source", "unknown")
+    result["pdf_text_length"] = len(text.strip())
+    return result
 
 
 def _extract_pdf_text_pypdf(storage_path: str) -> str:

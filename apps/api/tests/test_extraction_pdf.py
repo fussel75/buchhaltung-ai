@@ -37,6 +37,7 @@ class ExtractionPdfTests(TestCase):
             text = extraction_service._extract_pdf_text("dammers.pdf")
 
         self.assertEqual(text, pymupdf_text)
+        self.assertEqual(text.source, "pymupdf")
 
     def test_pdf_text_extraction_uses_ocr_when_regular_text_is_too_short(self):
         ocr_text = "DAMMERS\n" + ("OCR Rechnungstext " * 12)
@@ -49,6 +50,7 @@ class ExtractionPdfTests(TestCase):
             text = extraction_service._extract_pdf_text("dammers.pdf")
 
         self.assertEqual(text, ocr_text)
+        self.assertEqual(text.source, "pymupdf_ocr")
 
     def test_pdf_text_extraction_keeps_regular_text_when_ocr_is_unavailable(self):
         with (
@@ -59,6 +61,7 @@ class ExtractionPdfTests(TestCase):
             text = extraction_service._extract_pdf_text("dammers.pdf")
 
         self.assertEqual(text, "kurz")
+        self.assertEqual(text.source, "pypdf_short")
 
     def test_pymupdf_ocr_uses_german_and_english_languages(self):
         class FakePdf:

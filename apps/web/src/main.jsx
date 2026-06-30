@@ -2418,6 +2418,8 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
     [assignmentOptions, form.assignment_code, form.project_number],
   );
   const selectedAssignmentId = selectedAssignment?.id || "";
+  const rawResult = document.extraction?.raw_result || {};
+  const pdfTextDiagnostic = formatPdfTextDiagnostic(rawResult);
   const filteredAssignmentOptions = useMemo(() => {
     const needle = assignmentSearch.trim().toLowerCase();
     const matches = needle
@@ -2515,7 +2517,10 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
       <div className="detail-section-header">
         <div>
           <h3>Extraktionsdaten</h3>
-          <span>bearbeitbar vor Buchungsvorschlag und Freigabe</span>
+          <span>
+            bearbeitbar vor Buchungsvorschlag und Freigabe
+            {pdfTextDiagnostic ? ` · ${pdfTextDiagnostic}` : ""}
+          </span>
         </div>
         <StatusPill value={formatConfidence(document.extraction.confidence) || "geprüft"} tone="blue" />
       </div>
@@ -6436,6 +6441,31 @@ function formatConfidence(value) {
   const number = Number(value);
   if (Number.isNaN(number)) return "-";
   return `${Math.round(number * 100)} %`;
+}
+
+function formatPdfTextDiagnostic(rawResult) {
+  const source = formatPdfTextSource(rawResult?.pdf_text_source);
+  if (!source) return "";
+  const length = Number(rawResult?.pdf_text_length);
+  const lengthLabel = Number.isFinite(length) ? `, ${length} Zeichen` : "";
+  return `PDF-Text: ${source}${lengthLabel}`;
+}
+
+function formatPdfTextSource(source) {
+  switch (source) {
+    case "pypdf":
+      return "digital";
+    case "pymupdf":
+      return "PDF-Layout";
+    case "pymupdf_ocr":
+      return "OCR deutsch/englisch";
+    case "pypdf_short":
+      return "zu kurz";
+    case "unknown":
+      return "";
+    default:
+      return source || "";
+  }
 }
 
 function problemExtractionReasons(document) {
