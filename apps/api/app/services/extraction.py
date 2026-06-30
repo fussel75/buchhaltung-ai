@@ -649,11 +649,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         dammers_invoice = _build_scanned_dammers_invoice_result(document)
         if dammers_invoice:
             return dammers_invoice
-        result = _build_mock_result(document)
-        result["warnings"] = [
-            "PDF-Text konnte nicht ausreichend gelesen werden. OCR wird für diesen Belegtyp benötigt.",
-        ]
-        return result
+        return _build_unreadable_pdf_result(document)
 
     invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
@@ -972,6 +968,80 @@ def _build_mock_result(document: dict) -> dict:
         "warnings": warnings,
         "normalized_filename": None,
         "source": "mock",
+    }
+
+
+def _build_unreadable_pdf_result(document: dict) -> dict:
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    stem = Path(document["original_filename"]).stem
+    supplier_name = _supplier_from_filename(stem)
+    invoice_number = _invoice_number_from_filename(document["original_filename"])
+    invoice_date = _invoice_date_from_filename(document["original_filename"])
+    normalized_filename = _normalized_invoice_filename(
+        invoice_number=invoice_number,
+        assignment=None,
+        assignment_type="assignment_unresolved",
+        tenant_profile=tenant_profile,
+        supplier_name=supplier_name,
+        product_name="PDF nicht lesbar",
+        invoice_date=invoice_date,
+    )
+
+    return {
+        "supplier_name": supplier_name,
+        "invoice_number": invoice_number,
+        "customer_number": None,
+        "customer_reference": None,
+        "invoice_date": invoice_date,
+        "due_date": None,
+        "discount_due_date": None,
+        "service_period": invoice_date[:7] if invoice_date else None,
+        "delivery_address": None,
+        "delivery_addresses": [],
+        "allocation_lines": [],
+        "assignment_code": None,
+        "assignment_label": None,
+        "assignment_kind": None,
+        "assignment_revenue_relevant": None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
+        "project_code": None,
+        "project_number": None,
+        "project_name": None,
+        "assignment_type": "assignment_unresolved",
+        "cost_category": None,
+        "product_name": None,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "document_type": "incoming_invoice",
+        "payment_terms": _payment_terms(
+            gross_amount=None,
+            due_date=None,
+            discount_due_date=None,
+            discount_base=None,
+            discount_percent=None,
+            discount_amount=None,
+            discounted_payable_amount=None,
+            is_credit_note=False,
+        ),
+        "currency": "EUR",
+        "confidence": Decimal("0.20"),
+        "warnings": [
+            "PDF-Text konnte nicht ausreichend gelesen werden. Bitte OCR/KI-Prüfung oder manuelle Erfassung verwenden.",
+        ],
+        "normalized_filename": normalized_filename,
+        "source": "pdf_unreadable",
     }
 
 

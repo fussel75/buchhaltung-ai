@@ -114,6 +114,31 @@ class ExtractionPdfTests(TestCase):
             "ERg 776511-606, Bauvorhaben ungeklärt, Rolf Dammers oHG, Eingangsrechnung, ohne Datum.pdf",
         )
 
+    def test_unreadable_pdf_does_not_create_mock_amounts(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_52595092.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "unreadable.pdf",
+            "created_at": "2026-06-17T10:00:00+00:00",
+            "size_bytes": 361190,
+            "sha256": "abcdef123456",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["source"], "pdf_unreadable")
+        self.assertIsNone(result["net_amount"])
+        self.assertIsNone(result["tax_amount"])
+        self.assertIsNone(result["gross_amount"])
+        self.assertFalse(str(result["invoice_number"] or "").startswith("MOCK-"))
+        self.assertEqual(result["confidence"], Decimal("0.20"))
+        self.assertIn("OCR", " ".join(result["warnings"]))
+
     def test_af_elektro_invoice_reads_reverse_charge_discount_and_project_address(self):
         text = """
         AF-Elektro GmbH
