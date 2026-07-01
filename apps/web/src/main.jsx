@@ -6471,6 +6471,9 @@ function formatPdfTextSource(source) {
 function problemExtractionReasons(document) {
   const extraction = document?.extraction;
   if (!extraction) return [];
+  if (Array.isArray(extraction.problem_reasons) && extraction.problem_reasons.length) {
+    return extraction.problem_reasons;
+  }
   const reasons = [];
   const confidence = Number(extraction.confidence);
   const source = String(extraction.raw_result?.source || extraction.source || "").toLowerCase();
@@ -6486,7 +6489,7 @@ function problemExtractionReasons(document) {
     reasons.push(`Sicherheit ${Math.round(confidence * 100)} %`);
   }
   if (extraction.warnings?.length) {
-    reasons.push(`${extraction.warnings.length} Hinweise`);
+    reasons.push(`${extraction.warnings.length} ${extraction.warnings.length === 1 ? "Hinweis" : "Hinweise"}`);
   }
   if (!extraction.invoice_number) {
     reasons.push("Rechnungsnummer fehlt");
@@ -6532,7 +6535,7 @@ function summarizeProblemExtractionReasons(documents) {
 
 function problemExtractionSummaryKey(reason) {
   if (/^Sicherheit\s+\d+\s*%$/.test(reason)) return "Niedrige Sicherheit";
-  if (/^\d+\s+Hinweise$/.test(reason)) return "Offene Hinweise";
+  if (/^\d+\s+Hinweise?$/.test(reason)) return "Offene Hinweise";
   return reason;
 }
 

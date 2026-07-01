@@ -2217,6 +2217,57 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(document["content_type"], "application/pdf")
 
+    def test_document_serialization_marks_filename_supplier_as_problem(self):
+        now = datetime.now(UTC)
+        document = database_service._serialize_document(
+            {
+                "id": uuid4(),
+                "tenant_id": "demo-mandant",
+                "original_filename": "776511-606.pdf",
+                "normalized_filename": None,
+                "content_type": "application/pdf",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "storage_path": "demo/originals/776511-606.pdf",
+                "status": "extracted",
+                "processing_job_id": None,
+                "processing_started_at": None,
+                "duplicate_of": None,
+                "created_at": now,
+                "updated_at": now,
+                "extraction": {
+                    "id": uuid4(),
+                    "document_id": uuid4(),
+                    "tenant_id": "demo-mandant",
+                    "supplier_name": "776511 606",
+                    "invoice_number": "776511-606",
+                    "invoice_date": date(2026, 6, 12),
+                    "service_period": None,
+                    "net_amount": Decimal("331.88"),
+                    "tax_amount": Decimal("63.06"),
+                    "gross_amount": Decimal("394.94"),
+                    "currency": "EUR",
+                    "confidence": Decimal("0.42"),
+                    "warnings": ["Nicht sicher erkannt: Zuordnung."],
+                    "raw_result": {
+                        "source": "pdf_text",
+                        "assignment_type": "assignment_unresolved",
+                        "delivery_address": "Bucheckerweg 4, 22175 Hamburg",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                "booking_suggestions": [],
+                "payment_decision": None,
+            }
+        )
+
+        reasons = document["extraction"]["problem_reasons"]
+        self.assertIn("Lieferant ungeklärt", reasons)
+        self.assertIn("Sicherheit 42 %", reasons)
+        self.assertIn("1 Hinweis", reasons)
+        self.assertIn("Zuordnung ungeklärt", reasons)
+
     def test_update_extraction_resets_review_artifacts(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"

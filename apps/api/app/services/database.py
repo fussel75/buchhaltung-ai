@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from re import search as re_search, sub
+from re import match, search as re_search, sub
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -3881,6 +3881,7 @@ def _serialize_document(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_extraction(row: dict[str, Any]) -> dict[str, Any]:
+    raw_result = row.get("raw_result") or {}
     return {
         "id": str(row["id"]),
         "document_id": str(row["document_id"]),
@@ -3895,10 +3896,60 @@ def _serialize_extraction(row: dict[str, Any]) -> dict[str, Any]:
         "currency": row["currency"],
         "confidence": float(row["confidence"]),
         "warnings": row["warnings"],
-        "raw_result": row.get("raw_result") or {},
+        "raw_result": raw_result,
+        "problem_reasons": _extraction_problem_reasons(row, raw_result),
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
     }
+
+
+def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] | None = None) -> list[str]:
+    raw_result = raw_result or {}
+    reasons: list[str] = []
+    source = str(raw_result.get("source") or "").lower()
+
+    if source == "mock":
+        reasons.append("Mock-Erkennung")
+    if source == "pdf_unreadable":
+        reasons.append("PDF nicht lesbar")
+    if _supplier_needs_review(row.get("supplier_name"), row.get("invoice_number")):
+        reasons.append("Lieferant ungeklärt")
+
+    confidence = row.get("confidence")
+    if confidence is not None:
+        confidence_value = Decimal(str(confidence))
+        if confidence_value < Decimal("0.80"):
+            reasons.append(f"Sicherheit {int((confidence_value * 100).quantize(Decimal('1')))} %")
+
+    warnings = row.get("warnings") or []
+    if warnings:
+        reason_label = "Hinweis" if len(warnings) == 1 else "Hinweise"
+        reasons.append(f"{len(warnings)} {reason_label}")
+    if not row.get("invoice_number"):
+        reasons.append("Rechnungsnummer fehlt")
+    if not row.get("invoice_date"):
+        reasons.append("Datum fehlt")
+    if row.get("gross_amount") in (None, ""):
+        reasons.append("Brutto fehlt")
+    if raw_result.get("assignment_type") == "assignment_unresolved" or (
+        raw_result.get("delivery_address")
+        and not raw_result.get("assignment_code")
+        and not raw_result.get("project_number")
+    ):
+        reasons.append("Zuordnung ungeklärt")
+    return reasons
+
+
+def _supplier_needs_review(supplier_name: str | None, invoice_number: str | None = None) -> bool:
+    if not supplier_name:
+        return True
+    supplier = supplier_name.strip()
+    if not supplier or supplier.lower() == "unbekannter lieferant":
+        return True
+    normalized = sub(r"\s+", " ", supplier)
+    if invoice_number and normalized.casefold() == str(invoice_number).strip().casefold():
+        return True
+    return bool(match(r"^[0-9]{5,}(?:\s+[0-9]{2,})?$", normalized))
 
 
 def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) -> dict[str, Any]:
