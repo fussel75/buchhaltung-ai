@@ -1222,6 +1222,50 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["discount_due_date"], "2026-06-22")
         self.assertEqual(result["discount_amount"], Decimal("11.85"))
 
+    def test_dammers_invoice_uses_table_markers_when_logo_and_customer_number_are_missing(self):
+        text = """
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB  GmbH & Co KG
+        Haldesdorfer Str. 44
+        Datum          :    12.06.2026 - 08:46
+        Bestelldaten: Bucheckerweg 4
+        ART-NR BEZEICHNUNG                   MENGE    EINZELPREIS RAB    NETTOWERT
+        75556                                20,00 St     5,10 St           102,00
+        Thorben Peters Dachlatte 40 x 60 S10 rot
+        70016                                4 St         3,20 St             7,04
+        Rinneneinhalter verz. Nr 6/30 x 5
+        Summe Warenwert                                            EUR     331,88
+        + 19,00 % Mwst.                                            EUR      63,06
+        Rechnungsbetrag (zahlbar bis spaetestens 12.07.26 o. Abzug) EUR     394,94
+        zahlbar bis zum 22.06.26 abzueglich EUR 11,85 Skonto
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "776511-606.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["invoice_number"], "776511-606")
+        self.assertEqual(result["customer_reference"], "Bucheckerweg 4")
+        self.assertEqual(result["invoice_date"], "2026-06-12")
+        self.assertEqual(result["net_amount"], Decimal("331.88"))
+        self.assertEqual(result["tax_amount"], Decimal("63.06"))
+        self.assertEqual(result["gross_amount"], Decimal("394.94"))
+        self.assertEqual(result["cost_category"], "material")
+        self.assertIn("Dachlatte", result["product_name"])
+
     def test_foerch_invoice_uses_filename_and_derives_net_amount(self):
         text = """
         THEO FOERCH GmbH & Co. KG

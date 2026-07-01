@@ -2267,6 +2267,15 @@ def _compact_search_text(value: str) -> str:
     return sub(r"[^a-z0-9äöüß]+", "", value.lower())
 
 
+def _looks_like_dammers_invoice_text(lower_text: str, compact_text: str) -> bool:
+    return (
+        "bestelldaten" in lower_text
+        and "artnrbezeichnung" in compact_text
+        and "summewarenwert" in compact_text
+        and "rechnungsbetrag" in compact_text
+    )
+
+
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
@@ -2309,6 +2318,7 @@ def _supplier_name(document: dict, text: str) -> str:
         or "cobadach" in compact_text
         or "allesf" in compact_text
         or "auslieferungslager" in lower_text
+        or _looks_like_dammers_invoice_text(lower_text, compact_text)
     ):
         return "Rolf Dammers oHG"
     if (
