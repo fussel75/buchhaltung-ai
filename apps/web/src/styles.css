@@ -2890,6 +2890,32 @@ code {
   grid-template-columns: minmax(190px, 0.95fr) minmax(88px, 0.35fr) minmax(230px, 1.1fr) minmax(260px, 1.25fr);
 }
 
+.capability-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 220px);
+  gap: 12px;
+  align-items: end;
+}
+
+.capability-toolbar label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.capability-toolbar input,
+.capability-toolbar select {
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
 .accounting-table .data-row {
   grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.8fr) minmax(135px, 0.9fr) minmax(90px, 0.6fr) minmax(105px, 0.7fr) minmax(105px, 0.7fr) minmax(95px, 0.65fr) minmax(90px, 0.55fr) minmax(125px, 0.75fr);
 }
@@ -3135,6 +3161,7 @@ code {
   .supplier-form > .form-field:nth-child(n),
   .supplier-form > button,
   .bwa-upload,
+  .capability-toolbar,
   .assignment-table .data-row,
   .supplier-table .data-row,
   .capability-table .data-row,

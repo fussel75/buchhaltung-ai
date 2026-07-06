@@ -3974,6 +3974,8 @@ function MasterdataAdmin({
   const [assignmentReturnDocumentId, setAssignmentReturnDocumentId] = useState("");
   const [assignmentReturnLineNo, setAssignmentReturnLineNo] = useState("");
   const [assignmentReturnSuggestionId, setAssignmentReturnSuggestionId] = useState("");
+  const [capabilitySearch, setCapabilitySearch] = useState("");
+  const [capabilityStatusFilter, setCapabilityStatusFilter] = useState("all");
   const [profileForm, setProfileForm] = useState(tenantProfile);
   const [assignmentForm, setAssignmentForm] = useState({
     code: "",
@@ -4024,6 +4026,25 @@ function MasterdataAdmin({
   const editDebitSuggestions = accountSuggestions(activeAccountingFramework, "debit", accountingEditForm?.cost_category);
   const editCreditSuggestions = accountSuggestions(activeAccountingFramework, "credit", accountingEditForm?.cost_category);
   const editDiscountSuggestions = accountSuggestions(activeAccountingFramework, "discount", accountingEditForm?.cost_category);
+  const filteredExtractionCapabilities = useMemo(() => {
+    const searchText = normalizeSearchText(capabilitySearch);
+    return extractionCapabilities
+      .filter((capability) => capabilityStatusFilter === "all" || capability.status === capabilityStatusFilter)
+      .filter((capability) => {
+        if (!searchText) return true;
+        return normalizeSearchText([
+          capability.supplier_name,
+          capability.status,
+          capability.recognition,
+          capability.coverage,
+        ].filter(Boolean).join(" ")).includes(searchText);
+      })
+      .sort((left, right) => compareReviewValues(left.supplier_name, right.supplier_name));
+  }, [capabilitySearch, capabilityStatusFilter, extractionCapabilities]);
+  const capabilityStatuses = useMemo(
+    () => Array.from(new Set(extractionCapabilities.map((capability) => capability.status).filter(Boolean))).sort((left, right) => compareReviewValues(left, right)),
+    [extractionCapabilities],
+  );
 
   useEffect(() => {
     setProfileForm(tenantProfile);
@@ -4890,11 +4911,31 @@ function MasterdataAdmin({
               <p className="eyebrow">Einlesen und Extraktion</p>
               <h3>Abgedeckte Rechnungssteller</h3>
             </div>
-            <StatusPill value={`${extractionCapabilities.length} Einträge`} />
+            <StatusPill value={`${filteredExtractionCapabilities.length} von ${extractionCapabilities.length} Einträgen`} />
           </div>
           <p className="form-hint">
             Diese Liste zeigt, für welche Rechnungssteller es aktuell feste Erkennungsmerkmale oder belastbare Fallbacks gibt.
           </p>
+          <div className="capability-toolbar">
+            <label>
+              <span>Suchen</span>
+              <input
+                type="search"
+                placeholder="Rechnungssteller, Erkennung, Abdeckung"
+                value={capabilitySearch}
+                onChange={(event) => setCapabilitySearch(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Status</span>
+              <select value={capabilityStatusFilter} onChange={(event) => setCapabilityStatusFilter(event.target.value)}>
+                <option value="all">Alle Status</option>
+                {capabilityStatuses.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="data-table capability-table">
             <div className="data-row data-head">
               <span>Rechnungssteller</span>
@@ -4902,7 +4943,7 @@ function MasterdataAdmin({
               <span>Erkennung</span>
               <span>Abdeckung</span>
             </div>
-            {extractionCapabilities.map((capability) => (
+            {filteredExtractionCapabilities.map((capability) => (
               <div className="data-row" key={capability.supplier_name}>
                 <strong>{capability.supplier_name}</strong>
                 <StatusPill value={capability.status} tone={capability.status === "gut" ? "green" : "gray"} />
@@ -4910,6 +4951,11 @@ function MasterdataAdmin({
                 <span>{capability.coverage}</span>
               </div>
             ))}
+            {!filteredExtractionCapabilities.length ? (
+              <div className="data-row empty-row">
+                <span>Keine Rechnungssteller für diese Auswahl gefunden.</span>
+              </div>
+            ) : null}
           </div>
         </section>
 
