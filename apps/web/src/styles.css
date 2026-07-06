@@ -491,7 +491,7 @@ button:disabled {
   max-width: none;
   padding-top: 0;
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 3;
 }
 
 .queue-primary-actions {
@@ -605,6 +605,39 @@ button:disabled {
   border-color: var(--text);
   background: var(--text);
   color: #fff;
+}
+
+.queue-search-tools {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px);
+  gap: 10px;
+  align-items: end;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.queue-search-tools label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.queue-search-tools input,
+.queue-search-tools select {
+  min-height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.queue-search-tools input::placeholder {
+  color: #8a94a3;
 }
 
 .project-page {
@@ -1212,6 +1245,8 @@ button:disabled {
   flex-wrap: wrap;
   gap: 6px;
   max-width: 680px;
+  grid-column: 2;
+  grid-row: 4;
 }
 
 .problem-summary button {
@@ -3024,6 +3059,10 @@ code {
   .queue-tools {
     justify-self: stretch;
     max-width: none;
+  }
+
+  .queue-search-tools {
+    grid-template-columns: 1fr;
   }
 }
 

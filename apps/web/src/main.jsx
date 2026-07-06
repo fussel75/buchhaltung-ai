@@ -226,6 +226,8 @@ function UploadApp() {
   const [bulkJobs, setBulkJobs] = useState([]);
   const [reviewFilter, setReviewFilter] = useState("all");
   const [problemReasonFilter, setProblemReasonFilter] = useState("");
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [reviewSort, setReviewSort] = useState("created_desc");
   const [expandedDocumentIds, setExpandedDocumentIds] = useState([]);
   const [approvalDocumentId, setApprovalDocumentId] = useState(null);
   const [focusedReviewDocumentId, setFocusedReviewDocumentId] = useState(null);
@@ -264,12 +266,18 @@ function UploadApp() {
     [problemDocuments],
   );
   const filteredDocuments = useMemo(
-    () => documents.filter((document) => {
-      if (reviewFilter === "all") return true;
-      if (reviewFilter === "problems") return documentMatchesProblemSummary(document, problemReasonFilter);
-      return document.status === reviewFilter;
-    }),
-    [documents, problemReasonFilter, reviewFilter],
+    () => {
+      const searchText = normalizeSearchText(reviewSearch);
+      return documents
+        .filter((document) => {
+          if (reviewFilter === "all") return true;
+          if (reviewFilter === "problems") return documentMatchesProblemSummary(document, problemReasonFilter);
+          return document.status === reviewFilter;
+        })
+        .filter((document) => !searchText || documentSearchText(document).includes(searchText))
+        .sort((left, right) => compareReviewDocuments(left, right, reviewSort));
+    },
+    [documents, problemReasonFilter, reviewFilter, reviewSearch, reviewSort],
   );
   const extractableDocuments = useMemo(
     () => filteredDocuments.filter((document) => !document.extraction && document.status === "review_pending"),
@@ -1618,6 +1626,30 @@ function UploadApp() {
               <button type="button" className={reviewFilter === "problems" && !problemReasonFilter ? "active" : ""} onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(""); }}>
                 Probleme {problemDocuments.length}
               </button>
+            </div>
+            <div className="queue-search-tools">
+              <label>
+                <span>Suchen</span>
+                <input
+                  type="search"
+                  placeholder="Datei, Lieferant, Rechnung, Projekt"
+                  value={reviewSearch}
+                  onChange={(event) => setReviewSearch(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Sortieren</span>
+                <select value={reviewSort} onChange={(event) => setReviewSort(event.target.value)}>
+                  <option value="created_desc">Neueste zuerst</option>
+                  <option value="created_asc">Älteste zuerst</option>
+                  <option value="date_desc">Belegdatum absteigend</option>
+                  <option value="date_asc">Belegdatum aufsteigend</option>
+                  <option value="amount_desc">Betrag absteigend</option>
+                  <option value="amount_asc">Betrag aufsteigend</option>
+                  <option value="supplier_asc">Lieferant A-Z</option>
+                  <option value="filename_asc">Dateiname A-Z</option>
+                </select>
+              </label>
             </div>
             {problemSummary.length ? (
               <div className="problem-summary" aria-label="Häufige Extraktionsprobleme">
@@ -6485,6 +6517,9 @@ function problemExtractionReasons(document) {
   if (source === "pdf_unreadable") {
     reasons.push("PDF nicht lesbar");
   }
+  if (supplierNeedsReview(extraction.supplier_name, extraction.invoice_number)) {
+    reasons.push("Lieferant ungeklärt");
+  }
   if (!Number.isNaN(confidence) && confidence < 0.8) {
     reasons.push(`Sicherheit ${Math.round(confidence * 100)} %`);
   }
@@ -6537,6 +6572,13 @@ function problemExtractionSummaryKey(reason) {
   if (/^Sicherheit\s+\d+\s*%$/.test(reason)) return "Niedrige Sicherheit";
   if (/^\d+\s+Hinweise?$/.test(reason)) return "Offene Hinweise";
   return reason;
+}
+
+function supplierNeedsReview(supplierName, invoiceNumber) {
+  const supplier = String(supplierName ?? "").trim().replace(/\s+/g, " ");
+  if (!supplier || supplier.toLocaleLowerCase("de-DE") === "unbekannter lieferant") return true;
+  if (invoiceNumber && supplier.toLocaleLowerCase("de-DE") === String(invoiceNumber).trim().toLocaleLowerCase("de-DE")) return true;
+  return /^[0-9]{5,}(?:\s+[0-9]{2,})?$/.test(supplier);
 }
 
 function formatDate(value) {
@@ -6955,6 +6997,55 @@ function AccountSuggestionDatalist({ id, suggestions }) {
       ))}
     </datalist>
   );
+}
+
+function documentSearchText(document) {
+  const extraction = document?.extraction || {};
+  const rawResult = extraction.raw_result || {};
+  return normalizeSearchText([
+    document?.original_filename,
+    document?.normalized_filename,
+    document?.tenant_id,
+    document?.status,
+    extraction.supplier_name,
+    extraction.invoice_number,
+    extraction.invoice_date,
+    extraction.gross_amount,
+    rawResult.assignment_code,
+    rawResult.project_number,
+    rawResult.project_name,
+    rawResult.customer_reference,
+    rawResult.delivery_address,
+    rawResult.product_name,
+    ...(extraction.problem_reasons || []),
+  ].filter(Boolean).join(" "));
+}
+
+function compareReviewDocuments(left, right, sortKey) {
+  const direction = sortKey.endsWith("_asc") ? 1 : -1;
+  const key = sortKey.replace(/_(asc|desc)$/, "");
+  const leftValue = reviewSortValue(left, key);
+  const rightValue = reviewSortValue(right, key);
+  const comparison = compareReviewValues(leftValue, rightValue);
+  if (comparison !== 0) return comparison * direction;
+  return compareReviewValues(reviewSortValue(left, "created"), reviewSortValue(right, "created")) * -1;
+}
+
+function reviewSortValue(document, key) {
+  const extraction = document?.extraction || {};
+  if (key === "created") return document?.created_at || "";
+  if (key === "date") return extraction.invoice_date || "";
+  if (key === "amount") return Number.parseFloat(String(extraction.gross_amount ?? "").replace(",", ".")) || 0;
+  if (key === "supplier") return extraction.supplier_name || "";
+  if (key === "filename") return document?.original_filename || "";
+  return "";
+}
+
+function compareReviewValues(left, right) {
+  if (typeof left === "number" || typeof right === "number") {
+    return (left || 0) - (right || 0);
+  }
+  return String(left ?? "").localeCompare(String(right ?? ""), "de", { numeric: true, sensitivity: "base" });
 }
 
 function normalizeSearchText(value) {
