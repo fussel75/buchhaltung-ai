@@ -466,6 +466,15 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(payload.normalized()["project_number"], "26-00007")
 
+    def test_extraction_update_keeps_project_number(self):
+        payload = documents_route.ExtractionUpdate(
+            assignment_code=" Hk92 ",
+            project_number=" 26-00007 ",
+        )
+
+        self.assertEqual(payload.normalized()["assignment_code"], "Hk92")
+        self.assertEqual(payload.normalized()["project_number"], "26-00007")
+
     def test_normalized_invoice_filename_is_windows_safe(self):
         filename = _normalized_invoice_filename(
             invoice_number="RE1574023",

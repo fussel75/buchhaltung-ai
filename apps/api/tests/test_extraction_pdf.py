@@ -172,6 +172,37 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["confidence"], Decimal("0.20"))
         self.assertIn("OCR", " ".join(result["warnings"]))
 
+    def test_unknown_filename_supplier_is_marked_for_review(self):
+        text = """
+        Rechnung
+        Rechnungsnummer: 12345
+        Datum: 12.06.2026
+        Netto 100,00
+        MwSt 19,00
+        Rechnungsbetrag 119,00
+        Zahlungsziel netto ohne Abzug.
+        """ * 2
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Scan_12345.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "unknown.pdf",
+            "size_bytes": 120000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Scan 12345")
+        self.assertIn("Lieferant", " ".join(result["warnings"]))
+        self.assertEqual(result["confidence"], Decimal("0.72"))
+
     def test_af_elektro_invoice_reads_reverse_charge_discount_and_project_address(self):
         text = """
         AF-Elektro GmbH

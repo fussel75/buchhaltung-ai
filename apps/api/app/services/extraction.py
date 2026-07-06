@@ -842,6 +842,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
+    supplier_is_filename_guess = _supplier_name_is_filename_guess(document, supplier_name, supplier_rule)
     assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
     assignment = assignment_match["assignment"] if assignment_match else None
     if not assignment and delivery_addresses:
@@ -868,6 +869,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     missing = [
         label
         for label, value in {
+            "Lieferant": None if supplier_is_filename_guess else supplier_name,
             "Rechnungsnummer": invoice_number,
             "Datum": invoice_date,
             "Netto": net_amount,
@@ -2352,6 +2354,30 @@ def _supplier_name(document: dict, text: str) -> str:
     if "kreditrechnung" in original and ("holz junge" in lower_text or "fermacell" in lower_text):
         return "Holz Junge GmbH"
     return _supplier_from_filename(Path(document["original_filename"]).stem)
+
+
+def _supplier_name_is_filename_guess(document: dict, supplier_name: str | None, supplier_rule: dict | None) -> bool:
+    if supplier_rule or not supplier_name:
+        return False
+    fallback = _supplier_from_filename(Path(document["original_filename"]).stem)
+    if supplier_name.strip() != fallback.strip():
+        return False
+    compact = _compact_search_text(fallback)
+    if compact in {"beleg", "invoice", "rechnung", "scan"}:
+        return True
+    known_company_markers = [
+        "gmbh",
+        "ohg",
+        "kg",
+        "ag",
+        "service",
+        "baustoff",
+        "holz",
+        "elektro",
+        "dach",
+        "maler",
+    ]
+    return bool(search(r"\d", compact)) and not any(marker in compact for marker in known_company_markers)
 
 
 def _normalize_supplier_name(value: str | None) -> str | None:
