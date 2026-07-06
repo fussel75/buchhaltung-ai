@@ -4721,7 +4721,7 @@ function MasterdataAdmin({
           <div className="data-table assignment-table">
             <div className="data-row data-head">
               <span>Code</span>
-              <span>Projektnummer</span>
+              <span>Projekt-Nr.</span>
               <span>Name</span>
               <span>Adresse</span>
               <span>Art</span>

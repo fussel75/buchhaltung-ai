@@ -2865,7 +2865,16 @@ code {
 }
 
 .assignment-table .data-row {
-  grid-template-columns: minmax(105px, 0.75fr) minmax(115px, 0.7fr) minmax(150px, 0.95fr) minmax(180px, 1.15fr) minmax(125px, 0.75fr) minmax(110px, 0.65fr) minmax(95px, 0.55fr) minmax(85px, 0.45fr) minmax(115px, 0.65fr);
+  grid-template-columns:
+    minmax(96px, 0.62fr)
+    minmax(86px, 0.48fr)
+    minmax(130px, 0.82fr)
+    minmax(180px, 1fr)
+    minmax(112px, 0.62fr)
+    minmax(230px, 1.55fr)
+    minmax(94px, 0.5fr)
+    minmax(76px, 0.38fr)
+    minmax(110px, 0.58fr);
 }
 
 .stacked-inputs {
