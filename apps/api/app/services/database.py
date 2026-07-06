@@ -1865,7 +1865,10 @@ def prepare_document_review(document_id: UUID, actor: str = "system") -> dict[st
         with connection.cursor() as cursor:
             cursor.execute("delete from document_booking_suggestions where document_id = %s", (document_id,))
             for line_no, suggestion in enumerate(suggestions, start=1):
-                project_number = _assignment_project_number(document["tenant_id"], suggestion.get("assignment_code"))
+                project_number = suggestion.get("project_number") or _assignment_project_number(
+                    document["tenant_id"],
+                    suggestion.get("assignment_code"),
+                )
                 cursor.execute(
                     """
                     insert into document_booking_suggestions (
@@ -2354,6 +2357,7 @@ def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: d
                     "booking_type": booking_type,
                     "cost_category": line.get("cost_category") or cost_category,
                     "assignment_code": line.get("assignment_code") or line.get("project_code"),
+                    "project_number": line.get("project_number"),
                     "assignment_kind": line.get("assignment_kind") or raw_result.get("assignment_kind"),
                     "description": line.get("description") or description,
                     "net_amount": net_amount,
@@ -2369,6 +2373,7 @@ def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: d
             "booking_type": booking_type,
             "cost_category": cost_category,
             "assignment_code": raw_result.get("assignment_code") or raw_result.get("project_code"),
+            "project_number": raw_result.get("project_number"),
             "assignment_kind": raw_result.get("assignment_kind"),
             "description": description,
             "net_amount": total_net,

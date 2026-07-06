@@ -304,12 +304,14 @@ class BookingSuggestionTests(TestCase):
                     {
                         "amount": "78.78",
                         "assignment_code": "Wewe20",
+                        "project_number": "25-00008",
                         "assignment_kind": "construction_project",
                         "description": "Weseler Weg 20",
                     },
                     {
                         "amount": "200.14",
                         "assignment_code": "Hk92",
+                        "project_number": "26-00007",
                         "assignment_kind": "construction_project",
                         "description": "Heukoppel 92",
                     },
@@ -321,10 +323,12 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(len(suggestions), 2)
         self.assertEqual(suggestions[0]["assignment_code"], "Wewe20")
+        self.assertEqual(suggestions[0]["project_number"], "25-00008")
         self.assertEqual(suggestions[0]["net_amount"], Decimal("78.78"))
         self.assertEqual(suggestions[0]["tax_amount"], Decimal("14.97"))
         self.assertEqual(suggestions[0]["gross_amount"], Decimal("93.75"))
         self.assertEqual(suggestions[1]["assignment_code"], "Hk92")
+        self.assertEqual(suggestions[1]["project_number"], "26-00007")
         self.assertEqual(suggestions[1]["net_amount"], Decimal("200.14"))
         self.assertEqual(suggestions[1]["tax_amount"], Decimal("38.02"))
         self.assertEqual(suggestions[1]["gross_amount"], Decimal("238.16"))
@@ -345,6 +349,7 @@ class BookingSuggestionTests(TestCase):
                 "document_type": "credit_note",
                 "cost_category": "material",
                 "assignment_code": "Wewe20",
+                "project_number": "25-00008",
                 "assignment_kind": "construction_project",
             },
         }
@@ -353,9 +358,47 @@ class BookingSuggestionTests(TestCase):
 
         self.assertEqual(len(suggestions), 1)
         self.assertEqual(suggestions[0]["booking_type"], "credit_note")
+        self.assertEqual(suggestions[0]["project_number"], "25-00008")
         self.assertEqual(suggestions[0]["net_amount"], Decimal("-220.00"))
         self.assertEqual(suggestions[0]["tax_amount"], Decimal("-41.80"))
         self.assertEqual(suggestions[0]["gross_amount"], Decimal("-261.80"))
+
+    def test_prepare_document_review_prefers_extracted_project_number(self):
+        document_id = uuid4()
+        document = {
+            "id": document_id,
+            "tenant_id": "demo-mandant",
+            "original_filename": "RE1586258.pdf",
+            "extraction": {
+                "supplier_name": "Lüchau Baustoffe GmbH",
+                "currency": "EUR",
+                "net_amount": Decimal("50.13"),
+                "tax_amount": Decimal("9.52"),
+                "gross_amount": Decimal("59.65"),
+                "raw_result": {
+                    "document_type": "incoming_invoice",
+                    "cost_category": "material",
+                    "assignment_code": "Hk92",
+                    "project_number": "26-00007",
+                    "assignment_kind": "construction_project",
+                    "item_summary": "Maler-Abdeckvlies 50qm",
+                },
+            },
+        }
+        cursor = RecordingCursor()
+
+        with (
+            patch.object(database_service, "get_document", side_effect=[document, {"id": document_id, "status": "review_ready"}]),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "get_assignment_unit_by_code") as lookup_assignment,
+            patch.object(database_service, "insert_audit_event"),
+        ):
+            result = database_service.prepare_document_review(document_id)
+
+        self.assertEqual(result["status"], "review_ready")
+        insert_params = next(params for statement, params in cursor.statements if statement.startswith("insert into document_booking_suggestions"))
+        self.assertEqual(insert_params[7], "26-00007")
+        lookup_assignment.assert_not_called()
 
     def test_booking_update_rejects_unknown_cost_category(self):
         with self.assertRaises(ValidationError):
