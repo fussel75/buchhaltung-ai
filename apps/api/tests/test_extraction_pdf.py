@@ -1266,6 +1266,41 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["cost_category"], "material")
         self.assertIn("Dachlatte", result["product_name"])
 
+    def test_dammers_invoice_uses_filename_when_ocr_text_is_sparse(self):
+        text = """
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB  GmbH & Co KG
+        Datum          :    12.06.2026 - 08:46
+        75556                                20,00 St     5,10 St           102,00
+        Thorben Peters Dachlatte 40 x 60 S10 rot
+        Summe Warenwert                                            EUR     331,88
+        + 19,00 % Mwst.                                            EUR      63,06
+        Rechnungsbetrag (zahlbar bis spaetestens 12.07.26 o. Abzug) EUR     394,94
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "776511-606.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["invoice_number"], "776511-606")
+        self.assertEqual(result["invoice_date"], "2026-06-12")
+        self.assertEqual(result["net_amount"], Decimal("331.88"))
+        self.assertEqual(result["tax_amount"], Decimal("63.06"))
+        self.assertEqual(result["gross_amount"], Decimal("394.94"))
+
     def test_foerch_invoice_uses_filename_and_derives_net_amount(self):
         text = """
         THEO FOERCH GmbH & Co. KG

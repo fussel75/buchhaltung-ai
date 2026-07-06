@@ -2276,6 +2276,18 @@ def _looks_like_dammers_invoice_text(lower_text: str, compact_text: str) -> bool
     )
 
 
+def _looks_like_dammers_invoice_by_filename(lower_text: str, compact_text: str) -> bool:
+    return "rechnung" in lower_text and any(
+        marker in compact_text
+        for marker in [
+            "artnrbezeichnung",
+            "nettowert",
+            "summewarenwert",
+            "rechnungsbetrag",
+        ]
+    )
+
+
 def _supplier_name(document: dict, text: str) -> str:
     original = document["original_filename"].lower()
     lower_text = text.lower()
@@ -2319,6 +2331,7 @@ def _supplier_name(document: dict, text: str) -> str:
         or "allesf" in compact_text
         or "auslieferungslager" in lower_text
         or _looks_like_dammers_invoice_text(lower_text, compact_text)
+        or _looks_like_dammers_invoice_by_filename(lower_text, compact_text)
     ):
         return "Rolf Dammers oHG"
     if (
