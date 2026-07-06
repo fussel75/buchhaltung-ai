@@ -1623,7 +1623,7 @@ function UploadApp() {
               <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => { setReviewFilter("review_approved"); setProblemReasonFilter(""); }}>
                 Freigegeben {queueStats.approved}
               </button>
-              <button type="button" className={reviewFilter === "problems" && !problemReasonFilter ? "active" : ""} onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(""); }}>
+              <button type="button" className={reviewFilter === "problems" && !problemReasonFilter ? "active" : ""} onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(""); setReviewSort("problem_desc"); }}>
                 Probleme {problemDocuments.length}
               </button>
             </div>
@@ -1642,6 +1642,7 @@ function UploadApp() {
                 <select value={reviewSort} onChange={(event) => setReviewSort(event.target.value)}>
                   <option value="created_desc">Neueste zuerst</option>
                   <option value="created_asc">Älteste zuerst</option>
+                  <option value="problem_desc">Problempriorität</option>
                   <option value="date_desc">Belegdatum absteigend</option>
                   <option value="date_asc">Belegdatum aufsteigend</option>
                   <option value="amount_desc">Betrag absteigend</option>
@@ -1658,7 +1659,7 @@ function UploadApp() {
                     type="button"
                     className={reviewFilter === "problems" && problemReasonFilter === item.reason ? "active" : ""}
                     key={item.reason}
-                    onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(item.reason); }}
+                    onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(item.reason); setReviewSort("problem_desc"); }}
                   >
                     <span>{item.reason}</span>
                     <strong>{item.count}</strong>
@@ -7034,11 +7035,32 @@ function compareReviewDocuments(left, right, sortKey) {
 function reviewSortValue(document, key) {
   const extraction = document?.extraction || {};
   if (key === "created") return document?.created_at || "";
+  if (key === "problem") return problemPriorityScore(document);
   if (key === "date") return extraction.invoice_date || "";
   if (key === "amount") return Number.parseFloat(String(extraction.gross_amount ?? "").replace(",", ".")) || 0;
   if (key === "supplier") return extraction.supplier_name || "";
   if (key === "filename") return document?.original_filename || "";
   return "";
+}
+
+function problemPriorityScore(document) {
+  return problemExtractionReasons(document).reduce((score, reason) => Math.max(score, problemReasonPriority(reason)), 0);
+}
+
+function problemReasonPriority(reason) {
+  const normalized = problemExtractionSummaryKey(reason);
+  const priorities = {
+    "PDF nicht lesbar": 100,
+    "Lieferant ungeklärt": 90,
+    "Zuordnung ungeklärt": 80,
+    "Brutto fehlt": 75,
+    "Rechnungsnummer fehlt": 70,
+    "Datum fehlt": 65,
+    "Niedrige Sicherheit": 50,
+    "Mock-Erkennung": 45,
+    "Offene Hinweise": 30,
+  };
+  return priorities[normalized] ?? 10;
 }
 
 function compareReviewValues(left, right) {
