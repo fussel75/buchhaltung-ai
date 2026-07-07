@@ -3395,6 +3395,89 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(match["assignment"], assignment)
         self.assertIn("Bauherr", match["reasons"])
 
+    def test_assignment_lookup_accepts_project_number_without_separator(self):
+        assignment = {
+            "code": "Hk92",
+            "label": "Hk92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "order_number": "26-00001",
+            "customer_number": "11124",
+            "description": "Waermepumpe",
+            "client_name": "Christoph Balschat",
+            "source_status": "Aktiv",
+            "address_line": "Heukoppel 92",
+            "postal_code": "22179",
+            "city": "Hamburg",
+            "external_id": "project-hk",
+            "aliases": [],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            match = database_service.find_assignment_unit_match_by_text(
+                "demo-mandant",
+                "Kundenreferenz Projekt 2600007 / Lieferung Baustoffe",
+            )
+
+        self.assertEqual(match["assignment"], assignment)
+        self.assertIn("Projektnummer", match["reasons"])
+
+    def test_assignment_lookup_accepts_address_tokens_in_different_order(self):
+        assignment = {
+            "code": "Ekkp58",
+            "label": "Ekkp58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "order_number": "25-00007",
+            "customer_number": "11305",
+            "description": "Anbau und Dachsanierung",
+            "client_name": "Iris Wormsbaecher",
+            "source_status": "Aktiv",
+            "address_line": "Eckerkamp 58",
+            "postal_code": "22391",
+            "city": "Hamburg",
+            "external_id": "project-ek",
+            "aliases": ["Eckerkamp 58, 22391 Hamburg"],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            match = database_service.find_assignment_unit_match_by_text(
+                "demo-mandant",
+                "Kommission: Eckerkamp 58 Hamburg 22391",
+            )
+
+        self.assertEqual(match["assignment"], assignment)
+        self.assertIn("Projektadresse", match["reasons"])
+
+    def test_assignment_lookup_does_not_match_house_number_city_only(self):
+        assignment = {
+            "code": "Ekkp58",
+            "label": "Ekkp58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "order_number": "25-00007",
+            "customer_number": "11305",
+            "description": "Anbau und Dachsanierung",
+            "client_name": "Iris Wormsbaecher",
+            "source_status": "Aktiv",
+            "address_line": "Eckerkamp 58",
+            "postal_code": "22391",
+            "city": "Hamburg",
+            "external_id": "project-ek",
+            "aliases": [],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            self.assertIsNone(
+                database_service.find_assignment_unit_match_by_text(
+                    "demo-mandant",
+                    "Rechnung Hamburg 22391 Hausnummer 58",
+                ),
+            )
+
     def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
         document = {
             "id": str(uuid4()),

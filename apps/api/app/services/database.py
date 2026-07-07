@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from re import match, search as re_search, sub
+from re import match, search as re_search, split as re_split, sub
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -3413,6 +3413,7 @@ def find_assignment_unit_match_by_text(tenant_id: str, text: str | None) -> dict
 
 
 def _assignment_match_score(assignment: dict[str, Any], normalized_text: str) -> tuple[int, list[str]]:
+    compact_text = _compact_match_text(normalized_text)
     weighted_candidates = [
         ("Projektnummer", assignment.get("project_number"), 220),
         ("Auftragsnummer", assignment.get("order_number"), 180),
@@ -3430,12 +3431,78 @@ def _assignment_match_score(assignment: dict[str, Any], normalized_text: str) ->
     score = 0
     reasons: list[str] = []
     for label, candidate, weight in weighted_candidates:
-        normalized_candidate = _normalize_assignment_candidate(candidate)
-        if normalized_candidate and normalized_candidate in normalized_text:
-            score += weight
+        match_weight = _assignment_candidate_match_weight(label, candidate, weight, normalized_text, compact_text)
+        if match_weight:
+            score += match_weight
             if label not in reasons:
                 reasons.append(label)
     return score, reasons
+
+
+def _assignment_candidate_match_weight(
+    label: str,
+    candidate: str | None,
+    weight: int,
+    normalized_text: str,
+    compact_text: str,
+) -> int:
+    normalized_candidate = _normalize_assignment_candidate(candidate)
+    if not normalized_candidate:
+        return 0
+    if normalized_candidate in normalized_text:
+        return weight
+
+    compact_candidate = _compact_match_text(normalized_candidate)
+    if _is_strong_compact_assignment_candidate(label, compact_candidate) and compact_candidate in compact_text:
+        return weight
+
+    if label in {"Projektadresse", "Adresse", "Alias"} and _assignment_tokens_match(normalized_candidate, normalized_text):
+        return max(80, int(weight * Decimal("0.90")))
+
+    return 0
+
+
+def _is_strong_compact_assignment_candidate(label: str, compact_candidate: str) -> bool:
+    if len(compact_candidate) < 5:
+        return False
+    if label in {"Projektnummer", "Auftragsnummer"}:
+        return bool(re_search(r"\d{2,4}\d{3,}", compact_candidate))
+    if label in {"Projektcode", "Projektname", "Externe ID"}:
+        return bool(re_search(r"[a-z]", compact_candidate) and re_search(r"\d", compact_candidate))
+    return False
+
+
+def _assignment_tokens_match(normalized_candidate: str, normalized_text: str) -> bool:
+    tokens = _significant_assignment_tokens(normalized_candidate)
+    if len(tokens) < 2:
+        return False
+    text_tokens = set(_significant_assignment_tokens(normalized_text))
+    if not all(token in text_tokens for token in tokens):
+        return False
+    # A safe address-like match needs a street/name token and a house/project number token.
+    return any(re_search(r"[a-z]", token) for token in tokens) and any(re_search(r"\d", token) for token in tokens)
+
+
+def _significant_assignment_tokens(value: str) -> list[str]:
+    return [
+        token
+        for token in re_split(r"[^a-z0-9]+", _normalize_match_text(value))
+        if _is_significant_assignment_token(token)
+    ]
+
+
+def _is_significant_assignment_token(token: str) -> bool:
+    if len(token) < 2:
+        return False
+    if re_search(r"^\d{5}$", token):
+        return False
+    if token in {"hamburg", "aktiv", "abgeschlossen", "bauvorhaben", "str", "strasse", "straße"}:
+        return False
+    return True
+
+
+def _compact_match_text(value: str) -> str:
+    return sub(r"[^a-z0-9]+", "", _normalize_match_text(value))
 
 
 def _normalize_assignment_candidate(value: str | None) -> str | None:
