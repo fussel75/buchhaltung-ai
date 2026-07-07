@@ -265,6 +265,10 @@ function UploadApp() {
     () => summarizeProblemExtractionReasons(problemDocuments),
     [problemDocuments],
   );
+  const problemWorkItems = useMemo(
+    () => buildProblemWorkItems(problemDocuments),
+    [problemDocuments],
+  );
   const filteredDocuments = useMemo(
     () => {
       const searchText = normalizeSearchText(reviewSearch);
@@ -1789,6 +1793,20 @@ function UploadApp() {
             <small>{reviewBatch.failed} fehlgeschlagen</small>
           </div>
         ) : null}
+        <ProblemWorkboard
+          items={problemWorkItems}
+          activeReason={reviewFilter === "problems" ? problemReasonFilter : ""}
+          onSelect={(reason) => {
+            setReviewFilter("problems");
+            setProblemReasonFilter(reason);
+            setReviewSort("problem_desc");
+          }}
+          onShowAll={() => {
+            setReviewFilter("problems");
+            setProblemReasonFilter("");
+            setReviewSort("problem_desc");
+          }}
+        />
         {bookingPreview ? (
           <BookingExportPreview
             month={bookingPreview.month}
@@ -2435,6 +2453,45 @@ function BulkJobHistory({ jobs }) {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+function ProblemWorkboard({ items, activeReason, onSelect, onShowAll }) {
+  if (!items.length) return null;
+  const totalDocuments = new Set(items.flatMap((item) => item.documents.map((document) => document.id))).size;
+  return (
+    <section className="problem-workboard" aria-label="Problembelege abarbeiten">
+      <div className="problem-workboard-head">
+        <div>
+          <span>Problem-Abarbeitung</span>
+          <h3>Wichtigste Gruppen zuerst</h3>
+        </div>
+        <button type="button" className="secondary-button" onClick={onShowAll}>
+          Alle Problembelege {totalDocuments}
+        </button>
+      </div>
+      <div className="problem-work-list">
+        {items.map((item) => (
+          <article key={item.reason} className={activeReason === item.reason ? "problem-work-item active" : "problem-work-item"}>
+            <div className="problem-work-main">
+              <span className={`problem-severity ${item.severity}`}>{item.severityLabel}</span>
+              <h4>{item.reason}</h4>
+              <p>{item.help}</p>
+              {item.examples.length ? (
+                <small>Beispiele: {item.examples.join(", ")}</small>
+              ) : null}
+            </div>
+            <div className="problem-work-action">
+              <strong>{item.count}</strong>
+              <span>{item.action}</span>
+              <button type="button" onClick={() => onSelect(item.reason)}>
+                Anzeigen
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
@@ -6675,6 +6732,101 @@ function summarizeProblemExtractionReasons(documents) {
   return Array.from(counts, ([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason, "de"))
     .slice(0, 6);
+}
+
+function buildProblemWorkItems(documents) {
+  const groups = new Map();
+  documents.forEach((document) => {
+    problemExtractionReasons(document).forEach((reason) => {
+      const key = problemExtractionSummaryKey(reason);
+      const existing = groups.get(key) || {
+        reason: key,
+        count: 0,
+        documents: [],
+      };
+      existing.count += 1;
+      existing.documents.push(document);
+      groups.set(key, existing);
+    });
+  });
+  return Array.from(groups.values())
+    .map((group) => {
+      const meta = problemWorkMeta(group.reason);
+      return {
+        ...group,
+        ...meta,
+        priority: problemReasonPriority(group.reason),
+        examples: group.documents.slice(0, 3).map((document) => document.original_filename).filter(Boolean),
+      };
+    })
+    .sort((left, right) => right.priority - left.priority || right.count - left.count || left.reason.localeCompare(right.reason, "de"))
+    .slice(0, 5);
+}
+
+function problemWorkMeta(reason) {
+  const normalized = problemExtractionSummaryKey(reason);
+  if (normalized === "PDF nicht lesbar") {
+    return {
+      severity: "blocker",
+      severityLabel: "Blocker",
+      action: "Vorschau/Text prüfen",
+      help: "Ohne lesbaren Text braucht der Beleg OCR, bessere Datei oder manuelle Prüfung.",
+    };
+  }
+  if (normalized === "Lieferant ungeklärt") {
+    return {
+      severity: "blocker",
+      severityLabel: "Blocker",
+      action: "Lieferant korrigieren",
+      help: "Lieferant bestätigen, Kunden-Nr. ergänzen und bei Bedarf bewusst als Regel merken.",
+    };
+  }
+  if (normalized === "Zuordnung ungeklärt") {
+    return {
+      severity: "warning",
+      severityLabel: "Prüfen",
+      action: "Projekt zuweisen",
+      help: "Projekt-Nr. oder Bauvorhaben aus den Stammdaten wählen; danach Vorschlag neu erstellen.",
+    };
+  }
+  if (normalized === "Zuordnung prüfen") {
+    return {
+      severity: "warning",
+      severityLabel: "Prüfen",
+      action: "Treffer bestätigen",
+      help: "Die App hat ein Projekt vorgeschlagen, aber der Treffer sollte fachlich bestätigt werden.",
+    };
+  }
+  if (normalized === "Niedrige Sicherheit") {
+    return {
+      severity: "review",
+      severityLabel: "Unsicher",
+      action: "Kernwerte prüfen",
+      help: "Lieferant, Datum, Beträge und Kostenart kurz gegen die Vorschau prüfen.",
+    };
+  }
+  if (normalized === "Offene Hinweise") {
+    return {
+      severity: "review",
+      severityLabel: "Hinweis",
+      action: "Hinweise lesen",
+      help: "Warnungen kontrollieren; oft reicht Speichern oder Vorschlag neu erstellen.",
+    };
+  }
+  if (normalized === "Rechnungsnummer fehlt" || normalized === "Datum fehlt" || normalized === "Brutto fehlt") {
+    return {
+      severity: "blocker",
+      severityLabel: "Pflichtfeld",
+      action: "Feld ergänzen",
+      help: "Fehlenden Kernwert aus PDF/Text übernehmen, sonst blockiert der Export später.",
+    };
+  }
+  return {
+    severity: "review",
+    severityLabel: "Prüfen",
+    action: "Belege prüfen",
+    help: "Problemgruppe öffnen, betroffene Belege korrigieren und danach neu vorschlagen.",
+  };
 }
 
 function problemExtractionSummaryKey(reason) {

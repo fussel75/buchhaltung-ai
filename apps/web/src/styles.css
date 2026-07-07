@@ -1296,6 +1296,134 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+.problem-workboard {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d9e1e8;
+  border-radius: var(--radius);
+  padding: 14px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.problem-workboard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.problem-workboard-head span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.problem-workboard-head h3 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+}
+
+.problem-workboard-head button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.problem-work-list {
+  display: grid;
+  gap: 8px;
+}
+
+.problem-work-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #e3e8ef;
+  border-radius: 9px;
+  padding: 10px;
+  background: #fbfcfd;
+}
+
+.problem-work-item.active {
+  border-color: #fb923c;
+  box-shadow: 0 0 0 2px #fed7aa;
+}
+
+.problem-work-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.problem-work-main h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.problem-work-main p,
+.problem-work-main small {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.problem-work-main p {
+  font-size: 0.83rem;
+}
+
+.problem-work-main small {
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.problem-severity {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.problem-severity.blocker {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.problem-severity.warning {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.problem-severity.review {
+  color: #31556c;
+  background: #e8f1f6;
+}
+
+.problem-work-action {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.problem-work-action strong {
+  color: var(--text);
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.problem-work-action button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
 .document-head strong {
   overflow-wrap: anywhere;
 }
@@ -3150,6 +3278,14 @@ code {
 
   .queue-search-tools {
     grid-template-columns: 1fr;
+  }
+
+  .problem-work-item {
+    grid-template-columns: 1fr;
+  }
+
+  .problem-work-action {
+    justify-items: start;
   }
 }
 
