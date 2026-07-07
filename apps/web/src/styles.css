@@ -2678,6 +2678,41 @@ code {
   justify-content: flex-end;
 }
 
+.remember-rule-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d9e1e8;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--text);
+}
+
+.remember-rule-option input {
+  width: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.remember-rule-option span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.remember-rule-option strong {
+  font-size: 0.86rem;
+}
+
+.remember-rule-option small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
 .form-actions button {
   min-height: 32px;
   padding: 0 12px;

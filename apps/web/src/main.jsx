@@ -1286,6 +1286,7 @@ function UploadApp() {
 
   const saveExtraction = useCallback(
     async (document, values) => {
+      const { remember_supplier_rule: rememberSupplierRule, ...extractionValues } = values;
       setError("");
       setNotice("");
       setSavingExtractionIds((current) => [...current, document.id]);
@@ -1293,7 +1294,7 @@ function UploadApp() {
         const response = await apiFetch(`/documents/${document.id}/extraction`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(normalizeExtractionUpdate(values)),
+          body: JSON.stringify(normalizeExtractionUpdate(extractionValues)),
         });
 
         if (!response.ok) {
@@ -1302,15 +1303,35 @@ function UploadApp() {
         }
 
         const result = await response.json();
+        let ruleNotice = "";
+        if (rememberSupplierRule) {
+          const supplierRulePayload = supplierRulePayloadFromExtractionForm(extractionValues);
+          if (supplierRulePayload) {
+            try {
+              const ruleResponse = await apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(activeTenantId)}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(supplierRulePayload),
+              });
+              if (!ruleResponse.ok) {
+                const ruleResult = await ruleResponse.json().catch(() => ({}));
+                throw new Error(formatApiError(ruleResult.detail, `Lieferantenregel konnte nicht angelegt werden: ${ruleResponse.status}`));
+              }
+              ruleNotice = " Lieferantenregel angelegt.";
+            } catch (ruleError) {
+              ruleNotice = ` Lieferantenregel nicht angelegt: ${ruleError.message}`;
+            }
+          }
+        }
         await loadDocuments();
-        setNotice(`Extraktionsdaten gespeichert: ${result.document.original_filename}. Bitte Buchungsvorschlag neu erstellen.`);
+        setNotice(`Extraktionsdaten gespeichert: ${result.document.original_filename}. Bitte Buchungsvorschlag neu erstellen.${ruleNotice}`);
       } catch (saveError) {
         setError(saveError.message);
       } finally {
         setSavingExtractionIds((current) => current.filter((id) => id !== document.id));
       }
     },
-    [apiFetch, loadDocuments],
+    [activeTenantId, apiFetch, loadDocuments],
   );
 
   const selectPaymentDecision = useCallback(
@@ -2421,6 +2442,7 @@ function BulkJobHistory({ jobs }) {
 function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isSaving, onDirtyChange, onSave }) {
   const [form, setForm] = useState(() => extractionFormFromDocument(document));
   const [assignmentSearch, setAssignmentSearch] = useState("");
+  const [rememberSupplierRule, setRememberSupplierRule] = useState(false);
   const assignmentOptionRefs = useRef({});
   const baselineForm = useMemo(
     () => extractionFormFromDocument(document),
@@ -2467,6 +2489,7 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
   useEffect(() => {
     setForm(baselineForm);
     setAssignmentSearch("");
+    setRememberSupplierRule(false);
   }, [baselineForm]);
 
   useEffect(() => {
@@ -2542,7 +2565,7 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
 
   function submit(event) {
     event.preventDefault();
-    onSave(document, form);
+    onSave(document, { ...form, remember_supplier_rule: rememberSupplierRule });
   }
 
   return (
@@ -2693,6 +2716,20 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
           <input name="item_summary" value={form.item_summary} onChange={(event) => updateField("item_summary", event.target.value)} disabled={isApproved} />
         </FormField>
       </div>
+      {!isApproved ? (
+        <label className="remember-rule-option">
+          <input
+            type="checkbox"
+            checked={rememberSupplierRule}
+            onChange={(event) => setRememberSupplierRule(event.target.checked)}
+            disabled={isSaving || !form.supplier_name?.trim()}
+          />
+          <span>
+            <strong>Für ähnliche Rechnungen merken</strong>
+            <small>Speichert Lieferant, Kunden-Nr. und Kostenart als Regel. Kein Bauvorhaben wird an den Lieferanten gebunden.</small>
+          </span>
+        </label>
+      ) : null}
       <div className="form-actions">
         <button type="submit" disabled={isSaving || isApproved}>
           {isApproved ? "Freigegeben" : isSaving ? "Speichert..." : "Speichern"}
@@ -5957,6 +5994,20 @@ function normalizeExtractionUpdate(values) {
     discount_amount: decimalOrNull(values.discount_amount),
     discounted_payable_amount: decimalOrNull(values.discounted_payable_amount),
     item_summary: values.item_summary?.trim() || null,
+  };
+}
+
+function supplierRulePayloadFromExtractionForm(values) {
+  const supplierName = values.supplier_name?.trim();
+  if (!supplierName) return null;
+  const costCategories = costCategoryList(values.cost_category);
+  return {
+    match_text: supplierName,
+    supplier_name: supplierName,
+    customer_number: values.customer_number?.trim() || null,
+    default_cost_category: costCategories.length ? costCategories : null,
+    default_assignment_code: null,
+    is_active: true,
   };
 }
 
