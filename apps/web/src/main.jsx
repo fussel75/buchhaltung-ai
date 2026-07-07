@@ -235,6 +235,7 @@ function UploadApp() {
   const [approvalIssues, setApprovalIssues] = useState([]);
   const [highlightedBookingTarget, setHighlightedBookingTarget] = useState(null);
   const [reviewFocusTarget, setReviewFocusTarget] = useState(null);
+  const [problemActionMessage, setProblemActionMessage] = useState("");
   const [accountingRuleDraft, setAccountingRuleDraft] = useState(null);
   const [accountingRuleEditTarget, setAccountingRuleEditTarget] = useState(null);
   const [assignmentUnitDraft, setAssignmentUnitDraft] = useState(null);
@@ -445,6 +446,24 @@ function UploadApp() {
       current.includes(nextDocumentId) ? current : [...current, nextDocumentId],
     );
   }
+
+  const openProblemWorkItem = useCallback((item) => {
+    const firstDocument = item?.documents?.[0];
+    if (!firstDocument?.id) return;
+
+    const focusTarget = problemCorrectionFocusTarget(item.reason, firstDocument, tenantProfile);
+    setActiveView("review");
+    setReviewFilter("problems");
+    setProblemReasonFilter(item.reason);
+    setReviewSort("problem_desc");
+    setFocusedReviewDocumentId(firstDocument.id);
+    setReviewFocusTarget(focusTarget);
+    setExpandedDocumentIds((current) => (
+      current.includes(firstDocument.id) ? current : [...current, firstDocument.id]
+    ));
+    setProblemActionMessage(`${item.reason}: ${focusTarget.message}`);
+    window.setTimeout(() => focusReviewDocumentCard(firstDocument.id, { focusAction: false }), 80);
+  }, [tenantProfile]);
 
   const uploadFile = useCallback(
     async (file) => {
@@ -1796,15 +1815,19 @@ function UploadApp() {
         <ProblemWorkboard
           items={problemWorkItems}
           activeReason={reviewFilter === "problems" ? problemReasonFilter : ""}
+          actionMessage={problemActionMessage}
           onSelect={(reason) => {
             setReviewFilter("problems");
             setProblemReasonFilter(reason);
             setReviewSort("problem_desc");
+            setProblemActionMessage("");
           }}
+          onOpenFirst={openProblemWorkItem}
           onShowAll={() => {
             setReviewFilter("problems");
             setProblemReasonFilter("");
             setReviewSort("problem_desc");
+            setProblemActionMessage("");
           }}
         />
         {bookingPreview ? (
@@ -2076,6 +2099,7 @@ function UploadApp() {
         isSavingExtraction={focusedReviewDocument ? savingExtractionIds.includes(focusedReviewDocument.id) : false}
         isSavingPayment={focusedReviewDocument ? savingPaymentIds.includes(focusedReviewDocument.id) : false}
         isSavingSuggestion={focusedReviewDocument ? savingSuggestionIds.includes(focusedReviewDocument.id) : false}
+        isPreparingReview={focusedReviewDocument ? approvingIds.includes(focusedReviewDocument.id) : false}
         hasPrevious={focusedReviewIndex > 0}
         hasNext={focusedReviewIndex >= 0 && focusedReviewIndex < focusableReviewDocuments.length - 1}
         positionLabel={focusedReviewPositionLabel}
@@ -2090,6 +2114,7 @@ function UploadApp() {
         onPrevious={() => moveFocusedReview(-1)}
         onNext={() => moveFocusedReview(1)}
         onSaveExtraction={saveExtraction}
+        onPrepareReview={prepareReview}
         onSelectPayment={selectPaymentDecision}
         onSaveSuggestion={saveBookingSuggestion}
       />
@@ -2457,7 +2482,7 @@ function BulkJobHistory({ jobs }) {
   );
 }
 
-function ProblemWorkboard({ items, activeReason, onSelect, onShowAll }) {
+function ProblemWorkboard({ items, activeReason, actionMessage, onSelect, onOpenFirst, onShowAll }) {
   if (!items.length) return null;
   const totalDocuments = new Set(items.flatMap((item) => item.documents.map((document) => document.id))).size;
   return (
@@ -2471,6 +2496,9 @@ function ProblemWorkboard({ items, activeReason, onSelect, onShowAll }) {
           Alle Problembelege {totalDocuments}
         </button>
       </div>
+      {actionMessage ? (
+        <p className="problem-action-message">{actionMessage}</p>
+      ) : null}
       <div className="problem-work-list">
         {items.map((item) => (
           <article key={item.reason} className={activeReason === item.reason ? "problem-work-item active" : "problem-work-item"}>
@@ -2485,8 +2513,11 @@ function ProblemWorkboard({ items, activeReason, onSelect, onShowAll }) {
             <div className="problem-work-action">
               <strong>{item.count}</strong>
               <span>{item.action}</span>
-              <button type="button" onClick={() => onSelect(item.reason)}>
+              <button type="button" className="secondary-button" onClick={() => onSelect(item.reason)}>
                 Anzeigen
+              </button>
+              <button type="button" onClick={() => onOpenFirst(item)}>
+                Ersten bearbeiten
               </button>
             </div>
           </article>
@@ -3135,6 +3166,7 @@ function ReviewFocusDialog({
   isSavingExtraction,
   isSavingPayment,
   isSavingSuggestion,
+  isPreparingReview,
   hasPrevious,
   hasNext,
   positionLabel,
@@ -3145,13 +3177,16 @@ function ReviewFocusDialog({
   onPrevious,
   onNext,
   onSaveExtraction,
+  onPrepareReview,
   onSelectPayment,
   onSaveSuggestion,
 }) {
   const dialogRef = useRef(null);
   const [hasUnsavedExtractionChanges, setHasUnsavedExtractionChanges] = useState(false);
   const [navigationWarning, setNavigationWarning] = useState("");
-  const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion;
+  const canCreateReviewSuggestion = document?.extraction
+    && (!document.booking_suggestions?.length || (document.status !== "review_ready" && document.status !== "review_approved"));
+  const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion || isPreparingReview;
 
   useEffect(() => {
     setHasUnsavedExtractionChanges(false);
@@ -3278,6 +3313,16 @@ function ReviewFocusDialog({
               Zurück
             </button>
             {positionLabel ? <span>{positionLabel}</span> : null}
+            {canCreateReviewSuggestion ? (
+              <button
+                type="button"
+                onClick={() => onPrepareReview(document)}
+                disabled={isBusy || hasUnsavedExtractionChanges}
+                title={hasUnsavedExtractionChanges ? "Bitte erst Extraktionsdaten speichern." : ""}
+              >
+                {isPreparingReview ? "Erstellt..." : document.booking_suggestions?.length ? "Vorschlag neu" : "Vorschlag"}
+              </button>
+            ) : null}
             <button className="secondary-button" type="button" onClick={requestNext} disabled={isBusy || !hasNext}>
               Nächster
             </button>
@@ -3288,8 +3333,16 @@ function ReviewFocusDialog({
         </header>
         {navigationWarning ? <p className="inline-note review-focus-warning">{navigationWarning}</p> : null}
 
+        {focusTarget?.message ? (
+          <p className="quick-fix-note">
+            <strong>{focusTarget.reason || "Korrektur"}:</strong> {focusTarget.message}
+          </p>
+        ) : null}
+
         <div className="review-focus-body">
-          <DocumentPreview document={document} />
+          <div data-review-section="preview">
+            <DocumentPreview document={document} />
+          </div>
           <div className="review-focus-data">
             <div data-review-section="extraction">
               <ExtractionEditForm
@@ -3306,7 +3359,7 @@ function ReviewFocusDialog({
             </div>
             <AssignmentMatchNote rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />
             {document.extraction?.warnings?.length ? (
-              <ul className="warnings">
+              <ul className="warnings" data-review-section="warnings">
                 {document.extraction.warnings.map((warning, index) => (
                   <li key={`${warning}-${index}`}>{warning}</li>
                 ))}
@@ -6826,6 +6879,75 @@ function problemWorkMeta(reason) {
     severityLabel: "Prüfen",
     action: "Belege prüfen",
     help: "Problemgruppe öffnen, betroffene Belege korrigieren und danach neu vorschlagen.",
+  };
+}
+
+function problemCorrectionFocusTarget(reason, document, tenantProfile = defaultTenantProfile("general")) {
+  const normalized = problemExtractionSummaryKey(reason);
+  const assignmentLabel = tenantProfile.assignment_label_singular || "Zuordnung";
+  const targets = {
+    "PDF nicht lesbar": {
+      target: "preview",
+      field: "",
+      message: "Prüfe zuerst die Vorschau oder öffne die Datei. Wenn kein Text lesbar ist, muss der Beleg manuell oder per OCR geprüft werden.",
+    },
+    "Lieferant ungeklärt": {
+      target: "extraction",
+      field: "supplier_name",
+      message: "Korrigiere den Lieferanten und ergänze die Kunden-Nr. Danach speichern und bei Bedarf bewusst als Regel merken.",
+    },
+    "Zuordnung ungeklärt": {
+      target: "extraction",
+      field: "assignment_code",
+      message: `${assignmentLabel} aus den Stammdaten wählen. Projekt-Nr. und Zuordnungsart werden dann automatisch mitgesetzt.`,
+    },
+    "Zuordnung prüfen": {
+      target: "extraction",
+      field: "assignment_code",
+      message: `Vorgeschlagenes ${assignmentLabel} gegen Rechnung, Adresse und Bauherr prüfen. Wenn falsch, aus Stammdaten neu wählen.`,
+    },
+    "Rechnungsnummer fehlt": {
+      target: "extraction",
+      field: "invoice_number",
+      message: "Rechnungsnummer aus dem Beleg übernehmen und speichern.",
+    },
+    "Datum fehlt": {
+      target: "extraction",
+      field: "invoice_date",
+      message: "Rechnungsdatum aus dem Beleg übernehmen und speichern.",
+    },
+    "Brutto fehlt": {
+      target: "extraction",
+      field: "gross_amount",
+      message: "Bruttobetrag aus dem Beleg übernehmen und speichern.",
+    },
+    "Niedrige Sicherheit": {
+      target: "extraction",
+      field: "supplier_name",
+      message: "Kernwerte Lieferant, Datum, Beträge, Kostenart und Zuordnung gegen die Vorschau prüfen.",
+    },
+    "Offene Hinweise": {
+      target: "warnings",
+      field: "",
+      message: "Hinweise lesen und die betroffenen Felder korrigieren. Danach speichern und Vorschlag neu erstellen.",
+    },
+    "Mock-Erkennung": {
+      target: "extraction",
+      field: "supplier_name",
+      message: "Dieser Beleg wurde nur grob erkannt. Lieferant, Datum, Beträge, Kostenart und Zuordnung vollständig gegenprüfen.",
+    },
+  };
+
+  const target = targets[normalized] || {
+    target: "extraction",
+    field: "",
+    message: "Beleg prüfen, betroffene Felder korrigieren, speichern und anschließend Vorschlag neu erstellen.",
+  };
+
+  return {
+    documentId: document?.id,
+    reason: normalized,
+    ...target,
   };
 }
 

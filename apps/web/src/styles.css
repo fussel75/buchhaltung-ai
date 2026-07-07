@@ -1332,6 +1332,26 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+.problem-action-message,
+.quick-fix-note {
+  margin: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: #1d4f73;
+  background: #eff6ff;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.quick-fix-note {
+  margin-bottom: 12px;
+}
+
+.quick-fix-note strong {
+  color: #15384f;
+}
+
 .problem-work-list {
   display: grid;
   gap: 8px;
@@ -1422,6 +1442,7 @@ button:disabled {
   min-height: 30px;
   padding: 0 10px;
   font-size: 0.78rem;
+  width: 100%;
 }
 
 .document-head strong {
