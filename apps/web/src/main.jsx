@@ -447,23 +447,40 @@ function UploadApp() {
     );
   }
 
-  const openProblemWorkItem = useCallback((item) => {
-    const firstDocument = item?.documents?.[0];
-    if (!firstDocument?.id) return;
-
-    const focusTarget = problemCorrectionFocusTarget(item.reason, firstDocument, tenantProfile);
+  const openProblemDocument = useCallback((document, reason) => {
+    if (!document?.id) return;
+    const targetReason = reason || problemExtractionSummaryKey(problemExtractionReasons(document)[0] || "");
+    const focusTarget = problemCorrectionFocusTarget(targetReason, document, tenantProfile);
     setActiveView("review");
     setReviewFilter("problems");
-    setProblemReasonFilter(item.reason);
+    setProblemReasonFilter(targetReason);
     setReviewSort("problem_desc");
-    setFocusedReviewDocumentId(firstDocument.id);
+    setFocusedReviewDocumentId(document.id);
     setReviewFocusTarget(focusTarget);
     setExpandedDocumentIds((current) => (
-      current.includes(firstDocument.id) ? current : [...current, firstDocument.id]
+      current.includes(document.id) ? current : [...current, document.id]
     ));
-    setProblemActionMessage(`${item.reason}: ${focusTarget.message}`);
-    window.setTimeout(() => focusReviewDocumentCard(firstDocument.id, { focusAction: false }), 80);
+    setProblemActionMessage(`${targetReason}: ${focusTarget.message}`);
+    window.setTimeout(() => focusReviewDocumentCard(document.id, { focusAction: false }), 80);
   }, [tenantProfile]);
+
+  const openProblemWorkItem = useCallback((item) => {
+    openProblemDocument(item?.documents?.[0], item?.reason);
+  }, [openProblemDocument]);
+
+  const moveToNextProblemDocument = useCallback((currentDocumentId) => {
+    const currentReason = reviewFilter === "problems" ? problemReasonFilter : "";
+    const candidates = documents
+      .filter((document) => document.extraction)
+      .filter((document) => documentMatchesProblemSummary(document, currentReason))
+      .sort((left, right) => compareReviewDocuments(left, right, "problem_desc"));
+    if (!candidates.length) return;
+    const currentIndex = candidates.findIndex((document) => document.id === currentDocumentId);
+    const nextDocument = currentIndex >= 0
+      ? candidates[(currentIndex + 1) % candidates.length]
+      : candidates[0];
+    openProblemDocument(nextDocument, currentReason || problemExtractionSummaryKey(problemExtractionReasons(nextDocument)[0] || ""));
+  }, [documents, openProblemDocument, problemReasonFilter, reviewFilter]);
 
   const uploadFile = useCallback(
     async (file) => {
@@ -926,8 +943,10 @@ function UploadApp() {
         const result = await response.json();
         await loadDocuments();
         setNotice(`Buchungsvorschlag erstellt: ${result.document.original_filename}`);
+        return result.document;
       } catch (prepareError) {
         setError(prepareError.message);
+        return null;
       } finally {
         setApprovingIds((current) => current.filter((id) => id !== document.id));
       }
@@ -1348,13 +1367,25 @@ function UploadApp() {
         }
         await loadDocuments();
         setNotice(`Extraktionsdaten gespeichert: ${result.document.original_filename}. Bitte Buchungsvorschlag neu erstellen.${ruleNotice}`);
+        return result.document;
       } catch (saveError) {
         setError(saveError.message);
+        return null;
       } finally {
         setSavingExtractionIds((current) => current.filter((id) => id !== document.id));
       }
     },
     [activeTenantId, apiFetch, loadDocuments],
+  );
+
+  const saveExtractionAndPrepareReview = useCallback(
+    async (document, values) => {
+      const savedDocument = await saveExtraction(document, values);
+      if (!savedDocument) return null;
+      const preparedDocument = await prepareReview(document);
+      return preparedDocument;
+    },
+    [prepareReview, saveExtraction],
   );
 
   const selectPaymentDecision = useCallback(
@@ -2114,7 +2145,9 @@ function UploadApp() {
         onPrevious={() => moveFocusedReview(-1)}
         onNext={() => moveFocusedReview(1)}
         onSaveExtraction={saveExtraction}
+        onSaveExtractionAndPrepare={saveExtractionAndPrepareReview}
         onPrepareReview={prepareReview}
+        onNextProblem={() => moveToNextProblemDocument(focusedReviewDocument?.id)}
         onSelectPayment={selectPaymentDecision}
         onSaveSuggestion={saveBookingSuggestion}
       />
@@ -2527,7 +2560,17 @@ function ProblemWorkboard({ items, activeReason, actionMessage, onSelect, onOpen
   );
 }
 
-function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isSaving, onDirtyChange, onSave }) {
+function ExtractionEditForm({
+  document,
+  tenantProfile,
+  assignmentUnits = [],
+  isSaving,
+  isPreparingReview = false,
+  canPrepareReview = false,
+  onDirtyChange,
+  onSave,
+  onSaveAndPrepare,
+}) {
   const [form, setForm] = useState(() => extractionFormFromDocument(document));
   const [assignmentSearch, setAssignmentSearch] = useState("");
   const [rememberSupplierRule, setRememberSupplierRule] = useState(false);
@@ -2654,6 +2697,10 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
   function submit(event) {
     event.preventDefault();
     onSave(document, { ...form, remember_supplier_rule: rememberSupplierRule });
+  }
+
+  function saveAndPrepare() {
+    onSaveAndPrepare?.(document, { ...form, remember_supplier_rule: rememberSupplierRule });
   }
 
   return (
@@ -2822,6 +2869,16 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
         <button type="submit" disabled={isSaving || isApproved}>
           {isApproved ? "Freigegeben" : isSaving ? "Speichert..." : "Speichern"}
         </button>
+        {canPrepareReview && onSaveAndPrepare ? (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={saveAndPrepare}
+            disabled={isSaving || isPreparingReview || isApproved}
+          >
+            {isPreparingReview ? "Erstellt..." : "Speichern + Vorschlag neu"}
+          </button>
+        ) : null}
       </div>
     </form>
   );
@@ -3177,7 +3234,9 @@ function ReviewFocusDialog({
   onPrevious,
   onNext,
   onSaveExtraction,
+  onSaveExtractionAndPrepare,
   onPrepareReview,
+  onNextProblem,
   onSelectPayment,
   onSaveSuggestion,
 }) {
@@ -3186,6 +3245,7 @@ function ReviewFocusDialog({
   const [navigationWarning, setNavigationWarning] = useState("");
   const canCreateReviewSuggestion = document?.extraction
     && (!document.booking_suggestions?.length || (document.status !== "review_ready" && document.status !== "review_approved"));
+  const hasProblemFlow = Boolean(focusTarget?.reason);
   const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion || isPreparingReview;
 
   useEffect(() => {
@@ -3323,6 +3383,11 @@ function ReviewFocusDialog({
                 {isPreparingReview ? "Erstellt..." : document.booking_suggestions?.length ? "Vorschlag neu" : "Vorschlag"}
               </button>
             ) : null}
+            {hasProblemFlow ? (
+              <button className="secondary-button" type="button" onClick={onNextProblem} disabled={isBusy || hasUnsavedExtractionChanges}>
+                Nächstes Problem
+              </button>
+            ) : null}
             <button className="secondary-button" type="button" onClick={requestNext} disabled={isBusy || !hasNext}>
               Nächster
             </button>
@@ -3350,11 +3415,14 @@ function ReviewFocusDialog({
                 tenantProfile={tenantProfile}
                 assignmentUnits={assignmentUnits}
                 isSaving={isSavingExtraction}
+                isPreparingReview={isPreparingReview}
+                canPrepareReview={canCreateReviewSuggestion}
                 onDirtyChange={(isDirty) => {
                   setHasUnsavedExtractionChanges(isDirty);
                   if (!isDirty) setNavigationWarning("");
                 }}
                 onSave={onSaveExtraction}
+                onSaveAndPrepare={onSaveExtractionAndPrepare}
               />
             </div>
             <AssignmentMatchNote rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />
