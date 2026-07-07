@@ -3315,6 +3315,31 @@ class BookingSuggestionTests(TestCase):
                 database_service.find_assignment_unit_by_text("demo-mandant", "Materialrechnung für Dachsanierung in Hamburg"),
             )
 
+    def test_assignment_lookup_accepts_bauherr_as_project_signal(self):
+        assignment = {
+            "code": "Buwg4",
+            "label": "Buwg4",
+            "kind": "construction_project",
+            "project_number": "25-00009",
+            "order_number": "25-00012",
+            "customer_number": "10794",
+            "description": "Dachsanierung EFH",
+            "client_name": "Ralf Esch",
+            "source_status": "Aktiv",
+            "address_line": "Bucheckerweg 4",
+            "postal_code": "22175",
+            "city": "Hamburg",
+            "external_id": "project-buwg",
+            "aliases": [],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            match = database_service.find_assignment_unit_match_by_text("demo-mandant", "Auftraggeber/Bauherr: Ralf Esch")
+
+        self.assertEqual(match["assignment"], assignment)
+        self.assertIn("Bauherr", match["reasons"])
+
     def test_review_validation_blocks_missing_accounting_rule_and_payment_choice(self):
         document = {
             "id": str(uuid4()),

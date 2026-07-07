@@ -2405,15 +2405,69 @@ def _assignment_unit_match(
     customer_reference: str | None,
     text: str,
 ) -> dict | None:
-    for explicit_hint in (customer_reference, delivery_address):
+    for source, explicit_hint in _assignment_lookup_candidates(delivery_address, customer_reference, text):
         match = _find_assignment_unit_match(tenant_id, explicit_hint)
         if match and match["assignment"]["is_active"]:
-            match["source"] = "Kundenreferenz" if explicit_hint == customer_reference else "Lieferadresse"
+            match["source"] = source
             return match
-    match = _find_assignment_unit_match(tenant_id, text[:4000])
+    match = _find_assignment_unit_match(tenant_id, text[:12000])
     if match:
         match["source"] = "Belegtext"
     return match
+
+
+def _assignment_lookup_candidates(
+    delivery_address: str | None,
+    customer_reference: str | None,
+    text: str,
+) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    if customer_reference:
+        candidates.append(("Kundenreferenz", customer_reference))
+    if delivery_address:
+        candidates.append(("Lieferadresse", delivery_address))
+    for snippet in _assignment_context_snippets(text):
+        candidates.append(("Projektstammdaten-Abgleich", snippet))
+
+    seen: set[str] = set()
+    unique: list[tuple[str, str]] = []
+    for source, value in candidates:
+        normalized = _compact_search_text(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append((source, value))
+    return unique
+
+
+def _assignment_context_snippets(text: str) -> list[str]:
+    if not text:
+        return []
+    lines = [line.strip() for line in text.splitlines()]
+    snippets: list[str] = []
+    for index, line in enumerate(lines):
+        if _has_assignment_context_marker(line):
+            window = " ".join(part for part in lines[max(0, index - 1): index + 4] if part)
+            if window:
+                snippets.append(window)
+    return snippets[:20]
+
+
+def _has_assignment_context_marker(line: str) -> bool:
+    normalized_line = line.lower()
+    direct_markers = [
+        "bauvorhaben",
+        "bestelldaten",
+        "kommission",
+        "kundenreferenz",
+        "lieferanschrift",
+        "lieferadresse",
+        "auftraggeber",
+        "bauherr",
+    ]
+    if any(marker in normalized_line for marker in direct_markers):
+        return True
+    return bool(search(r"\bprojekt(?:nr|nummer)?\b\s*[:.-]?", normalized_line))
 
 
 def _find_assignment_unit_match(tenant_id: str, lookup_text: str | None) -> dict | None:

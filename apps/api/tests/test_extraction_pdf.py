@@ -63,6 +63,30 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(text, "kurz")
         self.assertEqual(text.source, "pypdf_short")
 
+    def test_assignment_match_uses_project_context_beyond_first_text_chunk(self):
+        assignment = {
+            "code": "Hk92",
+            "label": "Hk92",
+            "kind": "construction_project",
+            "project_number": "26-00007",
+            "address_line": "Heukoppel 92",
+            "is_active": True,
+        }
+
+        def find_assignment_match(_tenant_id, lookup_text):
+            if "Heukoppel 92" in lookup_text:
+                return {"assignment": assignment, "score": 150, "reasons": ["Projektadresse"]}
+            return None
+
+        text = "Rechnung\n" + ("Position ohne Projektbezug\n" * 260) + "Projekt:\nHeukoppel 92\n22179 Hamburg\n"
+
+        with patch.object(extraction_service, "find_assignment_unit_match_by_text", side_effect=find_assignment_match):
+            match = extraction_service._assignment_unit_match("demo-mandant", None, None, text)
+
+        self.assertEqual(match["assignment"], assignment)
+        self.assertEqual(match["source"], "Projektstammdaten-Abgleich")
+        self.assertIn("Projektadresse", match["reasons"])
+
     def test_pymupdf_ocr_uses_german_and_english_languages(self):
         class FakePdf:
             def __init__(self, pages):

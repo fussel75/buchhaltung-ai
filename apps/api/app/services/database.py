@@ -3422,8 +3422,8 @@ def _assignment_match_score(assignment: dict[str, Any], normalized_text: str) ->
         ("Adresse", assignment.get("address_line"), 130),
         ("Kundennummer", assignment.get("customer_number"), 95),
         ("Externe ID", assignment.get("external_id"), 80),
-        ("Bauherr", assignment.get("client_name"), 55),
-        ("Beschreibung", assignment.get("description"), 45),
+        ("Bauherr", assignment.get("client_name"), 90),
+        ("Beschreibung", assignment.get("description"), 65),
     ]
     weighted_candidates.extend(("Alias", alias, 120) for alias in assignment.get("aliases") or [])
 
