@@ -672,18 +672,18 @@ button:disabled {
 .project-row {
   display: grid;
   grid-template-columns:
-    minmax(110px, 0.8fr)
-    minmax(110px, 0.8fr)
-    minmax(100px, 0.7fr)
-    minmax(150px, 1fr)
-    minmax(220px, 1.4fr)
-    minmax(200px, 1.2fr)
-    minmax(150px, 1fr)
-    minmax(140px, 0.9fr)
-    minmax(220px, 1.4fr)
+    minmax(92px, 0.55fr)
+    minmax(96px, 0.55fr)
+    minmax(86px, 0.48fr)
+    minmax(130px, 0.75fr)
+    minmax(200px, 1.15fr)
+    minmax(180px, 1fr)
+    minmax(130px, 0.75fr)
+    minmax(110px, 0.6fr)
+    minmax(340px, 1.9fr)
     minmax(90px, 0.6fr);
   gap: 12px;
-  min-width: 1480px;
+  min-width: 1460px;
   padding: 12px 14px;
   align-items: center;
   border-top: 1px solid var(--border);

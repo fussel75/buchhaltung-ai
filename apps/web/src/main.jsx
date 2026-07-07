@@ -2274,9 +2274,9 @@ function ProjectsAdmin({ apiFetch, tenantId, tenantProfile }) {
         {sortedProjects.length ? (
           <div className="project-table">
             <div className="project-row project-head">
-              <ProjectSortHeader label="Projektnummer" sortKey="project_number" sortConfig={sortConfig} onSort={changeProjectSort} />
-              <ProjectSortHeader label="Auftragsnummer" sortKey="order_number" sortConfig={sortConfig} onSort={changeProjectSort} />
-              <ProjectSortHeader label="Kundennummer" sortKey="customer_number" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Projekt-Nr." sortKey="project_number" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Auftragsnr." sortKey="order_number" sortConfig={sortConfig} onSort={changeProjectSort} />
+              <ProjectSortHeader label="Kundennr." sortKey="customer_number" sortConfig={sortConfig} onSort={changeProjectSort} />
               <ProjectSortHeader label="Projektname" sortKey="label" sortConfig={sortConfig} onSort={changeProjectSort} />
               <ProjectSortHeader label="Adresse" sortKey="address" sortConfig={sortConfig} onSort={changeProjectSort} />
               <ProjectSortHeader label="Beschreibung" sortKey="description" sortConfig={sortConfig} onSort={changeProjectSort} />
@@ -2523,7 +2523,7 @@ function ExtractionEditForm({ document, tenantProfile, assignmentUnits = [], isS
   function handleAssignmentKeyDown(event) {
     if (!filteredAssignmentOptions.length) return;
     const selectedIndex = filteredAssignmentOptions.findIndex((assignment) => assignment.id === selectedAssignmentId);
-    const focusedIndex = filteredAssignmentOptions.findIndex((assignment) => assignmentOptionRefs.current[assignment.id] === document.activeElement);
+    const focusedIndex = filteredAssignmentOptions.findIndex((assignment) => assignmentOptionRefs.current[assignment.id] === window.document.activeElement);
     const currentIndex = focusedIndex >= 0 ? focusedIndex : (selectedIndex >= 0 ? selectedIndex : 0);
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -5584,7 +5584,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                   <option value="">{assignmentOptions.length ? "Projekt wählen" : "Keine Stammdaten"}</option>
                   {assignmentOptions.map((assignment) => (
                     <option key={`booking-assignment-${suggestion.id}-${assignment.id}`} value={assignment.id}>
-                      {[assignment.project_number, assignment.review_code].filter(Boolean).join(" · ")}
+                      {formatAssignmentPickerLabel(assignment)}
                     </option>
                   ))}
                 </select>
