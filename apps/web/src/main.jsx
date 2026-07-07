@@ -2721,8 +2721,9 @@ function AssignmentMatchNote({ rawResult, tenantProfile }) {
   if (!match) return null;
   const label = [match.project_number, match.label || match.code].filter(Boolean).join(" / ");
   const reasons = Array.isArray(match.reasons) ? match.reasons.filter(Boolean) : [];
+  const needsReview = assignmentMatchNeedsReview(match);
   return (
-    <div className="match-note">
+    <div className={needsReview ? "match-note needs-review" : "match-note"}>
       <strong>{tenantProfile.assignment_label_singular} erkannt: {label || "-"}</strong>
       <span>
         {[match.source ? `Quelle: ${match.source}` : null, match.score ? `Score: ${match.score}` : null]
@@ -2730,8 +2731,15 @@ function AssignmentMatchNote({ rawResult, tenantProfile }) {
           .join(" · ")}
       </span>
       {reasons.length ? <small>Treffer über {reasons.join(", ")}</small> : null}
+      {needsReview ? <em>Bitte prüfen: indirekter oder knapper Stammdaten-Treffer.</em> : null}
     </div>
   );
+}
+
+function assignmentMatchNeedsReview(match) {
+  if (!match) return false;
+  const score = Number(match.score);
+  return match.source === "Projektstammdaten-Abgleich" || (!Number.isNaN(score) && score < 120);
 }
 
 function DocumentPreview({ document }) {
@@ -6588,6 +6596,9 @@ function problemExtractionReasons(document) {
   ) {
     reasons.push("Zuordnung ungeklärt");
   }
+  if (assignmentMatchNeedsReview(rawResult.assignment_match)) {
+    reasons.push("Zuordnung prüfen");
+  }
 
   return reasons;
 }
@@ -7099,6 +7110,7 @@ function problemReasonPriority(reason) {
     "PDF nicht lesbar": 100,
     "Lieferant ungeklärt": 90,
     "Zuordnung ungeklärt": 80,
+    "Zuordnung prüfen": 78,
     "Brutto fehlt": 75,
     "Rechnungsnummer fehlt": 70,
     "Datum fehlt": 65,

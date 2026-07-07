@@ -3942,7 +3942,21 @@ def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] 
         and not raw_result.get("project_number")
     ):
         reasons.append("Zuordnung ungeklärt")
+    assignment_problem = _assignment_match_problem_reason(raw_result.get("assignment_match"))
+    if assignment_problem:
+        reasons.append(assignment_problem)
     return reasons
+
+
+def _assignment_match_problem_reason(match_payload: dict[str, Any] | None) -> str | None:
+    if not match_payload:
+        return None
+    source = str(match_payload.get("source") or "")
+    score = match_payload.get("score")
+    score_value = Decimal(str(score)) if score not in (None, "") else None
+    if source == "Projektstammdaten-Abgleich" or (score_value is not None and score_value < Decimal("120")):
+        return "Zuordnung prüfen"
+    return None
 
 
 def _supplier_needs_review(supplier_name: str | None, invoice_number: str | None = None) -> bool:

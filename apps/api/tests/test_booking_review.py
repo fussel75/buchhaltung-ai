@@ -2320,6 +2320,61 @@ class BookingSuggestionTests(TestCase):
         self.assertIn("1 Hinweis", reasons)
         self.assertIn("Zuordnung ungeklärt", reasons)
 
+    def test_document_serialization_marks_indirect_assignment_match_for_review(self):
+        now = datetime.now(UTC)
+        document = database_service._serialize_document(
+            {
+                "id": uuid4(),
+                "tenant_id": "demo-mandant",
+                "original_filename": "rechnung.pdf",
+                "normalized_filename": None,
+                "content_type": "application/pdf",
+                "sha256": "abc",
+                "size_bytes": 123,
+                "storage_path": "demo/originals/rechnung.pdf",
+                "status": "extracted",
+                "processing_job_id": None,
+                "processing_started_at": None,
+                "duplicate_of": None,
+                "created_at": now,
+                "updated_at": now,
+                "extraction": {
+                    "id": uuid4(),
+                    "document_id": uuid4(),
+                    "tenant_id": "demo-mandant",
+                    "supplier_name": "Lieferant GmbH",
+                    "invoice_number": "R-1",
+                    "invoice_date": date(2026, 6, 12),
+                    "service_period": None,
+                    "net_amount": Decimal("100.00"),
+                    "tax_amount": Decimal("19.00"),
+                    "gross_amount": Decimal("119.00"),
+                    "currency": "EUR",
+                    "confidence": Decimal("0.88"),
+                    "warnings": [],
+                    "raw_result": {
+                        "source": "pdf_text",
+                        "assignment_code": "Buwg4",
+                        "project_number": "25-00009",
+                        "assignment_match": {
+                            "code": "Buwg4",
+                            "label": "Buwg4",
+                            "project_number": "25-00009",
+                            "score": 90,
+                            "source": "Projektstammdaten-Abgleich",
+                            "reasons": ["Bauherr"],
+                        },
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                "booking_suggestions": [],
+                "payment_decision": None,
+            }
+        )
+
+        self.assertIn("Zuordnung prüfen", document["extraction"]["problem_reasons"])
+
     def test_update_extraction_resets_review_artifacts(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"

@@ -2556,6 +2556,23 @@ code {
   color: #52657d;
 }
 
+.match-note.needs-review {
+  border-color: #fed7aa;
+  color: #7c2d12;
+  background: #fff7ed;
+}
+
+.match-note.needs-review span,
+.match-note.needs-review small {
+  color: #9a3412;
+}
+
+.match-note em {
+  color: #7c2d12;
+  font-style: normal;
+  font-weight: 760;
+}
+
 .extraction-edit-grid {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   border-top: 0;
