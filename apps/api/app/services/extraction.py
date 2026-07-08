@@ -205,6 +205,54 @@ def run_mock_extraction(
     )
 
 
+def run_ai_extraction(
+    document_id: UUID,
+    *,
+    actor: str = "system",
+) -> dict:
+    document = get_document(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    if document.get("status") == "review_approved":
+        raise HTTPException(status_code=409, detail="KI-Prüfung blockiert: Beleg ist final freigegeben.")
+    if not document.get("extraction"):
+        raise HTTPException(status_code=409, detail="KI-Prüfung blockiert: Beleg hat noch keine Extraktion.")
+    if not _is_pdf_document(document):
+        raise HTTPException(status_code=415, detail="KI-Prüfung ist aktuell nur für PDF-Belege verfügbar.")
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.ai_extraction_started",
+        document_id=document_id,
+        actor=actor,
+        details={"previous_status": document.get("status")},
+    )
+
+    text = _extract_pdf_text(document["storage_path"])
+    extraction = maybe_enhance_extraction_with_ai(
+        document=document,
+        extraction=dict(document["extraction"]),
+        pdf_text=str(text),
+        force=True,
+    )
+    extraction = _with_pdf_text_diagnostics(extraction, text)
+    saved = save_document_extraction(
+        document_id=document_id,
+        tenant_id=document["tenant_id"],
+        extraction=extraction,
+    )
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.ai_extraction_completed",
+        document_id=document_id,
+        actor=actor,
+        details={
+            "ai_status": ((saved.get("extraction") or {}).get("raw_result") or {}).get("ai_extraction", {}).get("status"),
+        },
+    )
+    return saved
+
+
 def _build_extraction_result(document: dict) -> dict:
     if _is_standalone_xml_document(document):
         structured = _build_standalone_xml_result(document)

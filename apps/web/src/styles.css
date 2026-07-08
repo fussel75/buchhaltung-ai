@@ -2766,6 +2766,54 @@ code {
   font-weight: 760;
 }
 
+.ai-extraction-note {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  border: 1px solid #d6dee8;
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: #344054;
+  background: #f8fafc;
+  font-size: 0.82rem;
+}
+
+.ai-extraction-note.blue {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.ai-extraction-note.warning {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.ai-extraction-note > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-extraction-note strong {
+  color: #0d1726;
+}
+
+.ai-extraction-note span {
+  color: #667085;
+  font-size: 0.76rem;
+  font-weight: 760;
+}
+
+.ai-extraction-note p {
+  margin: 0;
+}
+
+.ai-extraction-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .extraction-edit-grid {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   border-top: 0;

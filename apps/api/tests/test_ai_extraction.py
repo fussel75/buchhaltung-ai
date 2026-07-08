@@ -118,3 +118,49 @@ class AiExtractionTests(TestCase):
         self.assertEqual(result["supplier_name"], "Unklar")
         self.assertIn("KI-Extraktion nicht verfügbar: timeout.", result["warnings"])
         self.assertEqual(result["raw_result"]["ai_extraction"]["status"], "failed")
+
+    def test_force_runs_ai_even_for_high_confidence_extraction(self):
+        extraction = {
+            "supplier_name": "Theo Foerch GmbH & Co. KG",
+            "invoice_number": "3161691971",
+            "invoice_date": "2026-05-21",
+            "gross_amount": Decimal("8.77"),
+            "confidence": Decimal("0.99"),
+            "warnings": [],
+            "raw_result": {
+                "supplier_name": "Theo Foerch GmbH & Co. KG",
+                "invoice_number": "3161691971",
+                "invoice_date": "2026-05-21",
+                "gross_amount": Decimal("8.77"),
+                "source": "pdf_text_rules",
+                "assignment_type": "assigned",
+            },
+        }
+        ai_payload = {
+            "customer_number": "425590",
+            "confidence": "0.93",
+            "evidence": ["Kundennummer 425590"],
+            "warnings": [],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload) as mocked_call,
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "test.pdf"},
+                extraction=extraction,
+                pdf_text="Kundennummer 425590",
+                force=True,
+            )
+
+        mocked_call.assert_called_once()
+        self.assertEqual(result["raw_result"]["customer_number"], "425590")
+        self.assertEqual(result["raw_result"]["ai_extraction"]["status"], "applied")

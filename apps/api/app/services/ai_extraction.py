@@ -75,11 +75,12 @@ def maybe_enhance_extraction_with_ai(
     document: dict[str, Any],
     extraction: dict[str, Any],
     pdf_text: str | None,
+    force: bool = False,
 ) -> dict[str, Any]:
     settings = get_settings()
     if not settings.ai_extraction_enabled or not settings.ai_extraction_api_key:
         return extraction
-    if not _should_run_ai(extraction, settings.ai_extraction_min_confidence):
+    if not force and not _should_run_ai(extraction, settings.ai_extraction_min_confidence):
         return extraction
 
     try:

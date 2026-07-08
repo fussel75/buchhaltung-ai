@@ -208,6 +208,7 @@ function UploadApp() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [extractingIds, setExtractingIds] = useState([]);
+  const [aiCheckingIds, setAiCheckingIds] = useState([]);
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
   const [approvingIds, setApprovingIds] = useState([]);
@@ -648,6 +649,42 @@ function UploadApp() {
         setError(extractError.message);
       } finally {
         setExtractingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
+  const aiCheckDocument = useCallback(
+    async (document) => {
+      const confirmed = window.confirm(
+        `Beleg "${document.original_filename}" mit KI prüfen? Bestehende Buchungsvorschläge werden verworfen, wenn die Extraktion gespeichert wird.`,
+      );
+      if (!confirmed) return;
+
+      setError("");
+      setNotice("");
+      setAiCheckingIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/ai-extract`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({}));
+          throw new Error(formatApiError(result.detail, `KI-Prüfung fehlgeschlagen: ${response.status}`));
+        }
+
+        const result = await response.json();
+        await loadDocuments();
+        const aiStatus = result.document?.extraction?.raw_result?.ai_extraction?.status;
+        setNotice(aiStatus === "applied"
+          ? `KI-Prüfung übernommen: ${result.document.original_filename}`
+          : `KI-Prüfung abgeschlossen: ${result.document.original_filename}`);
+      } catch (aiError) {
+        setError(aiError.message);
+      } finally {
+        setAiCheckingIds((current) => current.filter((id) => id !== document.id));
       }
     },
     [apiFetch, loadDocuments],
@@ -1937,6 +1974,16 @@ function UploadApp() {
                         {approvingIds.includes(document.id) ? "Erstellt..." : document.booking_suggestions?.length ? "Vorschlag neu" : "Vorschlag"}
                       </button>
                     ) : null}
+                    {document.extraction && document.status !== "review_approved" ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => aiCheckDocument(document)}
+                        disabled={aiCheckingIds.includes(document.id) || extractingIds.includes(document.id)}
+                      >
+                        {aiCheckingIds.includes(document.id) ? "KI läuft..." : "KI prüfen"}
+                      </button>
+                    ) : null}
                     {document.booking_suggestions?.length && document.status === "review_ready" ? (
                       <button
                         type="button"
@@ -2033,6 +2080,7 @@ function UploadApp() {
                               onSave={saveExtraction}
                             />
                             <AssignmentMatchNote rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />
+                            <AiExtractionNote rawResult={document.extraction.raw_result} />
 
                             {document.extraction?.warnings?.length ? (
                               <ul className="warnings">
@@ -2131,6 +2179,7 @@ function UploadApp() {
         isSavingPayment={focusedReviewDocument ? savingPaymentIds.includes(focusedReviewDocument.id) : false}
         isSavingSuggestion={focusedReviewDocument ? savingSuggestionIds.includes(focusedReviewDocument.id) : false}
         isPreparingReview={focusedReviewDocument ? approvingIds.includes(focusedReviewDocument.id) : false}
+        isAiChecking={focusedReviewDocument ? aiCheckingIds.includes(focusedReviewDocument.id) : false}
         hasPrevious={focusedReviewIndex > 0}
         hasNext={focusedReviewIndex >= 0 && focusedReviewIndex < focusableReviewDocuments.length - 1}
         positionLabel={focusedReviewPositionLabel}
@@ -2146,6 +2195,7 @@ function UploadApp() {
         onNext={() => moveFocusedReview(1)}
         onSaveExtraction={saveExtraction}
         onSaveExtractionAndPrepare={saveExtractionAndPrepareReview}
+        onAiCheck={aiCheckDocument}
         onPrepareReview={prepareReview}
         onNextProblem={() => moveToNextProblemDocument(focusedReviewDocument?.id)}
         onSelectPayment={selectPaymentDecision}
@@ -2940,6 +2990,65 @@ function AssignmentKindOptions() {
   );
 }
 
+function AiExtractionNote({ rawResult }) {
+  const ai = rawResult?.ai_extraction;
+  if (!ai) return null;
+
+  const acceptedFields = Array.isArray(ai.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
+  const evidence = Array.isArray(ai.evidence) ? ai.evidence.filter(Boolean) : [];
+  const warnings = Array.isArray(ai.warnings) ? ai.warnings.filter(Boolean) : [];
+  const confidence = Number(ai.confidence);
+  const statusLabel = {
+    applied: "KI angewendet",
+    no_changes: "KI geprüft",
+    failed: "KI fehlgeschlagen",
+  }[ai.status] || "KI geprüft";
+  const tone = ai.status === "failed" ? "warning" : ai.status === "applied" ? "blue" : "neutral";
+
+  return (
+    <div className={`ai-extraction-note ${tone}`}>
+      <div>
+        <strong>{statusLabel}</strong>
+        {ai.model ? <span>{ai.model}</span> : null}
+        {!Number.isNaN(confidence) ? <span>{Math.round(confidence * 100)} %</span> : null}
+      </div>
+      {acceptedFields.length ? <p>Übernommen: {acceptedFields.map(formatAiFieldLabel).join(", ")}</p> : null}
+      {evidence.length ? (
+        <ul>
+          {evidence.slice(0, 3).map((item, index) => (
+            <li key={`${item}-${index}`}>{item}</li>
+          ))}
+        </ul>
+      ) : null}
+      {warnings.length ? <p>{warnings.join(" · ")}</p> : null}
+    </div>
+  );
+}
+
+function formatAiFieldLabel(field) {
+  const labels = {
+    supplier_name: "Lieferant",
+    invoice_number: "Rechnungsnummer",
+    invoice_date: "Datum",
+    customer_number: "Kunden-Nr.",
+    document_type: "Belegart",
+    cost_category: "Kostenart",
+    assignment_code: "Zuordnung",
+    assignment_kind: "Zuordnungsart",
+    project_number: "Projekt-Nr.",
+    net_amount: "Netto",
+    tax_amount: "USt",
+    gross_amount: "Brutto",
+    due_date: "Zahlbar bis",
+    discount_due_date: "Skonto bis",
+    discount_base: "Skonto-Basis",
+    discount_amount: "Skonto",
+    discounted_payable_amount: "Zahlbetrag Skonto",
+    item_summary: "Artikel/Leistung",
+  };
+  return labels[field] || field;
+}
+
 function AssignmentMatchNote({ rawResult, tenantProfile }) {
   const match = rawResult?.assignment_match;
   if (!match) return null;
@@ -3266,6 +3375,7 @@ function ReviewFocusDialog({
   isSavingPayment,
   isSavingSuggestion,
   isPreparingReview,
+  isAiChecking,
   hasPrevious,
   hasNext,
   positionLabel,
@@ -3277,6 +3387,7 @@ function ReviewFocusDialog({
   onNext,
   onSaveExtraction,
   onSaveExtractionAndPrepare,
+  onAiCheck,
   onPrepareReview,
   onNextProblem,
   onSelectPayment,
@@ -3288,7 +3399,7 @@ function ReviewFocusDialog({
   const canCreateReviewSuggestion = document?.extraction
     && (!document.booking_suggestions?.length || (document.status !== "review_ready" && document.status !== "review_approved"));
   const hasProblemFlow = Boolean(focusTarget?.reason);
-  const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion || isPreparingReview;
+  const isBusy = isSavingExtraction || isSavingPayment || isSavingSuggestion || isPreparingReview || isAiChecking;
 
   useEffect(() => {
     setHasUnsavedExtractionChanges(false);
@@ -3425,6 +3536,17 @@ function ReviewFocusDialog({
                 {isPreparingReview ? "Erstellt..." : document.booking_suggestions?.length ? "Vorschlag neu" : "Vorschlag"}
               </button>
             ) : null}
+            {document?.extraction && document.status !== "review_approved" ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onAiCheck(document)}
+                disabled={isBusy || hasUnsavedExtractionChanges}
+                title={hasUnsavedExtractionChanges ? "Bitte erst Extraktionsdaten speichern." : ""}
+              >
+                {isAiChecking ? "KI läuft..." : "KI prüfen"}
+              </button>
+            ) : null}
             {hasProblemFlow ? (
               <button className="secondary-button" type="button" onClick={onNextProblem} disabled={isBusy || hasUnsavedExtractionChanges}>
                 Nächstes Problem
@@ -3468,6 +3590,7 @@ function ReviewFocusDialog({
               />
             </div>
             <AssignmentMatchNote rawResult={document.extraction.raw_result} tenantProfile={tenantProfile} />
+            <AiExtractionNote rawResult={document.extraction.raw_result} />
             {document.extraction?.warnings?.length ? (
               <ul className="warnings" data-review-section="warnings">
                 {document.extraction.warnings.map((warning, index) => (

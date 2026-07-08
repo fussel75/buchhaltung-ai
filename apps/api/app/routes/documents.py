@@ -38,7 +38,7 @@ from app.services.database import (
     enrich_review_validation_detail,
 )
 from app.services.bulk_jobs import run_document_bulk_job
-from app.services.extraction import run_mock_extraction
+from app.services.extraction import run_ai_extraction, run_mock_extraction
 from app.services.preview import PreviewError, extract_pdf_preview_text, pdf_page_count, render_pdf_preview_page
 from app.services.storage import (
     delete_stored_document,
@@ -692,6 +692,13 @@ def reextract_document(document_id: UUID, payload: DocumentReextractRequest, req
     document = require_document_access(request, document_id)
     _ensure_not_processing(document)
     return {"document": run_mock_extraction(document_id, force=True, actor=_actor(request))}
+
+
+@router.post("/{document_id}/ai-extract")
+def ai_extract_document(document_id: UUID, request: Request) -> dict[str, Any]:
+    document = require_document_access(request, document_id)
+    _ensure_not_processing(document)
+    return {"document": run_ai_extraction(document_id, actor=_actor(request))}
 
 
 @router.post("/{document_id}/review")
