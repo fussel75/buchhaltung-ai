@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     synology_hapak_base_url: str | None = None
     synology_hapak_username: str | None = None
     synology_hapak_password: str | None = None
+    ai_extraction_enabled: bool = False
+    ai_extraction_api_key: str | None = None
+    ai_extraction_base_url: str = "https://openrouter.ai/api/v1"
+    ai_extraction_model: str = "openai/gpt-4o-mini"
+    ai_extraction_timeout_seconds: int = 45
+    ai_extraction_min_confidence: float = 0.90
+    ai_extraction_max_text_chars: int = 18000
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -12,6 +12,7 @@ from pypdf import PdfReader
 
 from app.config import get_settings
 from app.services.cost_categories import VALID_COST_CATEGORIES, split_cost_category_values
+from app.services.ai_extraction import maybe_enhance_extraction_with_ai
 from app.services.database import (
     find_assignment_unit_match_by_text,
     find_assignment_unit_by_text,
@@ -646,22 +647,22 @@ def _build_pdf_text_result(document: dict) -> dict:
     if len(text.strip()) < 80:
         supporting_document = _build_tax_supporting_document_result(document, text)
         if supporting_document:
-            return _with_pdf_text_diagnostics(supporting_document, text)
+            return _finalize_pdf_result(document, supporting_document, text)
         tank_receipt = _build_tank_receipt_result(document, text)
         if tank_receipt:
-            return _with_pdf_text_diagnostics(tank_receipt, text)
+            return _finalize_pdf_result(document, tank_receipt, text)
         dammers_invoice = _build_scanned_dammers_invoice_result(document)
         if dammers_invoice:
-            return _with_pdf_text_diagnostics(dammers_invoice, text)
-        return _with_pdf_text_diagnostics(_build_unreadable_pdf_result(document), text)
+            return _finalize_pdf_result(document, dammers_invoice, text)
+        return _finalize_pdf_result(document, _build_unreadable_pdf_result(document), text)
 
     supporting_document = _build_tax_supporting_document_result(document, text)
     if supporting_document:
-        return _with_pdf_text_diagnostics(supporting_document, text)
+        return _finalize_pdf_result(document, supporting_document, text)
 
     tank_receipt = _build_tank_receipt_result(document, text)
     if tank_receipt:
-        return _with_pdf_text_diagnostics(tank_receipt, text)
+        return _finalize_pdf_result(document, tank_receipt, text)
 
     invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
@@ -910,7 +911,7 @@ def _build_pdf_text_result(document: dict) -> dict:
     if reverse_charge["is_reverse_charge"]:
         warnings.append("§13b/Steuerschuldnerschaft erkannt: Netto-Rechnung fachlich prüfen.")
 
-    return _with_pdf_text_diagnostics({
+    return _finalize_pdf_result(document, {
         "supplier_name": supplier_name,
         "invoice_number": invoice_number,
         "customer_number": customer_number,
@@ -1557,6 +1558,11 @@ def _with_pdf_text_diagnostics(result: dict, text: str) -> dict:
     result["pdf_text_source"] = getattr(text, "source", "unknown")
     result["pdf_text_length"] = len(text.strip())
     return result
+
+
+def _finalize_pdf_result(document: dict, result: dict, text: str) -> dict:
+    result = _with_pdf_text_diagnostics(result, text)
+    return maybe_enhance_extraction_with_ai(document=document, extraction=result, pdf_text=str(text))
 
 
 def _extract_pdf_text_pypdf(storage_path: str) -> str:
