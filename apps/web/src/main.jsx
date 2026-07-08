@@ -745,7 +745,7 @@ function UploadApp() {
       rememberBulkJob(job);
       await loadBulkJobs();
       await loadDocuments();
-      setNotice(`Neu-Extraktion abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.`);
+      setNotice(`Neu-Extraktion abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.${formatReextractionSummaryNotice(job.summary)}`);
       if (job.failed_count) {
         setError(formatBulkJobFailures(job, "Nicht neu extrahiert"));
       }
@@ -803,7 +803,7 @@ function UploadApp() {
       rememberBulkJob(job);
       await loadBulkJobs();
       await loadDocuments();
-      setNotice(`Problem-Neu-Extraktion${scopeLabel} abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.`);
+      setNotice(`Problem-Neu-Extraktion${scopeLabel} abgeschlossen: ${job.succeeded_count} neu extrahiert, ${job.failed_count} fehlgeschlagen.${formatReextractionSummaryNotice(job.summary)}`);
       if (job.failed_count) {
         setError(formatBulkJobFailures(job, "Nicht neu extrahiert"));
       }
@@ -2506,12 +2506,52 @@ function BulkJobHistory({ jobs }) {
                 <span>{job.failed_count || 0} fehlgeschlagen</span>
                 <span>{formatDateTime(job.started_at || job.created_at)}</span>
               </div>
+              <BulkJobSummary summary={job.summary} />
               {job.error ? <p className="job-error">{job.error}</p> : null}
             </article>
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+function BulkJobSummary({ summary }) {
+  if (!summary?.analyzed_count) return null;
+  const before = summary.before || {};
+  const after = summary.after || {};
+  const improved = summary.improved_count || 0;
+  const regressed = summary.regressed_count || 0;
+  const remaining = summary.remaining_problem_count || 0;
+  return (
+    <div className="job-summary">
+      <div>
+        <span>Allgemeine Kosten</span>
+        <strong>{before.general_cost || 0}{" -> "}{after.general_cost || 0}</strong>
+      </div>
+      <div>
+        <span>Zuordnung ungeklärt</span>
+        <strong>{before.assignment_unresolved || 0}{" -> "}{after.assignment_unresolved || 0}</strong>
+      </div>
+      <div>
+        <span>Zuordnung prüfen</span>
+        <strong>{before.assignment_review || 0}{" -> "}{after.assignment_review || 0}</strong>
+      </div>
+      <div>
+        <span>Verbessert</span>
+        <strong>{improved}</strong>
+      </div>
+      <div>
+        <span>Restproblem</span>
+        <strong>{remaining}</strong>
+      </div>
+      {regressed ? (
+        <div className="job-summary-warning">
+          <span>Verschlechtert</span>
+          <strong>{regressed}</strong>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -6274,6 +6314,13 @@ function formatBulkJobFailures(job, prefix) {
   return `${prefix}: ${details}${failedItems.length > 3 ? " ..." : ""}`;
 }
 
+function formatReextractionSummaryNotice(summary) {
+  if (!summary?.analyzed_count) return "";
+  const before = summary.before || {};
+  const after = summary.after || {};
+  return ` Verbessert: ${summary.improved_count || 0}. Allgemeine Kosten: ${before.general_cost || 0} -> ${after.general_cost || 0}. Zuordnung ungeklärt: ${before.assignment_unresolved || 0} -> ${after.assignment_unresolved || 0}.`;
+}
+
 function bwaHintSummary(hints = []) {
   const summaryCount = hints.filter((hint) => hint.kind === "bwa_summary").length;
   const accountCount = hints.length - summaryCount;
@@ -7053,6 +7100,7 @@ function formatDateTime(value) {
 function formatBulkAction(action) {
   const labels = {
     extract: "Extraktion",
+    reextract: "Neu-Extraktion",
     prepare_review: "Buchungsvorschläge",
   };
   return labels[action] ?? action;

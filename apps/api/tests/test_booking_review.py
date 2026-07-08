@@ -2375,6 +2375,64 @@ class BookingSuggestionTests(TestCase):
 
         self.assertIn("Zuordnung prüfen", document["extraction"]["problem_reasons"])
 
+    def test_document_extraction_health_flags_general_and_unresolved_assignment(self):
+        health = database_service.document_extraction_health(
+            {
+                "id": str(uuid4()),
+                "original_filename": "rechnung.pdf",
+                "normalized_filename": "ERg ohne Nummer, Allgemeine Kosten.pdf",
+                "extraction": {
+                    "supplier_name": "Lieferant GmbH",
+                    "invoice_number": "R-1",
+                    "invoice_date": "2026-06-12",
+                    "problem_reasons": ["Zuordnung ungeklÃ¤rt"],
+                    "raw_result": {
+                        "assignment_type": "assignment_unresolved",
+                        "delivery_address": "Eckerkamp 58, 22391 Hamburg",
+                    },
+                },
+            }
+        )
+
+        self.assertFalse(health["is_general_cost"])
+        self.assertTrue(health["is_assignment_unresolved"])
+        self.assertFalse(health["has_assignment"])
+        self.assertGreater(health["severity_score"], 0)
+
+    def test_reextraction_summary_counts_assignment_improvements(self):
+        before = {
+            "document_id": "doc-1",
+            "filename": "rechnung.pdf",
+            "assignment_type": "general_cost",
+            "has_assignment": False,
+            "is_general_cost": True,
+            "is_assignment_unresolved": False,
+            "needs_assignment_review": False,
+            "is_supplier_unresolved": False,
+            "problem_reasons": [],
+            "problem_count": 0,
+            "severity_score": 4,
+        }
+        after = {
+            **before,
+            "assignment_type": "assigned",
+            "assignment_code": "Hk92",
+            "project_number": "26-00007",
+            "has_assignment": True,
+            "is_general_cost": False,
+            "severity_score": 0,
+        }
+
+        summary = database_service.summarize_reextraction_health_changes(
+            [{"document_id": "doc-1", "status": "succeeded", "before": before, "after": after}]
+        )
+
+        self.assertEqual(summary["analyzed_count"], 1)
+        self.assertEqual(summary["improved_count"], 1)
+        self.assertEqual(summary["before"]["general_cost"], 1)
+        self.assertEqual(summary["after"]["general_cost"], 0)
+        self.assertEqual(summary["after"]["with_assignment"], 1)
+
     def test_update_extraction_resets_review_artifacts(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"

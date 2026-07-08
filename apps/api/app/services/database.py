@@ -354,6 +354,7 @@ def init_database() -> None:
                     succeeded_count integer not null default 0,
                     failed_count integer not null default 0,
                     error text,
+                    summary jsonb not null default '{}'::jsonb,
                     created_by text not null,
                     created_at timestamptz not null,
                     updated_at timestamptz not null,
@@ -364,6 +365,7 @@ def init_database() -> None:
                 )
                 """
             )
+            cursor.execute("alter table document_bulk_jobs add column if not exists summary jsonb not null default '{}'::jsonb")
             cursor.execute(
                 """
                 do $$
@@ -657,10 +659,10 @@ def create_document_bulk_job(
                     """
                     insert into document_bulk_jobs (
                         id, tenant_id, action, status, requested_total, processed_count,
-                        succeeded_count, failed_count, error, created_by,
+                        succeeded_count, failed_count, error, summary, created_by,
                         created_at, updated_at, started_at, finished_at
                     )
-                    values (%s, %s, %s, 'queued', %s, 0, 0, 0, null, %s, %s, %s, null, null)
+                    values (%s, %s, %s, 'queued', %s, 0, 0, 0, null, '{}'::jsonb, %s, %s, %s, null, null)
                     returning *
                     """,
                     (job_id, tenant_id, action, len(unique_document_ids), actor, now, now),
@@ -819,7 +821,12 @@ def release_document_bulk_claim(document_id: UUID, job_id: UUID) -> None:
             )
 
 
-def finish_document_bulk_job(job_id: UUID, status: str = "completed", error: str | None = None) -> dict[str, Any] | None:
+def finish_document_bulk_job(
+    job_id: UUID,
+    status: str = "completed",
+    error: str | None = None,
+    summary: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     now = datetime.now(UTC)
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -841,12 +848,13 @@ def finish_document_bulk_job(job_id: UUID, status: str = "completed", error: str
                         where job_id = %s and status in ('failed', 'skipped')
                     ),
                     error = %s,
+                    summary = coalesce(%s, summary),
                     updated_at = %s,
                     finished_at = %s
                 where id = %s
                 returning *
                 """,
-                (status, job_id, job_id, job_id, error, now, now, job_id),
+                (status, job_id, job_id, job_id, error, Jsonb(summary) if summary is not None else None, now, now, job_id),
             )
             row = cursor.fetchone()
     if not row:
@@ -4038,6 +4046,117 @@ def _supplier_needs_review(supplier_name: str | None, invoice_number: str | None
     return bool(match(r"^[0-9]{5,}(?:\s+[0-9]{2,})?$", normalized))
 
 
+def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any]:
+    document = document or {}
+    extraction = document.get("extraction") or {}
+    raw_result = extraction.get("raw_result") or {}
+    problem_reasons = list(extraction.get("problem_reasons") or [])
+    assignment_type = raw_result.get("assignment_type")
+    allocation_lines = raw_result.get("allocation_lines") or []
+    assignment_code = raw_result.get("assignment_code") or raw_result.get("project_code")
+    project_number = raw_result.get("project_number")
+    has_assignment = bool(
+        assignment_code
+        or project_number
+        or assignment_type == "assignment_split"
+        or any(line.get("assignment_code") or line.get("project_number") for line in allocation_lines if isinstance(line, dict))
+    )
+    unresolved = assignment_type == "assignment_unresolved" or "Zuordnung ungeklÃ¤rt" in problem_reasons
+    review_required = "Zuordnung prÃ¼fen" in problem_reasons
+    general_cost = assignment_type == "general_cost" and not has_assignment
+    supplier_unresolved = "Lieferant ungeklÃ¤rt" in problem_reasons
+    problem_count = len(problem_reasons)
+    severity_score = (
+        (5 if unresolved else 0)
+        + (4 if general_cost else 0)
+        + (3 if supplier_unresolved else 0)
+        + (2 if review_required else 0)
+        + problem_count
+    )
+
+    return {
+        "document_id": str(document.get("id") or ""),
+        "filename": document.get("original_filename"),
+        "normalized_filename": document.get("normalized_filename"),
+        "supplier_name": extraction.get("supplier_name"),
+        "invoice_number": extraction.get("invoice_number"),
+        "invoice_date": extraction.get("invoice_date"),
+        "assignment_type": assignment_type,
+        "assignment_code": assignment_code,
+        "project_number": project_number,
+        "has_assignment": has_assignment,
+        "is_general_cost": general_cost,
+        "is_assignment_unresolved": unresolved,
+        "needs_assignment_review": review_required,
+        "is_supplier_unresolved": supplier_unresolved,
+        "problem_reasons": problem_reasons,
+        "problem_count": problem_count,
+        "severity_score": severity_score,
+    }
+
+
+def summarize_reextraction_health_changes(entries: list[dict[str, Any]], detail_limit: int = 50) -> dict[str, Any]:
+    successful_entries = [entry for entry in entries if entry.get("status") == "succeeded"]
+    failed_entries = [entry for entry in entries if entry.get("status") != "succeeded"]
+    before = [entry["before"] for entry in successful_entries if entry.get("before")]
+    after = [entry["after"] for entry in successful_entries if entry.get("after")]
+    changed_entries = [
+        _reextraction_health_change_entry(entry)
+        for entry in successful_entries
+        if entry.get("before") and entry.get("after")
+    ]
+    improved_entries = [entry for entry in changed_entries if entry["change"] == "improved"]
+    regressed_entries = [entry for entry in changed_entries if entry["change"] == "regressed"]
+    unresolved_entries = [
+        entry for entry in changed_entries
+        if entry["after"].get("is_general_cost") or entry["after"].get("is_assignment_unresolved")
+    ]
+
+    return {
+        "analyzed_count": len(successful_entries),
+        "failed_count": len(failed_entries),
+        "improved_count": len(improved_entries),
+        "regressed_count": len(regressed_entries),
+        "remaining_problem_count": len(unresolved_entries),
+        "before": _health_totals(before),
+        "after": _health_totals(after),
+        "details": changed_entries[:detail_limit],
+        "failed": failed_entries[:detail_limit],
+    }
+
+
+def _reextraction_health_change_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    before = entry["before"]
+    after = entry["after"]
+    before_score = before.get("severity_score") or 0
+    after_score = after.get("severity_score") or 0
+    if after_score < before_score:
+        change = "improved"
+    elif after_score > before_score:
+        change = "regressed"
+    else:
+        change = "unchanged"
+    return {
+        "document_id": entry.get("document_id"),
+        "filename": after.get("filename") or before.get("filename"),
+        "change": change,
+        "before": before,
+        "after": after,
+    }
+
+
+def _health_totals(snapshots: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "total": len(snapshots),
+        "general_cost": sum(1 for snapshot in snapshots if snapshot.get("is_general_cost")),
+        "assignment_unresolved": sum(1 for snapshot in snapshots if snapshot.get("is_assignment_unresolved")),
+        "assignment_review": sum(1 for snapshot in snapshots if snapshot.get("needs_assignment_review")),
+        "supplier_unresolved": sum(1 for snapshot in snapshots if snapshot.get("is_supplier_unresolved")),
+        "with_assignment": sum(1 for snapshot in snapshots if snapshot.get("has_assignment")),
+        "with_any_problem": sum(1 for snapshot in snapshots if snapshot.get("problem_count", 0) > 0),
+    }
+
+
 def _serialize_user(row: dict[str, Any], include_password_hash: bool = False) -> dict[str, Any]:
     user = {
         "id": str(row["id"]),
@@ -4232,6 +4351,7 @@ def _serialize_bulk_job(row: dict[str, Any]) -> dict[str, Any]:
         "succeeded_count": row["succeeded_count"],
         "failed_count": row["failed_count"],
         "error": row["error"],
+        "summary": row.get("summary") or {},
         "created_by": row["created_by"],
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
