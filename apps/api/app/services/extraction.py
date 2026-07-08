@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from re import MULTILINE, finditer, search, sub
+from re import IGNORECASE, MULTILINE, finditer, search, sub
 from xml.etree import ElementTree
 from uuid import UUID
 
@@ -644,7 +644,10 @@ def _build_ubl_xml_result(
 def _build_pdf_text_result(document: dict) -> dict:
     text = _extract_pdf_text(document["storage_path"])
     if len(text.strip()) < 80:
-        tank_receipt = _build_scanned_tank_receipt_result(document)
+        supporting_document = _build_tax_supporting_document_result(document, text)
+        if supporting_document:
+            return _with_pdf_text_diagnostics(supporting_document, text)
+        tank_receipt = _build_tank_receipt_result(document, text)
         if tank_receipt:
             return _with_pdf_text_diagnostics(tank_receipt, text)
         dammers_invoice = _build_scanned_dammers_invoice_result(document)
@@ -655,6 +658,10 @@ def _build_pdf_text_result(document: dict) -> dict:
     supporting_document = _build_tax_supporting_document_result(document, text)
     if supporting_document:
         return _with_pdf_text_diagnostics(supporting_document, text)
+
+    tank_receipt = _build_tank_receipt_result(document, text)
+    if tank_receipt:
+        return _with_pdf_text_diagnostics(tank_receipt, text)
 
     invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
@@ -960,8 +967,12 @@ def _build_pdf_text_result(document: dict) -> dict:
 
 
 def _build_tax_supporting_document_result(document: dict, text: str) -> dict | None:
-    normalized_text = _compact_search_text(text)
+    original_filename = document["original_filename"]
+    normalized_text = _compact_search_text(f"{text} {original_filename}")
     if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
+        document_type = "tax_exemption_certificate"
+        certificate_kind = "Freistellungsbescheinigung Bauleistungen"
+    elif "bescheinigungbauleistungen" in normalized_text or "bvfabescheinigungbauleistungen" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
     elif "nachweiszursteuerschuldnerschaft" in normalized_text and "13b" in normalized_text:
@@ -970,7 +981,7 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
     else:
         return None
 
-    subject_name = _certificate_subject_name(text) or _supplier_from_filename(Path(document["original_filename"]).stem)
+    subject_name = _certificate_subject_name(text) or _certificate_subject_from_filename(original_filename)
     issued_by = _find_text(text, r"(Finanzamt\s+[A-Za-zÄÖÜäöüß -]+)") or "Finanzamt"
     issue_date = (
         _find_date(text, r"(?:Hamburg|Datum)\s*,?\s*(?:den\s*)?(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
@@ -1081,14 +1092,28 @@ def _certificate_subject_name(text: str) -> str | None:
 
 def _certificate_expiry_from_filename(filename: str) -> str | None:
     match = search(r"bis\s+([A-Za-zÄÖÜäöüß]{3,})\.?\s+(\d{4})", filename)
-    if not match:
-        return None
-    month = _german_month_number(match.group(1))
-    if not month:
-        return None
-    year = int(match.group(2))
-    day = monthrange(year, month)[1]
-    return f"{year:04d}-{month:02d}-{day:02d}"
+    if match:
+        month = _german_month_number(match.group(1))
+        if not month:
+            return None
+        year = int(match.group(2))
+        day = monthrange(year, month)[1]
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    year_range = search(r"\b(20\d{2})\s*[-/ ]\s*(20\d{2})\b", filename)
+    if year_range:
+        return f"{int(year_range.group(2)):04d}-12-31"
+    return None
+
+
+def _certificate_subject_from_filename(filename: str) -> str:
+    stem = Path(filename).stem
+    cleaned = sub(r"^(?:ERg|Nachweis|Bescheinigung)\s+ohne\s+Nummer,?\s*", "", stem, flags=IGNORECASE)
+    cleaned = sub(r"\b(?:Bauvorhaben|BV)\s+ungeklärt,?\s*", "", cleaned, flags=IGNORECASE)
+    cleaned = sub(r",?\s*PDF\s+nicht\s+lesbar,?", "", cleaned, flags=IGNORECASE)
+    cleaned = sub(r",?\s*ohne\s+Datum,?", "", cleaned, flags=IGNORECASE)
+    cleaned = sub(r"\b20\d{2}\s*[-/ ]\s*20\d{2}\b", "", cleaned)
+    cleaned = sub(r"\s+", " ", cleaned).strip(" ,-")
+    return cleaned or _supplier_from_filename(stem)
 
 
 def _german_month_number(value: str) -> int | None:
@@ -1234,30 +1259,26 @@ def _build_unreadable_pdf_result(document: dict) -> dict:
     }
 
 
-def _build_scanned_tank_receipt_result(document: dict) -> dict | None:
+def _build_tank_receipt_result(document: dict, text: str) -> dict | None:
     parsed = _tank_receipt_from_filename(document["original_filename"])
     if not parsed:
         return None
 
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
-    supplier_name = "Tankbeleg"
-    product_name = "Diesel"
+    supplier_name = _tank_station_from_text(text) or "Tankstelle"
+    product_name = _tank_product_name(text)
     invoice_number = parsed["invoice_number"]
     invoice_date = parsed["invoice_date"]
-    normalized_filename = _normalized_invoice_filename(
-        invoice_number=invoice_number,
-        assignment=None,
-        assignment_type="general_cost",
-        tenant_profile=tenant_profile,
-        supplier_name=supplier_name,
-        product_name=product_name,
-        invoice_date=invoice_date,
-    )
     vehicle = parsed["vehicle"]
     driver = parsed.get("driver")
+    gross_amount, tax_amount, net_amount = _tank_receipt_amounts(text)
+    normalized_filename = _normalized_tank_receipt_filename(vehicle, driver, invoice_date)
     warnings = [
         "Scan-/Foto-Tankbeleg: Beträge, Liter und Tankstelle müssen per OCR oder manuell geprüft werden.",
     ]
+    warnings.append("Tankbeleg ohne Rechnungsnummer: als bezahlter Mitarbeiter-/Fahrzeugbeleg prüfen.")
+    if gross_amount is None:
+        warnings.append("Beträge müssen per OCR oder manuell geprüft werden.")
     if driver:
         warnings.append(f"Fahrer-Kürzel aus Dateiname erkannt: {driver}.")
 
@@ -1287,9 +1308,9 @@ def _build_scanned_tank_receipt_result(document: dict) -> dict | None:
         "assignment_type": "general_cost",
         "cost_category": "fuel_vehicle",
         "product_name": product_name,
-        "net_amount": None,
-        "tax_amount": None,
-        "gross_amount": None,
+        "net_amount": net_amount,
+        "tax_amount": tax_amount,
+        "gross_amount": gross_amount,
         "discount_base": None,
         "discount_percent": None,
         "discount_amount": None,
@@ -1300,7 +1321,7 @@ def _build_scanned_tank_receipt_result(document: dict) -> dict | None:
         "is_credit_note": False,
         "document_type": "incoming_invoice",
         "payment_terms": _payment_terms(
-            gross_amount=None,
+            gross_amount=gross_amount,
             due_date=invoice_date,
             discount_due_date=None,
             discount_base=None,
@@ -1310,12 +1331,15 @@ def _build_scanned_tank_receipt_result(document: dict) -> dict | None:
             is_credit_note=False,
         ),
         "currency": "EUR",
-        "confidence": Decimal("0.62"),
+        "confidence": Decimal("0.74") if gross_amount is not None else Decimal("0.62"),
         "warnings": warnings,
         "normalized_filename": normalized_filename,
         "source": "pdf_scan_filename_rules",
         "vehicle": vehicle,
         "driver": driver,
+        "paid_status": "paid",
+        "payment_method": "card_or_cash",
+        "reimbursement_required": True,
     }
 
 
@@ -1417,7 +1441,8 @@ def _dammers_invoice_from_filename(filename: str) -> dict | None:
 
 def _tank_receipt_from_filename(filename: str) -> dict | None:
     stem = Path(filename).stem
-    if "tankbeleg" not in stem.lower():
+    lower_stem = stem.lower()
+    if not any(marker in lower_stem for marker in ["tankbeleg", "bareinlage"]):
         return None
     date_match = search(r"(\d{4}-\d{2}-\d{2})", stem)
     vehicle_match = search(r"\b(HH[-\s]*FB[-\s]*\d+)\b", stem, flags=0)
@@ -1436,6 +1461,58 @@ def _tank_receipt_from_filename(filename: str) -> dict | None:
         "invoice_date": invoice_date,
         "invoice_number": invoice_number,
     }
+
+
+def _normalized_tank_receipt_filename(vehicle: str, driver: str | None, invoice_date: str) -> str:
+    parts = [vehicle, "Bareinlage"]
+    if driver:
+        parts.append(driver)
+    parts.append(invoice_date)
+    return ", ".join(_filename_part(part) for part in parts) + ".pdf"
+
+
+def _tank_station_from_text(text: str) -> str | None:
+    lower = text.lower()
+    known_stations = {
+        "aral": "Aral",
+        "shell": "Shell",
+        "jet": "JET",
+        "avia": "AVIA",
+        "hem": "HEM",
+        "totalenergies": "TotalEnergies",
+        "star": "Star",
+        "esso": "Esso",
+    }
+    for marker, station in known_stations.items():
+        if marker in lower:
+            return station
+    return None
+
+
+def _tank_product_name(text: str) -> str:
+    lower = text.lower()
+    has_diesel = "diesel" in lower
+    has_adblue = "adblue" in lower or "ad blue" in lower
+    if has_diesel and has_adblue:
+        return "Diesel und AdBlue"
+    if has_adblue:
+        return "AdBlue"
+    return "Diesel"
+
+
+def _tank_receipt_amounts(text: str) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    gross_amount = (
+        _find_money(text, r"(?i)(?:summe|gesamt|betrag|endbetrag|zahlbetrag)\s*(?:eur|€)?\s*([0-9.]+,\d{2})")
+        or _find_money(text, r"([0-9.]+,\d{2})\s*(?:eur|€)\s*$")
+    )
+    tax_amount = _find_money(text, r"(?i)(?:mwst|ust|mehrwertsteuer)[^\n0-9]*[0-9]{1,2}(?:,\d+)?\s*%?[^\n]*?([0-9.]+,\d{2})")
+    net_amount = _find_money(text, r"(?i)(?:netto|warenwert)[^\n0-9]*([0-9.]+,\d{2})")
+    if gross_amount is not None and tax_amount is not None and net_amount is None:
+        net_amount = (gross_amount - tax_amount).quantize(Decimal("0.01"))
+    if gross_amount is not None and tax_amount is None and net_amount is None:
+        net_amount = (gross_amount / Decimal("1.19")).quantize(Decimal("0.01"))
+        tax_amount = (gross_amount - net_amount).quantize(Decimal("0.01"))
+    return gross_amount, tax_amount, net_amount
 
 
 def _tank_receipt_driver_from_filename(stem: str) -> str | None:

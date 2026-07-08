@@ -91,6 +91,29 @@ class ExtractionPdfTests(TestCase):
         self.assertIsNone(result["gross_amount"])
         self.assertIn("§13b", result["reverse_charge_basis"])
 
+    def test_unreadable_bvfa_certificate_filename_is_not_treated_as_invoice(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "68717 - BvFA_ Bescheinigung Bauleistungen 2026 - 2027.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "bvfa.pdf",
+            "size_bytes": 240000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_exemption_certificate")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["certificate_valid_until"], "2027-12-31")
+        self.assertEqual(result["assignment_type"], "supporting_document")
+        self.assertIsNone(result["gross_amount"])
+        self.assertNotEqual(result["source"], "pdf_unreadable")
+
     def test_pdf_text_extraction_uses_pymupdf_when_pypdf_text_is_too_short(self):
         pymupdf_text = "DAMMERS\n" + ("Rechnungstext " * 12)
 
@@ -640,7 +663,7 @@ class ExtractionPdfTests(TestCase):
             result = _build_pdf_text_result(document)
 
         self.assertEqual(result["source"], "pdf_scan_filename_rules")
-        self.assertEqual(result["supplier_name"], "Tankbeleg")
+        self.assertEqual(result["supplier_name"], "Tankstelle")
         self.assertEqual(result["invoice_number"], "HH-FB 814 2025-12-10")
         self.assertEqual(result["customer_reference"], "HH-FB 814")
         self.assertEqual(result["vehicle"], "HH-FB 814")
@@ -656,7 +679,7 @@ class ExtractionPdfTests(TestCase):
         self.assertIn("OCR", " ".join(result["warnings"]))
         self.assertEqual(
             result["normalized_filename"],
-            "ERg HH-FB 814 2025-12-10, Allgemeine Kosten, Tankbeleg, Diesel, 2025-12-10.pdf",
+            "HH-FB 814, Bareinlage, LS, 2025-12-10.pdf",
         )
 
     def test_scanned_tank_receipt_filename_driver_is_optional(self):
@@ -681,6 +704,48 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["driver"], "PhS")
         self.assertEqual(result["invoice_date"], "2025-11-25")
         self.assertEqual(result["cost_category"], "fuel_vehicle")
+
+    def test_tank_receipt_bareinlage_filename_and_ocr_amounts(self):
+        text = """
+        ARAL
+        Diesel
+        AdBlue
+        Netto 42,02
+        MwSt 19 % 7,98
+        Gesamt 50,00 EUR
+        Kartenzahlung
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "HH-FB 236, Bareinlage, PhS, 2026-06-30.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "tankbeleg.pdf",
+            "created_at": "2026-07-08T10:00:00+00:00",
+            "size_bytes": 121895,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["source"], "pdf_scan_filename_rules")
+        self.assertEqual(result["supplier_name"], "Aral")
+        self.assertEqual(result["invoice_number"], "HH-FB 236 2026-06-30")
+        self.assertEqual(result["vehicle"], "HH-FB 236")
+        self.assertEqual(result["driver"], "PhS")
+        self.assertEqual(result["invoice_date"], "2026-06-30")
+        self.assertEqual(result["product_name"], "Diesel und AdBlue")
+        self.assertEqual(result["gross_amount"], Decimal("50.00"))
+        self.assertEqual(result["tax_amount"], Decimal("7.98"))
+        self.assertEqual(result["net_amount"], Decimal("42.02"))
+        self.assertTrue(result["reimbursement_required"])
+        self.assertEqual(
+            result["normalized_filename"],
+            "HH-FB 236, Bareinlage, PhS, 2026-06-30.pdf",
+        )
 
     def test_roggemann_invoice_reads_header_totals_discount_and_assignment_hint(self):
         text = """
