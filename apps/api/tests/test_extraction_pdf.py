@@ -27,6 +27,70 @@ class ExtractionPdfTests(TestCase):
         self.assignment_match_patcher.start()
         self.addCleanup(self.assignment_match_patcher.stop)
 
+    def test_freistellungsbescheinigung_is_stored_as_supporting_document(self):
+        text = """
+        Finanzamt Hamburg-Nord
+        Freistellungsbescheinigung zum Steuerabzug bei Bauleistungen gemäß § 48 b Abs. 1 Satz 1 EStG
+        Name, Anschrift Firma FriStD-Bau ZuB GmbH & Co. KG, Haldesdorfer Straße 44, 22179 Hamburg
+        Steuernummer : 501620 / 01587
+        Diese Bescheinigung gilt vom 16.11.2023 bis zum 15.11.2026.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "FriStD-Bau ZuB, Freistellungsbescheinigung EStG, bis Nov. 2026.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "freistellung.pdf",
+            "size_bytes": 120000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_exemption_certificate")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["certificate_valid_from"], "2023-11-16")
+        self.assertEqual(result["certificate_valid_until"], "2026-11-15")
+        self.assertEqual(result["certificate_tax_number"], "501620 / 01587")
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("Freistellungsbescheinigung", result["normalized_filename"])
+
+    def test_reverse_charge_certificate_is_stored_as_supporting_document(self):
+        text = """
+        Finanzamt Hamburg-Nord
+        Nachweis zur Steuerschuldnerschaft des Leistungsempfängers bei Bauleistungen
+        Es wird bescheinigt, dass FriStD-Bau ZuB GmbH & Co. KG
+        nachhaltig Bauleistungen im Sinne des § 13b Abs. 2 Nr. 4 UStG erbringt.
+        Für die o. g. empfangenen Leistungen wird deshalb die Steuer vom Leistungsempfänger geschuldet (§ 13b Abs. 5 UStG).
+        USt-IdNr. DE276234295
+        Diese Bescheinigung verliert ihre Gültigkeit mit Ablauf des: 20.11.2026
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Nachweis zur Steuerschuldnerschaft des Leistungsempfängers 2023-2026.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "13b.pdf",
+            "size_bytes": 100000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "reverse_charge_certificate")
+        self.assertTrue(result["supporting_document"])
+        self.assertTrue(result["reverse_charge"])
+        self.assertEqual(result["certificate_valid_until"], "2026-11-20")
+        self.assertEqual(result["certificate_vat_id"], "DE276234295")
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("§13b", result["reverse_charge_basis"])
+
     def test_pdf_text_extraction_uses_pymupdf_when_pypdf_text_is_too_short(self):
         pymupdf_text = "DAMMERS\n" + ("Rechnungstext " * 12)
 
@@ -280,6 +344,8 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["net_amount"], Decimal("3819.92"))
         self.assertEqual(result["tax_amount"], Decimal("0.00"))
         self.assertEqual(result["gross_amount"], Decimal("3819.92"))
+        self.assertTrue(result["reverse_charge"])
+        self.assertEqual(result["reverse_charge_basis"], "§13b UStG")
         self.assertNotIn("MwSt", " ".join(result["warnings"]))
 
     def test_a_franz_invoice_reads_reverse_charge_due_date_and_product(self):

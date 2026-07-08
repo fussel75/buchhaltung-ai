@@ -582,6 +582,28 @@ def list_documents_for_month(tenant_id: str, year: int, month: int) -> list[dict
             return [_serialize_document(row) for row in cursor.fetchall()]
 
 
+def list_tax_supporting_documents(tenant_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select
+                    d.*,
+                    to_jsonb(e.*) as extraction
+                from documents d
+                join document_extractions e on e.document_id = d.id
+                where d.tenant_id = %s
+                    and e.raw_result->>'document_type' in ('tax_exemption_certificate', 'reverse_charge_certificate')
+                order by
+                    nullif(e.raw_result->>'certificate_valid_until', '')::date nulls first,
+                    d.created_at desc
+                limit 1000
+                """,
+                (tenant_id,),
+            )
+            return [_serialize_tax_supporting_document(row) for row in cursor.fetchall()]
+
+
 def get_document(document_id: UUID) -> dict[str, Any] | None:
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -3987,6 +4009,22 @@ def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] 
     raw_result = raw_result or {}
     reasons: list[str] = []
     source = str(raw_result.get("source") or "").lower()
+    document_type = raw_result.get("document_type")
+    if document_type in {"tax_exemption_certificate", "reverse_charge_certificate"}:
+        if not raw_result.get("certificate_valid_until"):
+            reasons.append("Ablaufdatum fehlt")
+        if raw_result.get("certificate_valid_until"):
+            days_until_expiry = _days_until(raw_result.get("certificate_valid_until"))
+            expiry_status = _certificate_expiry_status(days_until_expiry)
+            if expiry_status == "expired":
+                reasons.append("Nachweis abgelaufen")
+            elif expiry_status == "soon":
+                reasons.append("Nachweis läuft bald ab")
+        warnings = row.get("warnings") or []
+        if warnings:
+            reason_label = "Hinweis" if len(warnings) == 1 else "Hinweise"
+            reasons.append(f"{len(warnings)} {reason_label}")
+        return reasons
 
     if source == "mock":
         reasons.append("Mock-Erkennung")
@@ -4318,6 +4356,57 @@ def _serialize_bwa_import(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
     }
+
+
+def _serialize_tax_supporting_document(row: dict[str, Any]) -> dict[str, Any]:
+    document = _serialize_document(row)
+    extraction = document.get("extraction") or {}
+    raw_result = extraction.get("raw_result") or {}
+    valid_until = raw_result.get("certificate_valid_until")
+    days_until_expiry = _days_until(valid_until)
+    return {
+        "id": document["id"],
+        "tenant_id": document["tenant_id"],
+        "original_filename": document["original_filename"],
+        "normalized_filename": document.get("normalized_filename"),
+        "content_type": document["content_type"],
+        "size_bytes": document["size_bytes"],
+        "status": document["status"],
+        "document_type": raw_result.get("document_type"),
+        "certificate_kind": raw_result.get("certificate_kind"),
+        "certificate_subject": raw_result.get("certificate_subject") or extraction.get("supplier_name"),
+        "certificate_issuer": raw_result.get("certificate_issuer"),
+        "certificate_valid_from": raw_result.get("certificate_valid_from"),
+        "certificate_valid_until": valid_until,
+        "certificate_tax_number": raw_result.get("certificate_tax_number") or extraction.get("invoice_number"),
+        "certificate_vat_id": raw_result.get("certificate_vat_id"),
+        "reverse_charge": raw_result.get("reverse_charge") is True,
+        "days_until_expiry": days_until_expiry,
+        "expiry_status": _certificate_expiry_status(days_until_expiry),
+        "warnings": extraction.get("warnings") or [],
+        "created_at": document["created_at"],
+        "updated_at": document["updated_at"],
+    }
+
+
+def _days_until(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        expiry = date.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return (expiry - datetime.now(UTC).date()).days
+
+
+def _certificate_expiry_status(days_until_expiry: int | None) -> str:
+    if days_until_expiry is None:
+        return "unknown"
+    if days_until_expiry < 0:
+        return "expired"
+    if days_until_expiry <= 60:
+        return "soon"
+    return "valid"
 
 
 def _list_document_bulk_job_items(job_id: UUID) -> list[dict[str, Any]]:

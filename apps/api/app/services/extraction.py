@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -651,6 +652,10 @@ def _build_pdf_text_result(document: dict) -> dict:
             return _with_pdf_text_diagnostics(dammers_invoice, text)
         return _with_pdf_text_diagnostics(_build_unreadable_pdf_result(document), text)
 
+    supporting_document = _build_tax_supporting_document_result(document, text)
+    if supporting_document:
+        return _with_pdf_text_diagnostics(supporting_document, text)
+
     invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
         r"Rechnungsnummer:\s*([A-Z0-9-]+[a-z]?)",
@@ -799,6 +804,11 @@ def _build_pdf_text_result(document: dict) -> dict:
     net_amount = totals.get("net_amount")
     tax_amount = totals.get("tax_amount")
     gross_amount = totals.get("gross_amount")
+    reverse_charge = _reverse_charge_info(text)
+    if reverse_charge["is_reverse_charge"] and net_amount is not None and gross_amount is not None:
+        tax_amount = Decimal("0.00")
+        if gross_amount != net_amount:
+            gross_amount = net_amount
     discount_amount = (
         _find_dammers_discount_amount(text)
         or visible_discount.get("discount_amount")
@@ -887,6 +897,8 @@ def _build_pdf_text_result(document: dict) -> dict:
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
+    if reverse_charge["is_reverse_charge"]:
+        warnings.append("§13b/Steuerschuldnerschaft erkannt: Netto-Rechnung fachlich prüfen.")
 
     return _with_pdf_text_diagnostics({
         "supplier_name": supplier_name,
@@ -926,6 +938,8 @@ def _build_pdf_text_result(document: dict) -> dict:
         "discount_gross_amount": visible_discount.get("discount_gross_amount"),
         "discounted_payable_amount": discounted_payable_amount,
         "is_credit_note": is_credit_note,
+        "reverse_charge": reverse_charge["is_reverse_charge"],
+        "reverse_charge_basis": reverse_charge["basis"],
         "document_type": "credit_note" if is_credit_note else "incoming_invoice",
         "payment_terms": _payment_terms(
             gross_amount=gross_amount,
@@ -943,6 +957,179 @@ def _build_pdf_text_result(document: dict) -> dict:
         "normalized_filename": normalized_filename,
         "source": "pdf_text_rules",
     }, text)
+
+
+def _build_tax_supporting_document_result(document: dict, text: str) -> dict | None:
+    normalized_text = _compact_search_text(text)
+    if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
+        document_type = "tax_exemption_certificate"
+        certificate_kind = "Freistellungsbescheinigung Bauleistungen"
+    elif "nachweiszursteuerschuldnerschaft" in normalized_text and "13b" in normalized_text:
+        document_type = "reverse_charge_certificate"
+        certificate_kind = "Nachweis Steuerschuldnerschaft Leistungsempfänger"
+    else:
+        return None
+
+    subject_name = _certificate_subject_name(text) or _supplier_from_filename(Path(document["original_filename"]).stem)
+    issued_by = _find_text(text, r"(Finanzamt\s+[A-Za-zÄÖÜäöüß -]+)") or "Finanzamt"
+    issue_date = (
+        _find_date(text, r"(?:Hamburg|Datum)\s*,?\s*(?:den\s*)?(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+        or _find_date(text, r"Datum\s*\n\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+        or _invoice_date_from_filename(document["original_filename"])
+    )
+    valid_from = _find_date(text, r"gilt vom\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+    valid_until = (
+        _find_date(text, r"bis zum\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+        or _find_date(text, r"G[üu]ltigkeit mit Ablauf des:\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+        or _certificate_expiry_from_filename(document["original_filename"])
+    )
+    tax_number = _find_text(text, r"Steuernummer\s*:?\s*([0-9\s/I-]{8,})")
+    vat_id = _find_text(text, r"(DE[0-9]{9})")
+    normalized_filename = _normalized_supporting_document_filename(
+        certificate_kind=certificate_kind,
+        subject_name=subject_name,
+        valid_until=valid_until,
+    )
+    warnings = []
+    if not valid_until:
+        warnings.append("Ablaufdatum des Nachweises nicht sicher erkannt.")
+    if document_type == "reverse_charge_certificate":
+        warnings.append("§13b-Nachweis erkannt: für Netto-Rechnungen fachlich gegen Leistung prüfen.")
+
+    return {
+        "supplier_name": subject_name,
+        "invoice_number": tax_number or vat_id,
+        "customer_number": None,
+        "customer_reference": None,
+        "invoice_date": issue_date,
+        "due_date": None,
+        "discount_due_date": None,
+        "service_period": issue_date[:7] if issue_date else None,
+        "delivery_address": None,
+        "delivery_addresses": [],
+        "allocation_lines": [],
+        "assignment_code": None,
+        "assignment_label": None,
+        "assignment_kind": None,
+        "assignment_revenue_relevant": None,
+        "assignment_type": "supporting_document",
+        "cost_category": None,
+        "product_name": certificate_kind,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "reverse_charge": document_type == "reverse_charge_certificate",
+        "reverse_charge_basis": "§13b UStG" if document_type == "reverse_charge_certificate" else None,
+        "document_type": document_type,
+        "supporting_document": True,
+        "certificate_kind": certificate_kind,
+        "certificate_subject": subject_name,
+        "certificate_issuer": issued_by,
+        "certificate_valid_from": valid_from,
+        "certificate_valid_until": valid_until,
+        "certificate_tax_number": tax_number,
+        "certificate_vat_id": vat_id,
+        "payment_terms": [],
+        "currency": "EUR",
+        "confidence": Decimal("0.92") if valid_until else Decimal("0.78"),
+        "warnings": warnings,
+        "normalized_filename": normalized_filename,
+        "source": "pdf_text_certificate_rules",
+    }
+
+
+def _reverse_charge_info(text: str) -> dict[str, str | bool | None]:
+    normalized = _compact_search_text(text)
+    if "13b" not in normalized:
+        return {"is_reverse_charge": False, "basis": None}
+    markers = [
+        "steuerschuldnerschaftdesleistungsempfaengers",
+        "steuerschuldnerschaftdesleistungsempfängers",
+        "steuervomleistungsempfaengergeschuldet",
+        "steuervomleistungsempfängergeschuldet",
+        "nettorechnung",
+        "steuerschuldnerschaft des leistungsempfaengers",
+        "steuerschuldnerschaft des leistungsempfängers",
+        "steuer vom leistungsempfaenger geschuldet",
+        "steuer vom leistungsempfänger geschuldet",
+        "netto rechnung",
+        "nettorechnung",
+    ]
+    if any(marker in normalized for marker in markers):
+        return {"is_reverse_charge": True, "basis": "§13b UStG"}
+    return {"is_reverse_charge": False, "basis": None}
+
+
+def _certificate_subject_name(text: str) -> str | None:
+    direct = _find_text(text, r"bescheinigt,\s*dass\s+(.+?)\s*(?:\n|\()")
+    if direct:
+        return sub(r"\s+", " ", direct).strip(" ,")
+    compact = sub(r"\s+", " ", text)
+    match = search(r"(FriStD\s*-?\s*Bau\s+ZuB\s+GmbH\s*&\s*Co\.?\s*KG)", compact)
+    if match:
+        return sub(r"\s+", " ", match.group(1)).replace(" - ", "-").strip()
+    return None
+
+
+def _certificate_expiry_from_filename(filename: str) -> str | None:
+    match = search(r"bis\s+([A-Za-zÄÖÜäöüß]{3,})\.?\s+(\d{4})", filename)
+    if not match:
+        return None
+    month = _german_month_number(match.group(1))
+    if not month:
+        return None
+    year = int(match.group(2))
+    day = monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _german_month_number(value: str) -> int | None:
+    normalized = value.casefold().strip(".")
+    months = {
+        "jan": 1,
+        "januar": 1,
+        "feb": 2,
+        "februar": 2,
+        "mär": 3,
+        "maerz": 3,
+        "märz": 3,
+        "apr": 4,
+        "april": 4,
+        "mai": 5,
+        "jun": 6,
+        "juni": 6,
+        "jul": 7,
+        "juli": 7,
+        "aug": 8,
+        "august": 8,
+        "sep": 9,
+        "sept": 9,
+        "september": 9,
+        "okt": 10,
+        "oktober": 10,
+        "nov": 11,
+        "november": 11,
+        "dez": 12,
+        "dezember": 12,
+    }
+    return months.get(normalized)
+
+
+def _normalized_supporting_document_filename(
+    certificate_kind: str,
+    subject_name: str,
+    valid_until: str | None,
+) -> str:
+    parts = ["Nachweis", certificate_kind, subject_name, f"gültig bis {valid_until or 'ungeklärt'}"]
+    return ", ".join(_filename_part(part) for part in parts) + ".pdf"
 
 
 def _build_mock_result(document: dict) -> dict:
@@ -1658,6 +1845,7 @@ def _find_date(text: str, pattern: str) -> str | None:
 
 
 def _date_text_to_iso(value: str) -> str:
+    value = sub(r"\s+", "", value)
     day, month, year = value.split(".")
     if len(year) == 2:
         year = f"20{year}"

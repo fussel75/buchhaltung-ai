@@ -18,6 +18,7 @@ from app.services.database import (
     list_assignment_units,
     list_bwa_imports,
     list_supplier_rules,
+    list_tax_supporting_documents,
     tenant_profile_template,
     update_accounting_rule,
     update_assignment_unit,
@@ -164,6 +165,17 @@ def get_bwa_imports(
     require_admin(request)
     require_tenant_access(request, normalized_tenant_id)
     return {"bwa_imports": list_bwa_imports(normalized_tenant_id)}
+
+
+@router.get("/tax-supporting-documents")
+def get_tax_supporting_documents(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    normalized_tenant_id = _normalize_tenant_id(tenant_id)
+    require_admin(request)
+    require_tenant_access(request, normalized_tenant_id)
+    return {"tax_supporting_documents": list_tax_supporting_documents(normalized_tenant_id)}
 
 
 @router.post("/bwa-imports", status_code=status.HTTP_201_CREATED)

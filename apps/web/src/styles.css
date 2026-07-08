@@ -1883,6 +1883,18 @@ code {
   background: #fff2ea;
 }
 
+.status-pill.orange {
+  border-color: #fdba74;
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.status-pill.red {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fee2e2;
+}
+
 .status.gray,
 .status-pill.gray {
   border-color: var(--border);
@@ -3125,6 +3137,21 @@ code {
   grid-template-columns: minmax(190px, 0.95fr) minmax(88px, 0.35fr) minmax(230px, 1.1fr) minmax(260px, 1.25fr);
 }
 
+.tax-doc-table .data-row {
+  grid-template-columns:
+    minmax(180px, 1.25fr)
+    minmax(190px, 1.15fr)
+    minmax(105px, 0.58fr)
+    minmax(150px, 0.78fr)
+    minmax(120px, 0.62fr)
+    minmax(190px, 1.2fr);
+}
+
+.tax-doc-table .data-row > .inline-note,
+.tax-doc-table .empty-row > span {
+  grid-column: 1 / -1;
+}
+
 .capability-toolbar {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(150px, 220px);
@@ -3408,6 +3435,7 @@ code {
   .assignment-table .data-row,
   .supplier-table .data-row,
   .capability-table .data-row,
+  .tax-doc-table .data-row,
   .bwa-table .data-row,
   .accounting-table .data-row,
   .payment-row,

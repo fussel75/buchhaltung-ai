@@ -2778,6 +2778,8 @@ function ExtractionEditForm({
           <select name="document_type" value={form.document_type} onChange={(event) => updateField("document_type", event.target.value)} disabled={isApproved}>
             <option value="incoming_invoice">Eingangsrechnung</option>
             <option value="credit_note">Gutschrift</option>
+            <option value="tax_exemption_certificate">Freistellungsbescheinigung</option>
+            <option value="reverse_charge_certificate">§13b-Nachweis</option>
           </select>
         </FormField>
         <FormField label="Kostenart">
@@ -4227,6 +4229,7 @@ function MasterdataAdmin({
   const [extractionCapabilities, setExtractionCapabilities] = useState([]);
   const [accountingRules, setAccountingRules] = useState([]);
   const [bwaImports, setBwaImports] = useState([]);
+  const [taxSupportingDocuments, setTaxSupportingDocuments] = useState([]);
   const [assignmentEditId, setAssignmentEditId] = useState(null);
   const [assignmentEditForm, setAssignmentEditForm] = useState(null);
   const [supplierEditId, setSupplierEditId] = useState(null);
@@ -4318,14 +4321,15 @@ function MasterdataAdmin({
   }, [tenantProfile]);
 
   const loadMasterdata = useCallback(async () => {
-    const [assignmentsResponse, suppliersResponse, capabilitiesResponse, accountingResponse, bwaResponse] = await Promise.all([
+    const [assignmentsResponse, suppliersResponse, capabilitiesResponse, accountingResponse, bwaResponse, taxDocsResponse] = await Promise.all([
       apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch("/masterdata/extraction-capabilities"),
       apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/bwa-imports?tenant_id=${encodeURIComponent(tenantId)}`),
+      apiFetch(`/masterdata/tax-supporting-documents?tenant_id=${encodeURIComponent(tenantId)}`),
     ]);
-    if (!assignmentsResponse.ok || !suppliersResponse.ok || !capabilitiesResponse.ok || !accountingResponse.ok || !bwaResponse.ok) {
+    if (!assignmentsResponse.ok || !suppliersResponse.ok || !capabilitiesResponse.ok || !accountingResponse.ok || !bwaResponse.ok || !taxDocsResponse.ok) {
       throw new Error("Stammdaten konnten nicht geladen werden.");
     }
     const assignmentsResult = await assignmentsResponse.json();
@@ -4333,11 +4337,13 @@ function MasterdataAdmin({
     const capabilitiesResult = await capabilitiesResponse.json();
     const accountingResult = await accountingResponse.json();
     const bwaResult = await bwaResponse.json();
+    const taxDocsResult = await taxDocsResponse.json();
     setAssignmentUnits(assignmentsResult.assignment_units ?? []);
     setSupplierRules(suppliersResult.supplier_rules ?? []);
     setExtractionCapabilities(capabilitiesResult.capabilities ?? []);
     setAccountingRules(accountingResult.accounting_rules ?? []);
     setBwaImports(bwaResult.bwa_imports ?? []);
+    setTaxSupportingDocuments(taxDocsResult.tax_supporting_documents ?? []);
   }, [apiFetch, tenantId]);
 
   useEffect(() => {
@@ -5165,6 +5171,47 @@ function MasterdataAdmin({
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Steuerliche Nachweise</p>
+              <h3>Freistellung und §13b</h3>
+            </div>
+            <StatusPill value={`${taxSupportingDocuments.length} Nachweise`} tone={taxSupportingDocuments.length ? "green" : "gray"} />
+          </div>
+          <p className="form-hint">
+            Hochgeladene Freistellungsbescheinigungen und §13b-Nachweise werden hier gesammelt. Ablaufdaten dienen als Prüfhilfe und ersetzen keine fachliche Steuerprüfung.
+          </p>
+          <div className="data-table tax-doc-table">
+            <div className="data-row data-head">
+              <span>Firma</span>
+              <span>Nachweis</span>
+              <span>Gültig bis</span>
+              <span>Steuernr. / USt-ID</span>
+              <span>Status</span>
+              <span>Datei</span>
+            </div>
+            {taxSupportingDocuments.map((taxDocument) => (
+              <div className="data-row" key={taxDocument.id}>
+                <strong>{taxDocument.certificate_subject || "-"}</strong>
+                <span>{taxDocument.certificate_kind || formatDocumentType(taxDocument.document_type)}</span>
+                <span>{formatDate(taxDocument.certificate_valid_until)}</span>
+                <span>{[taxDocument.certificate_tax_number, taxDocument.certificate_vat_id].filter(Boolean).join(" / ") || "-"}</span>
+                <StatusPill value={formatCertificateExpiryStatus(taxDocument)} tone={certificateExpiryTone(taxDocument.expiry_status)} />
+                <span>{safeVisibleFilename(taxDocument.normalized_filename || taxDocument.original_filename)}</span>
+                {taxDocument.warnings?.length ? (
+                  <p className="inline-note">{taxDocument.warnings.join(" ")}</p>
+                ) : null}
+              </div>
+            ))}
+            {!taxSupportingDocuments.length ? (
+              <div className="data-row empty-row">
+                <span>Noch keine Freistellungs- oder §13b-Nachweise erkannt.</span>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -6493,8 +6540,24 @@ function formatDocumentType(value) {
   const labels = {
     credit_note: "Gutschrift",
     incoming_invoice: "Eingangsrechnung",
+    reverse_charge_certificate: "§13b-Nachweis",
+    tax_exemption_certificate: "Freistellungsbescheinigung",
   };
-  return labels[value] ?? value;
+  return labels[value] ?? value ?? "-";
+}
+
+function formatCertificateExpiryStatus(document) {
+  const days = document?.days_until_expiry;
+  if (document?.expiry_status === "expired") return "abgelaufen";
+  if (document?.expiry_status === "soon") return days === 0 ? "läuft heute ab" : `läuft in ${days} Tagen ab`;
+  if (document?.expiry_status === "valid") return "gültig";
+  return "Ablauf unklar";
+}
+
+function certificateExpiryTone(status) {
+  if (status === "expired") return "red";
+  if (status === "soon" || status === "unknown") return "orange";
+  return "green";
 }
 
 function formatExportRowType(value) {
