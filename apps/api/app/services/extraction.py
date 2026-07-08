@@ -701,6 +701,9 @@ def _build_pdf_text_result(document: dict) -> dict:
         r"\bNummer\s*:\s*([0-9]+-[0-9]+)",
     ) or _find_text(
         text,
+        r"\bNummer\s*(?:\([A-Z]{1,5}\))?\s*:\s*([0-9]+-[0-9]+)",
+    ) or _find_text(
+        text,
         r"Nr\.\s*\(S\)\s*:\s*([0-9-]+)",
     ) or _find_text(
         text,
@@ -2003,6 +2006,7 @@ def _find_money_after_label(text: str, label: str) -> Decimal | None:
 def _find_customer_number(text: str) -> str | None:
     return (
         _find_text(text, r"Rg\.-Datum\s+Kunden-Nr\.[^\n]*\n\s*\d{2}\.\d{2}\.\d{4}\s+([0-9]{5})\b")
+        or _find_text(text, r"Kundenr\./ADM\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.?\s+Auftraggeber\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden\s*-?\s*Nr\.?\s*:?\s*([0-9][0-9/.-]*)")
         or _find_text(text, r"Kunden-Nr\.\s*:\s*\n\s*([0-9][0-9/.-]*)")
@@ -2455,6 +2459,9 @@ def _find_customer_reference(text: str) -> str | None:
         r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text
     ) or search(
         r"Bestelldaten:\s*(.+?)(?:\n|$)", text
+    ) or search(
+        r"Kom\s*:\s*(.+?)(?=\s*-{3,}|\s*Pos\.|\s*Artikel|\n|$)",
+        text,
     ) or search(
         r"Objekt:\s*(.+?)(?:\n|$)", text
     ) or search(

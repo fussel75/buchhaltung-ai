@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from app.services import database as database_service
 from app.services import extraction as extraction_service
 from app.services.extraction import _build_pdf_text_result
 
@@ -944,6 +945,103 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["net_amount"], Decimal("34.17"))
         self.assertEqual(result["tax_amount"], Decimal("6.49"))
         self.assertEqual(result["gross_amount"], Decimal("40.66"))
+
+    def test_klindworth_invoice_reads_bd_number_customer_kom_and_discount(self):
+        text = """
+        FristD-Bau ZuB GmbH & Co.KG       R E C H N U N G               Blatt 1
+        Haldesdorfer Str. 44              --------------------------------------
+        22179 Hamburg
+        Nummer    (BD) :           866205-605
+        Datum          :   31.05.2026 - 10:01
+        Kundenr./ADM   :          0113042/504
+        Sachbearbeiter :       Thorben Peters
+        Lieferschein   :   1353525/20.04.2026
+        Lieferung      :      Direktlieferung
+        Steuernr.      :          DE116824527Kom:Buchecker Weg 4
+        --------------------------------------------------------------------------------
+        Pos. Artikel / Bezeichnung             Menge ME  Preis EUR /PE Rab/TZ Gesamt.EUR
+        10 eurot.3.%st                        1600 STK      4,44 %E             71,04
+        Hapatec Edelstahl gehärtet
+        4,5x50mm   # 111813
+        20 989                                   1 STK      8,95 E               8,95
+        zzgl. Aufw. Vorlieferant
+        -----------
+        Summe Warenwert                                            EUR      79,99
+        + 19,00 % Mwst.                                            EUR      15,20
+        -----------
+        Rechnungsbetrag (zahlbar bis spätestens 30.06.26 o. Abzug) EUR      95,19
+        ===========
+        10 Tage 2% Skonto        30 Tage netto
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "1RECHNUNGAR095410.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "klindworth.pdf",
+            "size_bytes": 149000,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Buwg4",
+            "label": "Buwg4",
+            "kind": "construction_project",
+            "project_number": "25-00009",
+            "address_line": "Bucheckerweg 4",
+            "postal_code": "22175",
+            "city": "Hamburg",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def assignment_lookup(_tenant_id, lookup_text):
+            if lookup_text and "Buchecker Weg 4" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=assignment_lookup),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Georg Klindworth oHG")
+        self.assertEqual(result["invoice_number"], "866205-605")
+        self.assertEqual(result["customer_number"], "0113042/504")
+        self.assertEqual(result["customer_reference"], "Buchecker Weg 4")
+        self.assertEqual(result["assignment_code"], "Buwg4")
+        self.assertEqual(result["project_name"], "Buwg4")
+        self.assertEqual(result["project_number"], "25-00009")
+        self.assertEqual(result["invoice_date"], "2026-05-31")
+        self.assertEqual(result["net_amount"], Decimal("79.99"))
+        self.assertEqual(result["tax_amount"], Decimal("15.20"))
+        self.assertEqual(result["gross_amount"], Decimal("95.19"))
+        self.assertEqual(result["due_date"], "2026-06-30")
+        self.assertEqual(result["discount_due_date"], "2026-06-10")
+        self.assertEqual(result["discount_amount"], Decimal("1.90"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("93.29"))
+
+    def test_assignment_match_tolerates_split_street_compound(self):
+        assignment = {
+            "code": "Buwg4",
+            "label": "Buwg4",
+            "kind": "construction_project",
+            "project_number": "25-00009",
+            "address_line": "Bucheckerweg 4",
+            "postal_code": "22175",
+            "city": "Hamburg",
+            "aliases": [],
+            "is_active": True,
+        }
+
+        score, reasons = database_service._assignment_match_score(
+            assignment,
+            database_service._normalize_match_text("Kom:Buchecker Weg 4"),
+        )
+
+        self.assertGreaterEqual(score, 80)
+        self.assertIn("Adresse", reasons)
 
     def test_arens_stitz_invoice_reads_header_totals_and_assignment(self):
         text = """

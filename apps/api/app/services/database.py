@@ -3486,6 +3486,14 @@ def _assignment_candidate_match_weight(
     if _is_strong_compact_assignment_candidate(label, compact_candidate) and compact_candidate in compact_text:
         return weight
 
+    if (
+        label in {"Projektadresse", "Adresse", "Alias"}
+        and re_search(r"[a-z]", compact_candidate)
+        and re_search(r"\d", compact_candidate)
+        and compact_candidate in compact_text
+    ):
+        return max(80, int(weight * Decimal("0.90")))
+
     if label in {"Projektadresse", "Adresse", "Alias"} and _assignment_tokens_match(normalized_candidate, normalized_text):
         return max(80, int(weight * Decimal("0.90")))
 
