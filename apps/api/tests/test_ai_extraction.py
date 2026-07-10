@@ -164,3 +164,91 @@ class AiExtractionTests(TestCase):
         mocked_call.assert_called_once()
         self.assertEqual(result["raw_result"]["customer_number"], "425590")
         self.assertEqual(result["raw_result"]["ai_extraction"]["status"], "applied")
+
+    def test_ai_assignment_resolves_partial_project_reference_to_masterdata(self):
+        extraction = {
+            "supplier_name": "773934 606",
+            "invoice_number": "773934 606",
+            "invoice_date": "2026-06-12",
+            "gross_amount": Decimal("361.19"),
+            "confidence": Decimal("0.42"),
+            "warnings": ["Zuordnung ungeklärt."],
+            "source": "pdf_text_rules",
+            "assignment_type": "assignment_unresolved",
+        }
+        assignment = {
+            "code": "Neula51",
+            "label": "Neusurenland 51",
+            "kind": "construction_project",
+            "project_number": "26-00003",
+            "address_line": "Neusurenland 51",
+            "postal_code": "22159",
+            "city": "Hamburg",
+            "client_name": "Ilja Badekow",
+            "description": "Umbau, Anbau, Wärmepumpe, Sanitär",
+            "is_active": True,
+            "aliases": [],
+        }
+        ai_payload = {
+            "supplier_name": "Hansa Holz GmbH",
+            "invoice_number": "26/007898",
+            "customer_number": "43535",
+            "document_type": "incoming_invoice",
+            "cost_category": "material",
+            "assignment_code": "Neusurenland Bangkirai",
+            "item_summary": "Bangkirai Konstruktionsholz",
+            "confidence": "0.93",
+            "evidence": ["BV: Neusurenland Bangkirai"],
+            "warnings": [],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[assignment]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload),
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "773934-606.pdf"},
+                extraction=extraction,
+                pdf_text="BV: Neusurenland Bangkirai",
+            )
+
+        self.assertEqual(result["supplier_name"], "Hansa Holz GmbH")
+        self.assertEqual(result["raw_result"]["assignment_code"], "Neula51")
+        self.assertEqual(result["raw_result"]["project_number"], "26-00003")
+        self.assertEqual(result["raw_result"]["assignment_kind"], "construction_project")
+
+    def test_ai_assignment_does_not_guess_ambiguous_partial_reference(self):
+        assignment_a = {
+            "code": "Ekkp58",
+            "label": "Eckerkamp 58",
+            "kind": "construction_project",
+            "project_number": "25-00007",
+            "address_line": "Eckerkamp 58",
+            "city": "Hamburg",
+            "is_active": True,
+            "aliases": [],
+        }
+        assignment_b = {
+            "code": "Ekkp66",
+            "label": "Eckerkamp 66",
+            "kind": "construction_project",
+            "project_number": "25-00012",
+            "address_line": "Eckerkamp 66",
+            "city": "Hamburg",
+            "is_active": True,
+            "aliases": [],
+        }
+
+        result = ai_extraction._resolve_assignment(
+            {"assignment_code": "Eckerkamp", "project_number": None},
+            [assignment_a, assignment_b],
+        )
+
+        self.assertIsNone(result)

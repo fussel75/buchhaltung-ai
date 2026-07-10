@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import json
 import os
-from re import search, sub
+from re import findall, search, sub
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -187,10 +187,13 @@ def _call_ai_extractor(
 def _system_prompt() -> str:
     return (
         "Du bist ein sehr genauer deutscher Buchhaltungs-Extraktor. "
-        "Lies Rechnungen, Gutschriften, Tankbelege und steuerliche Nachweise. "
+        "Lies Rechnungen, Gutschriften, Tankbelege, Freistellungsbescheinigungen und steuerliche Nachweise. "
         "Erfinde keine Werte. Wenn ein Wert nicht im Text steht, nutze null. "
-        "Nutze Projektstammdaten nur, wenn Text, Kommission, Adresse, Projektnummer, Projektname, Bauherr oder Alias plausibel passt. "
-        "Antworte ausschliesslich als JSON-Objekt."
+        "Nutze Projektstammdaten nur, wenn Text, Kommission, Kundenreferenz, Betreff, Adresse, Projektnummer, Projektname, Bauherr oder Alias plausibel passt. "
+        "Wenn nur ein Teil der Projektadresse oder des Projektnamens genannt wird, gleiche ihn mit der Projektliste ab und liefere Code plus Projektnummer. "
+        "Tankbelege sind Fahrzeug/Tanken und werden keinem Bauvorhaben zugeordnet, außer der Beleg nennt ausdrücklich ein Projekt. "
+        "Freistellungsbescheinigungen und §13b-Nachweise sind keine normalen Eingangsrechnungen. "
+        "Antworte ausschließlich als JSON-Objekt."
     )
 
 
@@ -354,15 +357,77 @@ def _resolve_assignment(payload: dict[str, Any], assignment_units: list[dict[str
     ]
     normalized_candidates = {_normalize_lookup(value) for value in candidates if value}
     for assignment in assignment_units:
-        values = {
-            assignment.get("project_number"),
-            assignment.get("code"),
-            assignment.get("label"),
-            *list(assignment.get("aliases") or []),
-        }
+        values = _assignment_match_values(assignment)
         if normalized_candidates & {_normalize_lookup(value) for value in values if value}:
             return assignment
-    return None
+    return _resolve_fuzzy_assignment(candidates, assignment_units)
+
+
+def _assignment_match_values(assignment: dict[str, Any]) -> set[Any]:
+    address = _assignment_address(assignment)
+    return {
+        assignment.get("project_number"),
+        assignment.get("order_number"),
+        assignment.get("code"),
+        assignment.get("label"),
+        assignment.get("address_line"),
+        assignment.get("postal_code"),
+        assignment.get("city"),
+        address,
+        assignment.get("client_name"),
+        assignment.get("description"),
+        *list(assignment.get("aliases") or []),
+    }
+
+
+def _resolve_fuzzy_assignment(candidates: list[Any], assignment_units: list[dict[str, Any]]) -> dict[str, Any] | None:
+    candidate_tokens = set()
+    for candidate in candidates:
+        candidate_tokens.update(_significant_tokens(candidate))
+    if not candidate_tokens:
+        return None
+
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for assignment in assignment_units:
+        assignment_tokens = set()
+        for value in _assignment_match_values(assignment):
+            assignment_tokens.update(_significant_tokens(value))
+        shared = candidate_tokens & assignment_tokens
+        if not shared:
+            continue
+        strong_shared = {token for token in shared if len(token) >= 7}
+        score = len(shared) + len(strong_shared)
+        if score >= 2:
+            scored.append((score, len(shared), assignment))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    best = scored[0]
+    if len(scored) > 1 and scored[1][0] == best[0]:
+        return None
+    return best[2]
+
+
+_ASSIGNMENT_STOP_TOKENS = {
+    "bauvorhaben",
+    "betreff",
+    "hamburg",
+    "kommission",
+    "kommision",
+    "kundenreferenz",
+    "lieferung",
+    "material",
+    "projekt",
+    "rechnung",
+    "sanierung",
+}
+
+
+def _significant_tokens(value: Any) -> list[str]:
+    text = str(value or "").casefold()
+    tokens = findall(r"[a-z0-9äöüß]{4,}", text)
+    return [token for token in tokens if token not in _ASSIGNMENT_STOP_TOKENS]
 
 
 def _assignment_code(assignment: dict[str, Any]) -> str | None:
