@@ -728,6 +728,71 @@ def get_document_bulk_job(job_id: UUID) -> dict[str, Any] | None:
     return job
 
 
+def cancel_document_bulk_job(job_id: UUID, actor: str = "system", reason: str | None = None) -> dict[str, Any] | None:
+    now = datetime.now(UTC)
+    cancel_reason = reason or "Manuell abgebrochen."
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("select * from document_bulk_jobs where id = %s for update", (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            if row["status"] in BULK_JOB_ACTIVE_STATUSES:
+                cursor.execute(
+                    """
+                    update document_bulk_job_items
+                    set status = 'skipped', error = %s, updated_at = %s
+                    where job_id = %s and status in ('queued', 'running')
+                    """,
+                    (cancel_reason, now, job_id),
+                )
+                cursor.execute(
+                    """
+                    update documents
+                    set processing_job_id = null, processing_started_at = null, updated_at = %s
+                    where processing_job_id = %s
+                    """,
+                    (now, job_id),
+                )
+                cursor.execute(
+                    """
+                    update document_bulk_jobs
+                    set
+                        status = 'failed',
+                        processed_count = (
+                            select count(*) from document_bulk_job_items
+                            where job_id = %s and status in ('succeeded', 'failed', 'skipped')
+                        ),
+                        succeeded_count = (
+                            select count(*) from document_bulk_job_items
+                            where job_id = %s and status = 'succeeded'
+                        ),
+                        failed_count = (
+                            select count(*) from document_bulk_job_items
+                            where job_id = %s and status in ('failed', 'skipped')
+                        ),
+                        error = %s,
+                        updated_at = %s,
+                        finished_at = %s
+                    where id = %s
+                    returning *
+                    """,
+                    (job_id, job_id, job_id, cancel_reason, now, now, job_id),
+                )
+                row = cursor.fetchone()
+
+    insert_audit_event(
+        tenant_id=row["tenant_id"],
+        event_type=f"document.bulk_{row['action']}_cancelled",
+        actor=actor,
+        details={"job_id": str(job_id), "reason": cancel_reason},
+    )
+    job = _serialize_bulk_job(row)
+    job["items"] = _list_document_bulk_job_items(job_id)
+    return job
+
+
 def list_document_bulk_jobs(tenant_id: str, limit: int = 10) -> list[dict[str, Any]]:
     capped_limit = max(1, min(limit, 50))
     with _connect() as connection:

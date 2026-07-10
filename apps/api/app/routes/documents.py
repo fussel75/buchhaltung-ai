@@ -18,6 +18,7 @@ from app.services.database import (
     approve_document_review,
     BulkJobConflictError,
     build_booking_export_rows,
+    cancel_document_bulk_job,
     create_document_bulk_job,
     create_document_record,
     delete_document,
@@ -37,7 +38,7 @@ from app.services.database import (
     validate_document_review_details,
     enrich_review_validation_detail,
 )
-from app.services.bulk_jobs import run_document_bulk_job
+from app.services.bulk_jobs import request_bulk_job_stop, run_document_bulk_job
 from app.services.extraction import run_ai_extraction, run_mock_extraction
 from app.services.preview import PreviewError, extract_pdf_preview_text, pdf_page_count, render_pdf_preview_page
 from app.services.storage import (
@@ -626,6 +627,24 @@ def get_bulk_job(job_id: UUID, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="bulk job not found")
     require_tenant_access(request, job["tenant_id"])
     return {"job": job}
+
+
+@router.post("/bulk-jobs/{job_id}/cancel")
+def cancel_bulk_job(job_id: UUID, request: Request) -> dict[str, Any]:
+    require_admin(request)
+    job = get_document_bulk_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="bulk job not found")
+    require_tenant_access(request, job["tenant_id"])
+    if job["status"] not in {"queued", "running"}:
+        return {"job": job}
+    request_bulk_job_stop(job_id)
+    cancelled = cancel_document_bulk_job(
+        job_id,
+        actor=getattr(request.state, "user_email", None) or "system",
+        reason="Manuell abgebrochen.",
+    )
+    return {"job": cancelled}
 
 
 @router.get("/{document_id}/file")

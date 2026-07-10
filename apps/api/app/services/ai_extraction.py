@@ -205,6 +205,12 @@ def _user_prompt(
     pdf_text: str,
     assignment_units: list[dict[str, Any]],
 ) -> str:
+    selected_assignment_units = _select_assignment_units_for_ai(
+        document=document,
+        extraction=extraction,
+        pdf_text=pdf_text,
+        assignment_units=assignment_units,
+    )
     project_context = [
         {
             "code": unit.get("code"),
@@ -220,7 +226,7 @@ def _user_prompt(
             "is_active": unit.get("is_active"),
             "status": unit.get("source_status"),
         }
-        for unit in assignment_units[:120]
+        for unit in selected_assignment_units
     ]
     schema = {
         "document_type": "incoming_invoice|credit_note|fuel_receipt|tax_exemption_certificate|reverse_charge_certificate|other|null",
@@ -258,12 +264,79 @@ def _user_prompt(
             "current_extraction": _json_safe(extraction),
             "allowed_cost_categories": sorted(VALID_COST_CATEGORIES),
             "project_masterdata": project_context,
+            "project_masterdata_count": len(project_context),
+            "project_masterdata_total": len(assignment_units),
             "expected_json_schema": schema,
             "pdf_text": pdf_text,
         },
         ensure_ascii=False,
         indent=2,
     )
+
+
+def _select_assignment_units_for_ai(
+    *,
+    document: dict[str, Any],
+    extraction: dict[str, Any],
+    pdf_text: str,
+    assignment_units: list[dict[str, Any]],
+    limit: int = 35,
+) -> list[dict[str, Any]]:
+    if not assignment_units:
+        return []
+
+    raw = extraction.get("raw_result") if isinstance(extraction.get("raw_result"), dict) else {}
+    lookup_text = " ".join(
+        str(value)
+        for value in (
+            document.get("original_filename"),
+            extraction.get("supplier_name"),
+            extraction.get("invoice_number"),
+            extraction.get("item_summary"),
+            extraction.get("assignment_code"),
+            extraction.get("project_number"),
+            raw.get("assignment_code"),
+            raw.get("project_number"),
+            raw.get("delivery_address"),
+            raw.get("customer_reference"),
+            raw.get("item_summary"),
+            pdf_text[:6000],
+        )
+        if value
+    )
+    normalized_lookup = _normalize_lookup(lookup_text)
+    lookup_tokens = set(_significant_tokens(lookup_text))
+
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for index, assignment in enumerate(assignment_units):
+        values = [value for value in _assignment_match_values(assignment) if value]
+        normalized_values = [_normalize_lookup(value) for value in values]
+        assignment_tokens = set()
+        for value in values:
+            assignment_tokens.update(_significant_tokens(value))
+
+        exact_hits = sum(1 for value in normalized_values if value and value in normalized_lookup)
+        shared_tokens = lookup_tokens & assignment_tokens
+        long_shared = {token for token in shared_tokens if len(token) >= 7}
+        score = exact_hits * 12 + len(shared_tokens) + len(long_shared) * 3
+        if assignment.get("is_active") is False and score:
+            score += 1
+        if score:
+            scored.append((score, -index, assignment))
+
+    if scored:
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        selected = [assignment for _, _, assignment in scored[:limit]]
+        if len(selected) < min(12, limit):
+            selected_ids = {id(assignment) for assignment in selected}
+            selected.extend(
+                assignment
+                for assignment in assignment_units
+                if id(assignment) not in selected_ids
+            )
+        return selected[:limit]
+
+    return assignment_units[: min(20, limit)]
 
 
 def _merge_ai_payload(

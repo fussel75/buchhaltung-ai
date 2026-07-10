@@ -378,6 +378,31 @@ function UploadApp() {
     setBulkJobs((current) => [job, ...current.filter((existingJob) => existingJob.id !== job.id)].slice(0, 8));
   }, []);
 
+  const cancelBulkJob = useCallback(async (job) => {
+    if (!job?.id || !["queued", "running"].includes(job.status)) return;
+    const confirmed = window.confirm(`${formatBulkAction(job.action)} wirklich abbrechen? Bereits bearbeitete Belege bleiben erhalten.`);
+    if (!confirmed) return;
+
+    setError("");
+    setNotice("");
+    try {
+      const response = await apiFetch(`/documents/bulk-jobs/${job.id}/cancel`, { method: "POST" });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result.detail, `Auftrag konnte nicht abgebrochen werden: ${response.status}`));
+      }
+      const result = await response.json();
+      rememberBulkJob(result.job);
+      setExtractionBatch(null);
+      setReviewBatch(null);
+      await loadBulkJobs();
+      await loadDocuments();
+      setNotice("Auftrag abgebrochen. Gesperrte Belege wurden wieder freigegeben.");
+    } catch (cancelError) {
+      setError(cancelError.message);
+    }
+  }, [apiFetch, loadBulkJobs, loadDocuments, rememberBulkJob]);
+
   useEffect(() => {
     loadDocuments().catch((loadError) => setError(loadError.message));
   }, [loadDocuments]);
@@ -1781,7 +1806,7 @@ function UploadApp() {
               }}
             />
           </section>
-          <BulkJobHistory jobs={bulkJobs} />
+          <BulkJobHistory jobs={bulkJobs} onCancel={cancelBulkJob} />
           </aside>
 
           <section className="uploads" ref={reviewQueueRef}>
@@ -2617,7 +2642,7 @@ function assignmentMatchesSearch(assignment, needle) {
   ].filter(Boolean).join(" ").toLowerCase().includes(needle);
 }
 
-function BulkJobHistory({ jobs }) {
+function BulkJobHistory({ jobs, onCancel }) {
   const activeCount = jobs.filter((job) => ["queued", "running"].includes(job.status)).length;
   return (
     <section className="job-history">
@@ -2651,6 +2676,11 @@ function BulkJobHistory({ jobs }) {
               </div>
               <BulkJobSummary summary={job.summary} />
               {job.error ? <p className="job-error">{job.error}</p> : null}
+              {["queued", "running"].includes(job.status) ? (
+                <button type="button" className="secondary compact" onClick={() => onCancel?.(job)}>
+                  Abbrechen
+                </button>
+              ) : null}
             </article>
           ))}
         </div>

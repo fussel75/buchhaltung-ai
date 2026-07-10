@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import TestCase
@@ -277,3 +278,42 @@ class AiExtractionTests(TestCase):
         self.assertIn('"code": "Ekkp58"', prompt)
         self.assertIn('"is_active": false', prompt)
         self.assertIn('"status": "Abgeschlossen"', prompt)
+
+    def test_ai_prompt_prioritizes_relevant_project_masterdata(self):
+        assignments = [
+            {
+                "code": f"Unrel{i}",
+                "label": f"Unrelevantes Projekt {i}",
+                "kind": "construction_project",
+                "project_number": f"26-9{i:04d}",
+                "address_line": f"Unbekannte Strasse {i}",
+                "city": "Hamburg",
+                "is_active": True,
+                "aliases": [],
+            }
+            for i in range(60)
+        ]
+        assignments.append(
+            {
+                "code": "Neula51",
+                "label": "Neusurenland 51",
+                "kind": "construction_project",
+                "project_number": "26-00003",
+                "address_line": "Neusurenland 51",
+                "city": "Hamburg",
+                "is_active": True,
+                "aliases": ["Neusurenland Bangkirai"],
+            }
+        )
+
+        prompt = ai_extraction._user_prompt(
+            document={"original_filename": "hansa-holz.pdf", "content_type": "application/pdf", "size_bytes": 1234},
+            extraction={"supplier_name": "Hansa Holz GmbH", "confidence": Decimal("0.50")},
+            pdf_text="BV: Neusurenland Bangkirai",
+            assignment_units=assignments,
+        )
+        payload = json.loads(prompt)
+
+        self.assertEqual(payload["project_masterdata_total"], 61)
+        self.assertLessEqual(payload["project_masterdata_count"], 35)
+        self.assertEqual(payload["project_masterdata"][0]["code"], "Neula51")

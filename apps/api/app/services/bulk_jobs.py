@@ -7,7 +7,6 @@ from app.services.database import (
     document_extraction_health,
     finish_document_bulk_job,
     get_document,
-    get_document_bulk_job,
     mark_document_bulk_job_item,
     mark_document_bulk_job_running,
     prepare_document_review,
@@ -15,6 +14,13 @@ from app.services.database import (
     summarize_reextraction_health_changes,
 )
 from app.services.extraction import run_ai_extraction, run_mock_extraction
+
+
+_CANCELLED_BULK_JOBS: set[UUID] = set()
+
+
+def request_bulk_job_stop(job_id: UUID) -> None:
+    _CANCELLED_BULK_JOBS.add(job_id)
 
 
 def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
@@ -25,6 +31,8 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
     health_entries: list[dict] = []
     try:
         for item in job["items"]:
+            if job_id in _CANCELLED_BULK_JOBS:
+                return
             document_id = UUID(item["document_id"])
             mark_document_bulk_job_item(job_id, document_id, "running")
             claim = claim_document_for_bulk_job(document_id, job_id, _expected_status(job["action"]))
@@ -69,6 +77,8 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
         _finish_bulk_job(job_id, "completed", job["action"], health_entries)
     except Exception as error:  # noqa: BLE001 - persist fatal job errors for the UI
         _finish_bulk_job(job_id, "failed", job["action"], health_entries, _error_message(error))
+    finally:
+        _CANCELLED_BULK_JOBS.discard(job_id)
 
 
 def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id: UUID) -> None:
