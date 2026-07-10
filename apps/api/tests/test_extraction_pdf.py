@@ -175,6 +175,54 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(match["source"], "Projektstammdaten-Abgleich")
         self.assertIn("Projektadresse", match["reasons"])
 
+    def test_customer_reference_reads_bv_marker(self):
+        text = "Betr. Lieferung vom 9.06.26\nOnline-Shop-Nr.:\nBV: Neusurenland Bangkirai\nAnlieferung:"
+
+        self.assertEqual(extraction_service._find_customer_reference(text), "Neusurenland Bangkirai")
+
+    def test_assignment_match_accepts_named_project_without_house_number(self):
+        assignment = {
+            "code": "Neula51",
+            "label": "Neula51",
+            "kind": "construction_project",
+            "project_number": "26-00003",
+            "address_line": "Neusurenland 51",
+            "postal_code": "22159",
+            "city": "Hamburg",
+            "aliases": ["Neusurenland 51"],
+            "is_active": True,
+        }
+
+        with patch.object(database_service, "list_assignment_units", return_value=[assignment]):
+            match = database_service.find_assignment_unit_match_by_text(
+                "demo-mandant",
+                "BV: Neusurenland Bangkirai",
+            )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match["assignment"]["code"], "Neula51")
+        self.assertIn("Adresse", match["reasons"])
+
+    def test_hansa_holz_supplier_name_is_normalized(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "HaHo-R-26007898-43535.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "hansa.pdf",
+            "size_bytes": 120000,
+            "sha256": "abc",
+        }
+        text = """
+        Hansa Holz Wilhelm Krüger GmbH
+        RechnungsNr.: 26/007898
+        KundenNr. .: 43535
+        Versand .: per LKW
+        Reisender .: Lennart Werner
+        BTR NL
+        """
+
+        self.assertEqual(extraction_service._supplier_name(document, text), "Hansa Holz GmbH")
+
     def test_pymupdf_ocr_uses_german_and_english_languages(self):
         class FakePdf:
             def __init__(self, pages):
@@ -1853,7 +1901,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "HaHo Holz")
+        self.assertEqual(result["supplier_name"], "Hansa Holz GmbH")
         self.assertEqual(result["invoice_number"], "25005898")
         self.assertEqual(result["customer_number"], "43535")
         self.assertEqual(result["invoice_date"], "2025-04-30")

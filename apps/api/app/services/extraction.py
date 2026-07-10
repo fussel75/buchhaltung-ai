@@ -2513,6 +2513,8 @@ def _find_customer_reference(text: str) -> str | None:
     ) or search(
         r"Bestelldaten:\s*(.+?)(?:\n|$)", text
     ) or search(
+        r"\bBV\s*:\s*(.+?)(?:\n|$)", text
+    ) or search(
         r"Kom\s*:\s*(.+?)(?=\s*-{3,}|\s*Pos\.|\s*Artikel|\n|$)",
         text,
     ) or search(
@@ -2666,8 +2668,10 @@ def _supplier_name(document: dict, text: str) -> str:
         or ("cobadach" in compact_text and "kundennr" in compact_text)
     ):
         return "Rolf Dammers oHG"
-    if "kundennr" in lower_text and "reisender" in lower_text and "btr nl" in lower_text:
-        return "HaHo Holz"
+    if ("hansa holz" in lower_text and "wilhelm kr" in lower_text) or (
+        "kundennr" in lower_text and "reisender" in lower_text and "btr nl" in lower_text
+    ):
+        return "Hansa Holz GmbH"
     if "foerch" in original or "foerch" in text.lower() or "f\u00f6rch" in text.lower():
         return "Theo Foerch GmbH & Co. KG"
     if any(name in lower_text for name in ["lüchau baustoffe gmbh", "lã¼chau baustoffe gmbh", "luechau baustoffe gmbh"]):
@@ -2710,6 +2714,8 @@ def _normalize_supplier_name(value: str | None) -> str | None:
         return None
     if value == "Holz-Junge GmbH":
         return "Holz Junge GmbH"
+    if value in {"HaHo Holz", "Hana Holz", "Hansa Holz Wilhelm Krüger GmbH"}:
+        return "Hansa Holz GmbH"
     value = sub(r"\s+Lager\s+.+$", "", value).strip()
     return value
 

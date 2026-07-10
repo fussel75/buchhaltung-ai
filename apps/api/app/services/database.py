@@ -3497,6 +3497,12 @@ def _assignment_candidate_match_weight(
     if label in {"Projektadresse", "Adresse", "Alias"} and _assignment_tokens_match(normalized_candidate, normalized_text):
         return max(80, int(weight * Decimal("0.90")))
 
+    if label in {"Projektname", "Projektadresse", "Adresse", "Alias"} and _assignment_named_place_match(
+        normalized_candidate,
+        normalized_text,
+    ):
+        return max(85, int(weight * Decimal("0.60")))
+
     return 0
 
 
@@ -3519,6 +3525,20 @@ def _assignment_tokens_match(normalized_candidate: str, normalized_text: str) ->
         return False
     # A safe address-like match needs a street/name token and a house/project number token.
     return any(re_search(r"[a-z]", token) for token in tokens) and any(re_search(r"\d", token) for token in tokens)
+
+
+def _assignment_named_place_match(normalized_candidate: str, normalized_text: str) -> bool:
+    # Some supplier invoices only carry the named place, e.g. "BV: Neusurenland",
+    # while the project master data stores "Neusurenland 51".
+    tokens = [
+        token
+        for token in _significant_assignment_tokens(normalized_candidate)
+        if re_search(r"[a-z]", token) and len(token) >= 7
+    ]
+    if not tokens:
+        return False
+    text_tokens = set(_significant_assignment_tokens(normalized_text))
+    return any(token in text_tokens for token in tokens)
 
 
 def _significant_assignment_tokens(value: str) -> list[str]:
