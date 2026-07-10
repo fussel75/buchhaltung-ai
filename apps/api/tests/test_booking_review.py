@@ -4233,6 +4233,65 @@ class BookingSuggestionTests(TestCase):
 
         self.assertFalse(any(detail["code"] == "missing_assignment" for detail in details))
 
+    def test_review_validation_allows_fuel_receipt_without_assignment_and_uses_ja_account(self):
+        document = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "original_filename": "HH-FB 236, Bareinlage, FS, 2026-05-29.pdf",
+            "normalized_filename": "HH-FB 236, Bareinlage, FS, 2026-05-29.pdf",
+            "status": "review_ready",
+            "extraction": {
+                "supplier_name": "Tankstelle",
+                "invoice_number": "HH-FB 236 2026-05-29",
+                "invoice_date": "2026-05-29",
+                "net_amount": "10.00",
+                "tax_amount": "1.90",
+                "gross_amount": "11.90",
+                "currency": "EUR",
+                "confidence": Decimal("0.88"),
+                "warnings": [],
+                "raw_result": {
+                    "document_type": "incoming_invoice",
+                    "assignment_type": "general_cost",
+                    "cost_category": "fuel_vehicle",
+                },
+            },
+            "booking_suggestions": [
+                {
+                    "line_no": 1,
+                    "booking_type": "incoming_invoice",
+                    "cost_category": "fuel_vehicle",
+                    "description": "Diesel",
+                    "assignment_code": None,
+                    "net_amount": "10.00",
+                    "tax_amount": "1.90",
+                    "gross_amount": "11.90",
+                    "currency": "EUR",
+                }
+            ],
+            "payment_decision": {"payment_type": "full_amount", "amount": "11.90"},
+        }
+
+        with patch.object(database_service, "list_accounting_rules", return_value=[]):
+            details = validate_document_review_details(document)
+            rule = find_accounting_rule("demo-mandant", "Tankstelle", "fuel_vehicle")
+            row = {
+                "payment_decision_source": "Manuell",
+                "cost_category": "fuel_vehicle",
+                "assignment_code": None,
+                "accounting_rule": rule["name"],
+                "accounting_rule_status": "matched",
+                "debit_account": rule["debit_account"],
+                "credit_account": "70000",
+                "tax_rate": "19.00",
+            }
+            warnings = database_service._booking_export_warning_items(row)
+
+        self.assertEqual(rule["debit_account"], "4530")
+        self.assertFalse(any(detail["code"] == "missing_assignment" for detail in details))
+        self.assertFalse(any(detail["code"] == "missing_accounting_rule" for detail in details))
+        self.assertFalse(any(warning["code"] == "missing_assignment" for warning in warnings))
+
     def test_review_validation_details_link_existing_accounting_rule_errors(self):
         rule_id = str(uuid4())
         document = {

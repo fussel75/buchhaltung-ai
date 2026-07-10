@@ -1328,7 +1328,6 @@ def _build_tank_receipt_result(document: dict, text: str) -> dict | None:
     warnings = [
         "Scan-/Foto-Tankbeleg: Beträge, Liter und Tankstelle müssen per OCR oder manuell geprüft werden.",
     ]
-    warnings.append("Tankbeleg ohne Rechnungsnummer: als bezahlter Mitarbeiter-/Fahrzeugbeleg prüfen.")
     if gross_amount is None:
         warnings.append("Beträge müssen per OCR oder manuell geprüft werden.")
     if driver:

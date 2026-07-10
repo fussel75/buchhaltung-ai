@@ -2300,7 +2300,7 @@ def _booking_export_warning_items(row: dict[str, Any]) -> list[dict[str, str]]:
 
     if row.get("payment_decision_source") == "Standard":
         add_warning("payment_decision_default", "Zahlung nicht manuell gewählt")
-    if not row.get("assignment_code"):
+    if row.get("cost_category") in ASSIGNMENT_RELEVANT_COST_CATEGORIES and not row.get("assignment_code"):
         add_warning("missing_assignment", "Zuordnung fehlt")
     if row.get("accounting_rule_status") == "ambiguous":
         matches = row.get("accounting_rule_matches")
@@ -3926,7 +3926,31 @@ def find_accounting_rule_matches(
             best_rules = [rule]
         elif rank == best_rank:
             best_rules.append(rule)
-    return best_rules
+    if best_rules:
+        return best_rules
+    builtin_rule = _builtin_accounting_rule(cost_category)
+    return [builtin_rule] if builtin_rule else []
+
+
+def _builtin_accounting_rule(cost_category: str | None) -> dict[str, Any] | None:
+    if cost_category != "fuel_vehicle":
+        return None
+    return {
+        "id": None,
+        "tenant_id": None,
+        "name": "Fahrzeug/Tanken Standard aus JA 2024",
+        "supplier_match_text": None,
+        "cost_category": "fuel_vehicle",
+        "debit_account": "4530",
+        "credit_account": "",
+        "tax_key": None,
+        "tax_rate": Decimal("19.00"),
+        "discount_account": None,
+        "notes": "Jahresabschluss 2024: 4530 Laufende Kfz-Betriebskosten im Block Fahrzeugkosten.",
+        "is_active": True,
+        "created_at": None,
+        "updated_at": None,
+    }
 
 
 def _accounting_rule_rank(
