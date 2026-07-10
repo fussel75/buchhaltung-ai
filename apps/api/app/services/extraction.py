@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from re import IGNORECASE, MULTILINE, finditer, search, sub
+from re import IGNORECASE, MULTILINE, escape, finditer, search, sub
 from xml.etree import ElementTree
 from uuid import UUID
 
@@ -2505,20 +2505,93 @@ def _normalize_inline_address(value: str) -> str:
     return cleaned
 
 
+PROJECT_REFERENCE_LABELS = (
+    "AUFTR.TEXT",
+    "Auftragstext",
+    "Bauvorhaben",
+    "Bestelldaten",
+    "Betreff",
+    "BV",
+    "Ihre Kommission",
+    "Kommission",
+    "Kommision",
+    "Kommissionsangaben",
+    "KOM",
+    "Kom",
+    "Kundenreferenz",
+    "Objekt",
+    "Projekt",
+    "Projekthinweis",
+    "Referenz",
+)
+
+PROJECT_REFERENCE_LABEL_PATTERN = "|".join(
+    sorted((escape(label).replace(r"\.", r"\.?\s*") for label in PROJECT_REFERENCE_LABELS), key=len, reverse=True)
+)
+
+
+def _find_labeled_project_reference(text: str) -> str | None:
+    if not text:
+        return None
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = search(
+            rf"^\s*(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?:(?::|\.|\-)\s*(.*?)\s*)?$",
+            line,
+            IGNORECASE,
+        )
+        if not match:
+            continue
+        value = (match.group(1) or "").strip()
+        if not value:
+            value = _next_nonempty_line(lines, index + 1)
+        cleaned = _clean_project_reference_value(value)
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
+    for line in lines[start_index : start_index + 4]:
+        value = line.strip()
+        if value:
+            return value
+    return None
+
+
+def _clean_project_reference_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = sub(r"\s+", " ", value).strip(" :-\t")
+    nested_label = search(rf"^(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?::|\.|\-)\s*(.+)$", cleaned, IGNORECASE)
+    if nested_label:
+        cleaned = nested_label.group(1).strip(" :-\t")
+    cleaned = sub(
+        r"\s+(?:Anlieferung|Abholung|Lieferanschrift|Lieferadresse|Pos\.?|Artikel|Rechnung|Kundennummer|Kunden-Nr\.?)\b.*$",
+        "",
+        cleaned,
+        flags=IGNORECASE,
+    ).strip(" :-\t")
+    if not cleaned or cleaned.lower() in {"keine", "ohne", "nicht angegeben"}:
+        return None
+    return cleaned
+
+
 def _find_customer_reference(text: str) -> str | None:
-    match = search(r"AUFTR\.TEXT:\s*(.+?)(?:\n|$)", text) or search(
-        r"Ihre Kommission:\s*(.+?)(?:\n|$)", text
-    ) or search(
-        r"Kommissionsangaben:\s*(.+?)(?:\n|$)", text
-    ) or search(
-        r"Bestelldaten:\s*(.+?)(?:\n|$)", text
-    ) or search(
-        r"\bBV\s*:\s*(.+?)(?:\n|$)", text
-    ) or search(
+    column_match = search(
+        r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
+        text,
+    )
+    if column_match:
+        value = _clean_project_reference_value(column_match.group(1))
+        if value:
+            return value
+    labeled_reference = _find_labeled_project_reference(text)
+    if labeled_reference:
+        return labeled_reference
+    match = search(
         r"Kom\s*:\s*(.+?)(?=\s*-{3,}|\s*Pos\.|\s*Artikel|\n|$)",
         text,
-    ) or search(
-        r"Objekt:\s*(.+?)(?:\n|$)", text
     ) or search(
         r"(?:Ihre Referenz:.*?,\s*)?Auftrag:\s*([0-9]{2}-[0-9]{5})\b", text
     ) or search(
@@ -2537,7 +2610,7 @@ def _find_customer_reference(text: str) -> str | None:
 
 def _find_reference_delivery_address(text: str) -> str | None:
     match = search(
-        r"(?:Bestelldaten|Kundenreferenz|Kommissionsangaben)\s*:?\s*\n?\s*"
+        rf"(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*:?\s*\n?\s*"
         r"([^\n]*?\d+[A-Za-zÄÖÜäöüß]?)\s*\n\s*(\d{5}\s+[^\n]+)",
         text,
     )
@@ -2548,7 +2621,7 @@ def _find_reference_delivery_address(text: str) -> str | None:
 
 def _find_assignment_hint_from_filename(filename: str) -> str | None:
     stem = Path(filename).stem
-    return _find_text(stem, r"\bBV\s+([^,]+)") or _find_text(
+    return _find_text(stem, rf"\b(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s+([^,]+)") or _find_text(
         stem,
         r"\b(?:Bauvorhaben|Projekt)\s+([^,]+)",
     )
@@ -2786,16 +2859,9 @@ def _assignment_context_snippets(text: str) -> list[str]:
 
 def _has_assignment_context_marker(line: str) -> bool:
     normalized_line = line.lower()
-    direct_markers = [
-        "bauvorhaben",
-        "bestelldaten",
-        "kommission",
-        "kundenreferenz",
-        "lieferanschrift",
-        "lieferadresse",
-        "auftraggeber",
-        "bauherr",
-    ]
+    if search(rf"^\s*(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?::|\.|\-|$)", line, IGNORECASE):
+        return True
+    direct_markers = ["lieferanschrift", "lieferadresse", "auftraggeber", "bauherr"]
     if any(marker in normalized_line for marker in direct_markers):
         return True
     return bool(search(r"\bprojekt(?:nr|nummer)?\b\s*[:.-]?", normalized_line))

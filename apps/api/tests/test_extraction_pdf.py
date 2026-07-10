@@ -180,6 +180,27 @@ class ExtractionPdfTests(TestCase):
 
         self.assertEqual(extraction_service._find_customer_reference(text), "Neusurenland Bangkirai")
 
+    def test_customer_reference_reads_common_project_labels(self):
+        examples = {
+            "Kommission: Bucheckerweg 4": "Bucheckerweg 4",
+            "Kommision: Eckerkamp 58": "Eckerkamp 58",
+            "Betreff: Heukoppel 92": "Heukoppel 92",
+            "Objekt: Weseler Weg 20": "Weseler Weg 20",
+            "Auftragstext:\nNeusurenland 51\nPositionen": "Neusurenland 51",
+        }
+
+        for text, expected in examples.items():
+            with self.subTest(text=text):
+                self.assertEqual(extraction_service._find_customer_reference(text), expected)
+
+    def test_assignment_hint_from_filename_reads_common_project_labels(self):
+        self.assertEqual(
+            extraction_service._find_assignment_hint_from_filename(
+                "ERg 123, Kommission Neusurenland 51, Lieferant GmbH.pdf"
+            ),
+            "Neusurenland 51",
+        )
+
     def test_assignment_match_accepts_named_project_without_house_number(self):
         assignment = {
             "code": "Neula51",
