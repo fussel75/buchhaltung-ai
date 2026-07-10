@@ -191,6 +191,7 @@ def _system_prompt() -> str:
         "Erfinde keine Werte. Wenn ein Wert nicht im Text steht, nutze null. "
         "Nutze Projektstammdaten nur, wenn Text, Kommission, Kundenreferenz, Betreff, Adresse, Projektnummer, Projektname, Bauherr oder Alias plausibel passt. "
         "Wenn nur ein Teil der Projektadresse oder des Projektnamens genannt wird, gleiche ihn mit der Projektliste ab und liefere Code plus Projektnummer. "
+        "Auch abgeschlossene Projekte dürfen zugeordnet werden, wenn der Beleg klar dazu passt. "
         "Tankbelege sind Fahrzeug/Tanken und werden keinem Bauvorhaben zugeordnet, außer der Beleg nennt ausdrücklich ein Projekt. "
         "Freistellungsbescheinigungen und §13b-Nachweise sind keine normalen Eingangsrechnungen. "
         "Antworte ausschließlich als JSON-Objekt."
@@ -217,9 +218,9 @@ def _user_prompt(
             "aliases": unit.get("aliases") or [],
             "kind": unit.get("kind"),
             "is_active": unit.get("is_active"),
+            "status": unit.get("source_status"),
         }
         for unit in assignment_units[:120]
-        if unit.get("is_active")
     ]
     schema = {
         "document_type": "incoming_invoice|credit_note|fuel_receipt|tax_exemption_certificate|reverse_charge_certificate|other|null",

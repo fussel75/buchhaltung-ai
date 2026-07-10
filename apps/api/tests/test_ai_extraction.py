@@ -252,3 +252,28 @@ class AiExtractionTests(TestCase):
         )
 
         self.assertIsNone(result)
+
+    def test_ai_prompt_includes_completed_projects_for_late_invoices(self):
+        prompt = ai_extraction._user_prompt(
+            document={"original_filename": "rechnung.pdf", "content_type": "application/pdf", "size_bytes": 1234},
+            extraction={"supplier_name": "Lieferant", "confidence": Decimal("0.50")},
+            pdf_text="Kommission Eckerkamp 58",
+            assignment_units=[
+                {
+                    "code": "Ekkp58",
+                    "label": "Eckerkamp 58",
+                    "kind": "construction_project",
+                    "project_number": "25-00007",
+                    "address_line": "Eckerkamp 58",
+                    "postal_code": "22391",
+                    "city": "Hamburg",
+                    "is_active": False,
+                    "source_status": "Abgeschlossen",
+                    "aliases": [],
+                }
+            ],
+        )
+
+        self.assertIn('"code": "Ekkp58"', prompt)
+        self.assertIn('"is_active": false', prompt)
+        self.assertIn('"status": "Abgeschlossen"', prompt)
