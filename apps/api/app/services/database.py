@@ -14,7 +14,7 @@ from app.services.cost_categories import COST_CATEGORY_LABELS, VALID_COST_CATEGO
 from app.services.storage import StoredDocument, effective_content_type, rename_stored_document
 
 VALID_ACCOUNTING_FRAMEWORKS = {"SKR03", "SKR04"}
-BULK_JOB_ACTIONS = {"extract", "reextract", "prepare_review"}
+BULK_JOB_ACTIONS = {"extract", "reextract", "ai_extract", "prepare_review"}
 BULK_JOB_ACTIVE_STATUSES = {"queued", "running"}
 
 
@@ -360,7 +360,7 @@ def init_database() -> None:
                     updated_at timestamptz not null,
                     started_at timestamptz,
                     finished_at timestamptz,
-                    check (action in ('extract', 'reextract', 'prepare_review')),
+                    check (action in ('extract', 'reextract', 'ai_extract', 'prepare_review')),
                     check (status in ('queued', 'running', 'completed', 'failed'))
                 )
                 """
@@ -384,7 +384,7 @@ def init_database() -> None:
 
                     alter table document_bulk_jobs
                         add constraint document_bulk_jobs_action_check
-                        check (action in ('extract', 'reextract', 'prepare_review'));
+                        check (action in ('extract', 'reextract', 'ai_extract', 'prepare_review'));
                 end $$;
                 """
             )
@@ -526,7 +526,7 @@ def list_document_ids_for_bulk_action(tenant_id: str, action: str, limit: int = 
     capped_limit = max(1, min(limit, 1000))
     if action == "extract":
         where_clause = "d.status = 'review_pending' and e.document_id is null"
-    elif action == "reextract":
+    elif action in {"reextract", "ai_extract"}:
         where_clause = "d.status in ('extracted', 'review_ready') and e.document_id is not null"
     else:
         where_clause = "d.status = 'extracted' and e.document_id is not null and not exists (select 1 from document_booking_suggestions s where s.document_id = d.id)"
@@ -4096,6 +4096,7 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
     document = document or {}
     extraction = document.get("extraction") or {}
     raw_result = extraction.get("raw_result") or {}
+    ai_extraction = raw_result.get("ai_extraction") if isinstance(raw_result.get("ai_extraction"), dict) else {}
     problem_reasons = list(extraction.get("problem_reasons") or [])
     assignment_type = raw_result.get("assignment_type")
     allocation_lines = raw_result.get("allocation_lines") or []
@@ -4127,9 +4128,12 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
         "supplier_name": extraction.get("supplier_name"),
         "invoice_number": extraction.get("invoice_number"),
         "invoice_date": extraction.get("invoice_date"),
+        "document_type": raw_result.get("document_type"),
         "assignment_type": assignment_type,
         "assignment_code": assignment_code,
         "project_number": project_number,
+        "ai_status": ai_extraction.get("status"),
+        "ai_accepted_fields": ai_extraction.get("accepted_fields") or [],
         "has_assignment": has_assignment,
         "is_general_cost": general_cost,
         "is_assignment_unresolved": unresolved,
@@ -4141,7 +4145,11 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
     }
 
 
-def summarize_reextraction_health_changes(entries: list[dict[str, Any]], detail_limit: int = 50) -> dict[str, Any]:
+def summarize_reextraction_health_changes(
+    entries: list[dict[str, Any]],
+    detail_limit: int = 50,
+    action: str = "reextract",
+) -> dict[str, Any]:
     successful_entries = [entry for entry in entries if entry.get("status") == "succeeded"]
     failed_entries = [entry for entry in entries if entry.get("status") != "succeeded"]
     before = [entry["before"] for entry in successful_entries if entry.get("before")]
@@ -4158,7 +4166,8 @@ def summarize_reextraction_health_changes(entries: list[dict[str, Any]], detail_
         if entry["after"].get("is_general_cost") or entry["after"].get("is_assignment_unresolved")
     ]
 
-    return {
+    summary = {
+        "action": action,
         "analyzed_count": len(successful_entries),
         "failed_count": len(failed_entries),
         "improved_count": len(improved_entries),
@@ -4169,6 +4178,51 @@ def summarize_reextraction_health_changes(entries: list[dict[str, Any]], detail_
         "details": changed_entries[:detail_limit],
         "failed": failed_entries[:detail_limit],
     }
+    if action == "ai_extract":
+        summary.update(_ai_extraction_summary(successful_entries, changed_entries, detail_limit=detail_limit))
+    return summary
+
+
+def _ai_extraction_summary(successful_entries: list[dict[str, Any]], changed_entries: list[dict[str, Any]], detail_limit: int = 50) -> dict[str, Any]:
+    after_snapshots = [entry["after"] for entry in successful_entries if entry.get("after")]
+    ai_applied = [snapshot for snapshot in after_snapshots if snapshot.get("ai_status") == "applied"]
+    ai_failed = [snapshot for snapshot in after_snapshots if snapshot.get("ai_status") == "failed"]
+    ai_no_changes = [snapshot for snapshot in after_snapshots if snapshot.get("ai_status") == "no_changes"]
+    remaining_problems = [
+        snapshot for snapshot in after_snapshots
+        if snapshot.get("problem_count", 0) > 0 or snapshot.get("is_general_cost") or snapshot.get("is_assignment_unresolved")
+    ]
+    return {
+        "ai_applied_count": len(ai_applied),
+        "ai_no_changes_count": len(ai_no_changes),
+        "ai_failed_count": len(ai_failed),
+        "accepted_field_counts": _accepted_field_counts(ai_applied),
+        "remaining_by_supplier": _top_bucket_counts(remaining_problems, "supplier_name", detail_limit=detail_limit),
+        "remaining_by_document_type": _top_bucket_counts(remaining_problems, "document_type", detail_limit=detail_limit),
+        "ai_details": [
+            entry for entry in changed_entries[:detail_limit]
+            if (entry.get("after") or {}).get("ai_status")
+        ],
+    }
+
+
+def _accepted_field_counts(snapshots: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for snapshot in snapshots:
+        for field_name in snapshot.get("ai_accepted_fields") or []:
+            counts[str(field_name)] = counts.get(str(field_name), 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _top_bucket_counts(snapshots: list[dict[str, Any]], field_name: str, detail_limit: int = 50) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for snapshot in snapshots:
+        value = str(snapshot.get(field_name) or "-").strip() or "-"
+        counts[value] = counts.get(value, 0) + 1
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:detail_limit]
+    ]
 
 
 def _reextraction_health_change_entry(entry: dict[str, Any]) -> dict[str, Any]:

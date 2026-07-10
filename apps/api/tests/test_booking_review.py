@@ -2433,6 +2433,56 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(summary["after"]["general_cost"], 0)
         self.assertEqual(summary["after"]["with_assignment"], 1)
 
+    def test_ai_extraction_summary_counts_ai_results_and_remaining_buckets(self):
+        base_before = {
+            "document_id": "doc-1",
+            "filename": "rechnung.pdf",
+            "supplier_name": "Dammers",
+            "document_type": "incoming_invoice",
+            "assignment_type": "general_cost",
+            "has_assignment": False,
+            "is_general_cost": True,
+            "is_assignment_unresolved": False,
+            "needs_assignment_review": False,
+            "is_supplier_unresolved": False,
+            "problem_reasons": [],
+            "problem_count": 0,
+            "severity_score": 4,
+        }
+        applied_after = {
+            **base_before,
+            "assignment_type": "assigned",
+            "assignment_code": "Buwg4",
+            "project_number": "25-00009",
+            "has_assignment": True,
+            "is_general_cost": False,
+            "severity_score": 0,
+            "ai_status": "applied",
+            "ai_accepted_fields": ["assignment_code", "project_number"],
+        }
+        failed_after = {
+            **base_before,
+            "document_id": "doc-2",
+            "supplier_name": "Tankstelle",
+            "document_type": "fuel_receipt",
+            "problem_count": 1,
+            "ai_status": "failed",
+        }
+
+        summary = database_service.summarize_reextraction_health_changes(
+            [
+                {"document_id": "doc-1", "status": "succeeded", "before": base_before, "after": applied_after},
+                {"document_id": "doc-2", "status": "succeeded", "before": base_before, "after": failed_after},
+            ],
+            action="ai_extract",
+        )
+
+        self.assertEqual(summary["ai_applied_count"], 1)
+        self.assertEqual(summary["ai_failed_count"], 1)
+        self.assertEqual(summary["accepted_field_counts"]["assignment_code"], 1)
+        self.assertEqual(summary["remaining_by_supplier"][0], {"value": "Tankstelle", "count": 1})
+        self.assertEqual(summary["remaining_by_document_type"][0], {"value": "fuel_receipt", "count": 1})
+
     def test_update_extraction_resets_review_artifacts(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"
@@ -2602,6 +2652,59 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(tenant_id, "demo-mandant")
         self.assertEqual(document_ids, [document_id])
 
+    def test_bulk_ai_extraction_validation_accepts_extracted_pdf_work_items(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkJobRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+        )
+
+        with patch.object(
+            documents_route,
+            "require_document_access",
+            return_value={
+                "id": str(document_id),
+                "tenant_id": "demo-mandant",
+                "status": "review_ready",
+                "content_type": "application/pdf",
+                "original_filename": "rechnung.pdf",
+                "extraction": {"id": str(uuid4())},
+                "booking_suggestions": [{"line_no": 1}],
+            },
+        ):
+            tenant_id, document_ids = documents_route._validated_bulk_documents(request, payload, "ai_extract")
+
+        self.assertEqual(tenant_id, "demo-mandant")
+        self.assertEqual(document_ids, [document_id])
+
+    def test_bulk_ai_extraction_validation_rejects_non_pdf_work_items(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkJobRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+        )
+
+        with patch.object(
+            documents_route,
+            "require_document_access",
+            return_value={
+                "id": str(document_id),
+                "tenant_id": "demo-mandant",
+                "status": "review_ready",
+                "content_type": "image/png",
+                "original_filename": "scan.png",
+                "extraction": {"id": str(uuid4())},
+                "booking_suggestions": [],
+            },
+        ):
+            with self.assertRaises(HTTPException) as context:
+                documents_route._validated_bulk_documents(request, payload, "ai_extract")
+
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertIn("PDF", context.exception.detail["documents"][0]["reason"])
+
     def test_bulk_reextraction_validation_rejects_finally_approved_documents(self):
         document_id = uuid4()
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
@@ -2671,6 +2774,44 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(result["queued_count"], 1)
         start_job.assert_called_once()
         self.assertEqual(start_job.call_args.args[3], "reextract")
+
+    def test_bulk_ai_extraction_route_accepts_problem_document_subset(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        payload = documents_route.DocumentBulkAiExtractRequest(
+            tenant_id="demo-mandant",
+            document_ids=[document_id],
+            confirm=True,
+        )
+        background_tasks = SimpleNamespace(add_task=lambda *args, **kwargs: None)
+        job = {"id": str(uuid4()), "requested_total": 1}
+
+        with (
+            patch.object(documents_route, "require_admin") as require_admin,
+            patch.object(documents_route, "_start_bulk_job", return_value={"job": job}) as start_job,
+        ):
+            result = documents_route.start_bulk_ai_extraction(payload, request, background_tasks)
+
+        require_admin.assert_called_once_with(request)
+        self.assertEqual(result["job"], job)
+        self.assertEqual(result["queued_count"], 1)
+        start_job.assert_called_once()
+        self.assertEqual(start_job.call_args.args[3], "ai_extract")
+
+    def test_bulk_ai_extraction_route_requires_confirmation_for_subset(self):
+        payload = documents_route.DocumentBulkAiExtractRequest(
+            tenant_id="demo-mandant",
+            document_ids=[uuid4()],
+            confirm=False,
+        )
+        request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
+        background_tasks = SimpleNamespace(add_task=lambda *args, **kwargs: None)
+
+        with patch.object(documents_route, "require_admin"):
+            with self.assertRaises(HTTPException) as context:
+                documents_route.start_bulk_ai_extraction(payload, request, background_tasks)
+
+        self.assertEqual(context.exception.status_code, 400)
 
     def test_bulk_reextraction_route_requires_confirmation_for_subset(self):
         payload = documents_route.DocumentBulkReextractRequest(
@@ -2785,6 +2926,61 @@ class BookingSuggestionTests(TestCase):
         )
         finish_job.assert_called_once_with(job_id, "completed")
         self.assertEqual(release_claim.call_count, 2)
+
+    def test_bulk_job_runner_runs_ai_extraction_and_stores_summary(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "ai_extract",
+            "status": "running",
+            "items": [{"document_id": str(document_id), "status": "queued"}],
+        }
+        before_health = {
+            "document_id": str(document_id),
+            "filename": "rechnung.pdf",
+            "supplier_name": "Dammers",
+            "document_type": "incoming_invoice",
+            "assignment_type": "general_cost",
+            "has_assignment": False,
+            "is_general_cost": True,
+            "is_assignment_unresolved": False,
+            "needs_assignment_review": False,
+            "is_supplier_unresolved": False,
+            "problem_reasons": [],
+            "problem_count": 0,
+            "severity_score": 4,
+        }
+        after_health = {
+            **before_health,
+            "assignment_type": "assigned",
+            "assignment_code": "Buwg4",
+            "project_number": "25-00009",
+            "has_assignment": True,
+            "is_general_cost": False,
+            "severity_score": 0,
+            "ai_status": "applied",
+            "ai_accepted_fields": ["assignment_code", "project_number"],
+        }
+
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(document_id)}),
+            patch.object(bulk_job_service, "release_document_bulk_claim"),
+            patch.object(bulk_job_service, "get_document", return_value={"id": str(document_id)}),
+            patch.object(bulk_job_service, "document_extraction_health", side_effect=[before_health, after_health]),
+            patch.object(bulk_job_service, "run_ai_extraction") as run_ai,
+            patch.object(bulk_job_service, "mark_document_bulk_job_item"),
+            patch.object(bulk_job_service, "finish_document_bulk_job") as finish_job,
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        run_ai.assert_called_once_with(document_id, actor="admin@example.com")
+        finish_job.assert_called_once()
+        self.assertEqual(finish_job.call_args.args[:2], (job_id, "completed"))
+        self.assertEqual(finish_job.call_args.kwargs["summary"]["action"], "ai_extract")
+        self.assertEqual(finish_job.call_args.kwargs["summary"]["ai_applied_count"], 1)
 
     def test_bulk_job_runner_skips_document_that_cannot_be_claimed(self):
         job_id = uuid4()

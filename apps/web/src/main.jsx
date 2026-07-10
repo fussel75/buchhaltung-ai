@@ -305,7 +305,12 @@ function UploadApp() {
     () => reextractableDocuments.filter((document) => documentMatchesProblemSummary(document, problemReasonFilter)),
     [problemReasonFilter, reextractableDocuments],
   );
+  const problemAiDocuments = useMemo(
+    () => problemExtractionDocuments.filter((document) => isPdfDocument(document)),
+    [problemExtractionDocuments],
+  );
   const problemReextractionLabel = problemReasonFilter ? `Problembelege neu: ${problemReasonFilter}` : "Problembelege neu";
+  const problemAiLabel = problemReasonFilter ? `Problembelege mit KI: ${problemReasonFilter}` : "Problembelege mit KI";
   const focusableReviewDocuments = useMemo(
     () => documents.filter((document) => document.extraction),
     [documents],
@@ -850,6 +855,64 @@ function UploadApp() {
       setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
     }
   }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, problemExtractionDocuments, problemReasonFilter, rememberBulkJob]);
+
+  const startProblemAiExtraction = useCallback(async () => {
+    const targets = problemAiDocuments;
+    if (!targets.length || isBulkExtracting) return;
+
+    const scopeLabel = problemReasonFilter ? ` mit "${problemReasonFilter}"` : "";
+    const confirmed = window.confirm(
+      `${targets.length} Problembelege${scopeLabel} mit KI prüfen? Das kann je nach Anbieter Kosten verursachen. Bestehende Buchungsvorschläge, Freigaben und Zahlungsentscheidungen dieser Belege können verworfen werden, wenn die KI Felder übernimmt.`,
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setNotice("");
+    setExtractionBatch({
+      state: "running",
+      total: targets.length,
+      done: 0,
+      current: targets[0]?.original_filename || "",
+      failed: 0,
+    });
+    setExtractingIds((current) => Array.from(new Set([...current, ...targets.map((document) => document.id)])));
+
+    try {
+      const response = await apiFetch("/documents/bulk/ai-extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: activeTenantId,
+          document_ids: targets.map((document) => document.id),
+          confirm: true,
+        }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result.detail, `Bulk-KI-Prüfung fehlgeschlagen: ${response.status}`));
+      }
+      const result = await response.json();
+      if (!result.job) {
+        setExtractionBatch(null);
+        setNotice("Keine Problembelege für KI-Prüfung gefunden.");
+        return;
+      }
+      rememberBulkJob(result.job);
+      setExtractionBatch(batchStateFromJob(result.job));
+      const job = await waitForBulkJob(apiFetch, result.job.id, setExtractionBatch);
+      rememberBulkJob(job);
+      await loadBulkJobs();
+      await loadDocuments();
+      setNotice(`Bulk-KI-Prüfung${scopeLabel} abgeschlossen: ${job.succeeded_count} geprüft, ${job.failed_count} fehlgeschlagen.${formatAiExtractionSummaryNotice(job.summary)}`);
+      if (job.failed_count) {
+        setError(formatBulkJobFailures(job, "KI-Prüfung fehlgeschlagen"));
+      }
+    } catch (extractError) {
+      setError(extractError.message);
+    } finally {
+      setExtractingIds((current) => current.filter((id) => !targets.some((document) => document.id === id)));
+    }
+  }, [activeTenantId, apiFetch, isBulkExtracting, loadBulkJobs, loadDocuments, problemAiDocuments, problemReasonFilter, rememberBulkJob]);
 
   const startBulkReviewPreparation = useCallback(async () => {
     const targets = reviewableDocuments;
@@ -1815,6 +1878,16 @@ function UploadApp() {
               >
                 {isBulkExtracting ? "Läuft..." : `${problemReextractionLabel} (${problemExtractionDocuments.length})`}
               </button>
+              {user?.role === "admin" ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={startProblemAiExtraction}
+                  disabled={!problemAiDocuments.length || isBulkExtracting}
+                >
+                  {isBulkExtracting ? "Läuft..." : `${problemAiLabel} (${problemAiDocuments.length})`}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={startBulkReviewPreparation}
@@ -2595,10 +2668,40 @@ function BulkJobSummary({ summary }) {
         <span>Restproblem</span>
         <strong>{remaining}</strong>
       </div>
+      {summary.ai_applied_count !== undefined ? (
+        <div>
+          <span>KI übernommen</span>
+          <strong>{summary.ai_applied_count || 0}</strong>
+        </div>
+      ) : null}
+      {summary.ai_no_changes_count !== undefined ? (
+        <div>
+          <span>KI ohne Änderung</span>
+          <strong>{summary.ai_no_changes_count || 0}</strong>
+        </div>
+      ) : null}
+      {summary.ai_failed_count ? (
+        <div className="job-summary-warning">
+          <span>KI fehlgeschlagen</span>
+          <strong>{summary.ai_failed_count}</strong>
+        </div>
+      ) : null}
       {regressed ? (
         <div className="job-summary-warning">
           <span>Verschlechtert</span>
           <strong>{regressed}</strong>
+        </div>
+      ) : null}
+      {summary.remaining_by_supplier?.length ? (
+        <div className="job-summary-wide">
+          <span>Rest nach Lieferant</span>
+          <strong>{formatSummaryBuckets(summary.remaining_by_supplier)}</strong>
+        </div>
+      ) : null}
+      {summary.remaining_by_document_type?.length ? (
+        <div className="job-summary-wide">
+          <span>Rest nach Dokumenttyp</span>
+          <strong>{formatSummaryBuckets(summary.remaining_by_document_type)}</strong>
         </div>
       ) : null}
     </div>
@@ -3073,6 +3176,11 @@ function assignmentMatchNeedsReview(match) {
   if (!match) return false;
   const score = Number(match.score);
   return match.source === "Projektstammdaten-Abgleich" || (!Number.isNaN(score) && score < 120);
+}
+
+function isPdfDocument(document) {
+  const contentType = String(document?.content_type || "").split(";", 1)[0].trim().toLowerCase();
+  return contentType === "application/pdf" || String(document?.original_filename || "").toLowerCase().endsWith(".pdf");
 }
 
 function DocumentPreview({ document }) {
@@ -6491,6 +6599,16 @@ function formatReextractionSummaryNotice(summary) {
   return ` Verbessert: ${summary.improved_count || 0}. Allgemeine Kosten: ${before.general_cost || 0} -> ${after.general_cost || 0}. Zuordnung ungeklärt: ${before.assignment_unresolved || 0} -> ${after.assignment_unresolved || 0}.`;
 }
 
+function formatAiExtractionSummaryNotice(summary) {
+  if (!summary?.analyzed_count) return "";
+  return ` KI übernommen: ${summary.ai_applied_count || 0}. Verbessert: ${summary.improved_count || 0}. Restprobleme: ${summary.remaining_problem_count || 0}.`;
+}
+
+function formatSummaryBuckets(rows) {
+  if (!rows?.length) return "-";
+  return rows.slice(0, 3).map((row) => `${row.value}: ${row.count}`).join(" · ");
+}
+
 function bwaHintSummary(hints = []) {
   const summaryCount = hints.filter((hint) => hint.kind === "bwa_summary").length;
   const accountCount = hints.length - summaryCount;
@@ -7287,6 +7405,7 @@ function formatBulkAction(action) {
   const labels = {
     extract: "Extraktion",
     reextract: "Neu-Extraktion",
+    ai_extract: "KI-Prüfung",
     prepare_review: "Buchungsvorschläge",
   };
   return labels[action] ?? action;

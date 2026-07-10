@@ -158,6 +158,7 @@ class ExtractionXmlTests(TestCase):
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
             patch.object(extraction_service, "find_supplier_rule", return_value=None),
             patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
         ):
             result = _build_structured_xml_result(document, "factur-x.xml", MAISON_CII_INVOICE, text)
 
@@ -202,6 +203,7 @@ class ExtractionXmlTests(TestCase):
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
             patch.object(extraction_service, "find_supplier_rule", return_value=None),
             patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
         ):
             result = _build_structured_xml_result(document, "factur-x.xml", DATEV_CII_INVOICE, text)
 
@@ -243,6 +245,7 @@ class ExtractionXmlTests(TestCase):
                 patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
                 patch.object(extraction_service, "find_supplier_rule", return_value=None),
                 patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+                patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
             ):
                 result = _build_extraction_result(document)
 
@@ -287,6 +290,7 @@ class ExtractionXmlTests(TestCase):
                 patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
                 patch.object(extraction_service, "find_supplier_rule", return_value=None),
                 patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+                patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
             ):
                 result = _build_extraction_result(document)
 

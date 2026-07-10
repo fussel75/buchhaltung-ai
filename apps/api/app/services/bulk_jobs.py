@@ -14,7 +14,7 @@ from app.services.database import (
     release_document_bulk_claim,
     summarize_reextraction_health_changes,
 )
-from app.services.extraction import run_mock_extraction
+from app.services.extraction import run_ai_extraction, run_mock_extraction
 
 
 def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
@@ -30,7 +30,7 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
             claim = claim_document_for_bulk_job(document_id, job_id, _expected_status(job["action"]))
             if claim is None:
                 mark_document_bulk_job_item(job_id, document_id, "skipped", "Beleg ist nicht mehr im passenden Status.")
-                if job["action"] == "reextract":
+                if job["action"] in {"reextract", "ai_extract"}:
                     health_entries.append(
                         {
                             "document_id": str(document_id),
@@ -39,12 +39,12 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
                         }
                     )
                 continue
-            before_health = document_extraction_health(get_document(document_id)) if job["action"] == "reextract" else None
+            before_health = document_extraction_health(get_document(document_id)) if job["action"] in {"reextract", "ai_extract"} else None
             try:
                 _run_document_bulk_action(job["action"], document_id, actor, job_id)
             except Exception as error:  # noqa: BLE001 - keep one bad document from stopping the batch
                 mark_document_bulk_job_item(job_id, document_id, "failed", _error_message(error))
-                if job["action"] == "reextract":
+                if job["action"] in {"reextract", "ai_extract"}:
                     health_entries.append(
                         {
                             "document_id": str(document_id),
@@ -55,7 +55,7 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
                     )
             else:
                 mark_document_bulk_job_item(job_id, document_id, "succeeded")
-                if job["action"] == "reextract":
+                if job["action"] in {"reextract", "ai_extract"}:
                     health_entries.append(
                         {
                             "document_id": str(document_id),
@@ -78,6 +78,9 @@ def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id
     if action == "reextract":
         run_mock_extraction(document_id, processing_job_id=job_id, force=True, actor=actor)
         return
+    if action == "ai_extract":
+        run_ai_extraction(document_id, actor=actor)
+        return
     if action == "prepare_review":
         document = prepare_document_review(document_id, actor=actor)
         if document is None:
@@ -91,6 +94,8 @@ def _expected_status(action: str) -> str | list[str]:
         return "review_pending"
     if action == "reextract":
         return ["extracted", "review_ready"]
+    if action == "ai_extract":
+        return ["extracted", "review_ready"]
     if action == "prepare_review":
         return "extracted"
     raise ValueError("unsupported bulk action")
@@ -103,9 +108,9 @@ def _error_message(error: Exception) -> str:
 
 
 def _bulk_job_summary(action: str, health_entries: list[dict]) -> dict:
-    if action != "reextract":
+    if action not in {"reextract", "ai_extract"}:
         return {}
-    return summarize_reextraction_health_changes(health_entries)
+    return summarize_reextraction_health_changes(health_entries, action=action)
 
 
 def _finish_bulk_job(

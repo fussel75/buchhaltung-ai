@@ -115,6 +115,10 @@ class DocumentBulkReextractRequest(DocumentBulkJobRequest):
     confirm: bool = False
 
 
+class DocumentBulkAiExtractRequest(DocumentBulkJobRequest):
+    confirm: bool = False
+
+
 class DocumentBulkAllRequest(BaseModel):
     tenant_id: str
     limit: int = Field(default=1000, ge=1, le=1000)
@@ -282,7 +286,7 @@ def _ensure_not_processing(document: dict[str, Any]) -> None:
 def _validated_bulk_documents(
     request: Request,
     payload: DocumentBulkJobRequest,
-    action: Literal["extract", "reextract", "prepare_review"],
+    action: Literal["extract", "reextract", "ai_extract", "prepare_review"],
 ) -> tuple[str, list[UUID]]:
     tenant_id = _normalize_tenant_id(payload.tenant_id)
     require_tenant_access(request, tenant_id)
@@ -300,6 +304,11 @@ def _validated_bulk_documents(
         elif action == "reextract":
             if document["status"] not in {"extracted", "review_ready"} or not document.get("extraction"):
                 invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit für Neu-Extraktion."})
+        elif action == "ai_extract":
+            if document["status"] not in {"extracted", "review_ready"} or not document.get("extraction"):
+                invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit für KI-Prüfung."})
+            elif not _is_pdf_document(document):
+                invalid_documents.append({"document_id": str(document_id), "reason": "KI-Prüfung ist aktuell nur für PDF-Belege verfügbar."})
         elif document["status"] != "extracted" or not document.get("extraction") or document.get("booking_suggestions"):
             invalid_documents.append({"document_id": str(document_id), "reason": "Beleg ist nicht bereit für Vorschläge."})
 
@@ -315,7 +324,7 @@ def _start_bulk_job(
     request: Request,
     background_tasks: BackgroundTasks,
     payload: DocumentBulkJobRequest,
-    action: Literal["extract", "reextract", "prepare_review"],
+    action: Literal["extract", "reextract", "ai_extract", "prepare_review"],
 ) -> dict[str, Any]:
     tenant_id, document_ids = _validated_bulk_documents(request, payload, action)
     actor = _actor(request)
@@ -337,7 +346,7 @@ def _start_bulk_job_for_all(
     request: Request,
     background_tasks: BackgroundTasks,
     payload: DocumentBulkAllRequest,
-    action: Literal["extract", "reextract", "prepare_review"],
+    action: Literal["extract", "reextract", "ai_extract", "prepare_review"],
 ) -> dict[str, Any]:
     tenant_id = _normalize_tenant_id(payload.tenant_id)
     require_tenant_access(request, tenant_id)
@@ -558,6 +567,36 @@ def start_bulk_reextraction_for_all(
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="Bulk-Neu-Extraktion erfordert explizite Bestätigung.")
     return _start_bulk_job_for_all(request, background_tasks, payload, "reextract")
+
+
+@router.post("/bulk/ai-extract", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_ai_extraction(
+    payload: DocumentBulkAiExtractRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    require_admin(request)
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Bulk-KI-Prüfung erfordert explizite Bestätigung.")
+    job_result = _start_bulk_job(
+        request,
+        background_tasks,
+        DocumentBulkJobRequest(tenant_id=payload.tenant_id, document_ids=payload.document_ids),
+        "ai_extract",
+    )
+    return job_result | {"queued_count": len(payload.document_ids)}
+
+
+@router.post("/bulk/ai-extract-all", status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_ai_extraction_for_all(
+    payload: DocumentBulkAllRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    require_admin(request)
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Bulk-KI-Prüfung erfordert explizite Bestätigung.")
+    return _start_bulk_job_for_all(request, background_tasks, payload, "ai_extract")
 
 
 @router.post("/bulk/review", status_code=status.HTTP_202_ACCEPTED)

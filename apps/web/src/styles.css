@@ -1126,6 +1126,15 @@ button:disabled {
   background: var(--danger-soft) !important;
 }
 
+.job-summary-wide {
+  grid-column: span 2;
+}
+
+.job-summary-wide strong {
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .job-error {
   margin: 0;
   color: var(--danger);
