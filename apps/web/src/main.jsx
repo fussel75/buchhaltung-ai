@@ -243,6 +243,7 @@ function UploadApp() {
   const [tenantProfile, setTenantProfile] = useState(defaultTenantProfile("construction"));
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const approvalValidationRequestRef = useRef(0);
+  const reviewQueueRef = useRef(null);
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -453,6 +454,12 @@ function UploadApp() {
     );
   }
 
+  const scrollReviewQueueIntoView = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      reviewQueueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
   const openProblemDocument = useCallback((document, reason) => {
     if (!document?.id) return;
     const targetReason = reason || problemExtractionSummaryKey(problemExtractionReasons(document)[0] || "");
@@ -460,6 +467,7 @@ function UploadApp() {
     setActiveView("review");
     setReviewFilter("problems");
     setProblemReasonFilter(targetReason);
+    setReviewSearch("");
     setReviewSort("problem_desc");
     setFocusedReviewDocumentId(document.id);
     setReviewFocusTarget(focusTarget);
@@ -467,8 +475,9 @@ function UploadApp() {
       current.includes(document.id) ? current : [...current, document.id]
     ));
     setProblemActionMessage(`${targetReason}: ${focusTarget.message}`);
+    scrollReviewQueueIntoView();
     window.setTimeout(() => focusReviewDocumentCard(document.id, { focusAction: false }), 80);
-  }, [tenantProfile]);
+  }, [scrollReviewQueueIntoView, tenantProfile]);
 
   const openProblemWorkItem = useCallback((item) => {
     openProblemDocument(item?.documents?.[0], item?.reason);
@@ -1775,7 +1784,7 @@ function UploadApp() {
           <BulkJobHistory jobs={bulkJobs} />
           </aside>
 
-          <section className="uploads">
+          <section className="uploads" ref={reviewQueueRef}>
         <div className="section-header queue-header">
           <div className="queue-heading">
             <div>
@@ -1834,7 +1843,14 @@ function UploadApp() {
                     type="button"
                     className={reviewFilter === "problems" && problemReasonFilter === item.reason ? "active" : ""}
                     key={item.reason}
-                    onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(item.reason); setReviewSort("problem_desc"); }}
+                    onClick={() => {
+                      setReviewFilter("problems");
+                      setProblemReasonFilter(item.reason);
+                      setReviewSearch("");
+                      setReviewSort("problem_desc");
+                      setProblemActionMessage(`Problemfilter aktiv: ${item.reason}`);
+                      scrollReviewQueueIntoView();
+                    }}
                   >
                     <span>{item.reason}</span>
                     <strong>{item.count}</strong>
@@ -1960,15 +1976,19 @@ function UploadApp() {
           onSelect={(reason) => {
             setReviewFilter("problems");
             setProblemReasonFilter(reason);
+            setReviewSearch("");
             setReviewSort("problem_desc");
-            setProblemActionMessage("");
+            setProblemActionMessage(`Problemfilter aktiv: ${reason}`);
+            scrollReviewQueueIntoView();
           }}
           onOpenFirst={openProblemWorkItem}
           onShowAll={() => {
             setReviewFilter("problems");
             setProblemReasonFilter("");
+            setReviewSearch("");
             setReviewSort("problem_desc");
-            setProblemActionMessage("");
+            setProblemActionMessage("Alle Problembelege werden angezeigt.");
+            scrollReviewQueueIntoView();
           }}
         />
         {bookingPreview ? (
