@@ -4,6 +4,7 @@ import "./styles.css";
 
 const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL ?? "/api");
 const AuthContext = createContext(null);
+const AI_CHECK_TIMEOUT_MS = 60_000;
 const COST_CATEGORY_OPTIONS = [
   ["material", "Material"],
   ["subcontractor", "Fremdleistung"],
@@ -244,6 +245,8 @@ function UploadApp() {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
   const approvalValidationRequestRef = useRef(0);
   const reviewQueueRef = useRef(null);
+  const aiCheckControllersRef = useRef(new Map());
+  const aiCheckTimeoutsRef = useRef(new Map());
 
   const canUpload = useMemo(() => tenantId.trim().length > 0, [tenantId]);
   const activeTenantId = tenantId.trim();
@@ -356,6 +359,13 @@ function UploadApp() {
     setDocuments(loadedDocuments);
     return loadedDocuments;
   }, [activeTenantId, apiFetch]);
+
+  useEffect(() => () => {
+    aiCheckControllersRef.current.forEach((controller) => controller.abort());
+    aiCheckTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    aiCheckControllersRef.current.clear();
+    aiCheckTimeoutsRef.current.clear();
+  }, []);
 
   const loadBulkJobs = useCallback(async () => {
     if (!activeTenantId) {
@@ -693,8 +703,26 @@ function UploadApp() {
     [apiFetch, loadDocuments],
   );
 
+  const cancelAiCheckDocument = useCallback((documentId, message = "KI-Prüfung abgebrochen.") => {
+    const controller = aiCheckControllersRef.current.get(documentId);
+    if (controller) {
+      controller.abort();
+    }
+    const timeoutId = aiCheckTimeoutsRef.current.get(documentId);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+    aiCheckControllersRef.current.delete(documentId);
+    aiCheckTimeoutsRef.current.delete(documentId);
+    setAiCheckingIds((current) => current.filter((id) => id !== documentId));
+    setError(message);
+  }, []);
+
   const aiCheckDocument = useCallback(
     async (document) => {
+      if (aiCheckControllersRef.current.has(document.id)) {
+        return;
+      }
       const confirmed = window.confirm(
         `Beleg "${document.original_filename}" mit KI prüfen? Bestehende Buchungsvorschläge werden verworfen, wenn die Extraktion gespeichert wird.`,
       );
@@ -702,11 +730,21 @@ function UploadApp() {
 
       setError("");
       setNotice("");
-      setAiCheckingIds((current) => [...current, document.id]);
+      setAiCheckingIds((current) => (current.includes(document.id) ? current : [...current, document.id]));
+
+      const controller = new AbortController();
+      let timedOut = false;
+      aiCheckControllersRef.current.set(document.id, controller);
+      const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, AI_CHECK_TIMEOUT_MS);
+      aiCheckTimeoutsRef.current.set(document.id, timeoutId);
 
       try {
         const response = await apiFetch(`/documents/${document.id}/ai-extract`, {
           method: "POST",
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -721,8 +759,20 @@ function UploadApp() {
           ? `KI-Prüfung übernommen: ${result.document.original_filename}`
           : `KI-Prüfung abgeschlossen: ${result.document.original_filename}`);
       } catch (aiError) {
-        setError(aiError.message);
+        if (aiError.name === "AbortError") {
+          setError(timedOut
+            ? "KI-Prüfung nach 60 Sekunden abgebrochen. Bitte später erneut versuchen oder den Beleg manuell prüfen."
+            : "KI-Prüfung abgebrochen.");
+        } else {
+          setError(aiError.message);
+        }
       } finally {
+        const activeTimeoutId = aiCheckTimeoutsRef.current.get(document.id);
+        if (activeTimeoutId) {
+          window.clearTimeout(activeTimeoutId);
+        }
+        aiCheckControllersRef.current.delete(document.id);
+        aiCheckTimeoutsRef.current.delete(document.id);
         setAiCheckingIds((current) => current.filter((id) => id !== document.id));
       }
     },
@@ -2096,10 +2146,14 @@ function UploadApp() {
                       <button
                         className="secondary-button"
                         type="button"
-                        onClick={() => aiCheckDocument(document)}
-                        disabled={aiCheckingIds.includes(document.id) || extractingIds.includes(document.id)}
+                        onClick={() => (
+                          aiCheckingIds.includes(document.id)
+                            ? cancelAiCheckDocument(document.id)
+                            : aiCheckDocument(document)
+                        )}
+                        disabled={!aiCheckingIds.includes(document.id) && extractingIds.includes(document.id)}
                       >
-                        {aiCheckingIds.includes(document.id) ? "KI läuft..." : "KI prüfen"}
+                        {aiCheckingIds.includes(document.id) ? "KI abbrechen" : "KI prüfen"}
                       </button>
                     ) : null}
                     {document.booking_suggestions?.length && document.status === "review_ready" ? (
@@ -2314,6 +2368,7 @@ function UploadApp() {
         onSaveExtraction={saveExtraction}
         onSaveExtractionAndPrepare={saveExtractionAndPrepareReview}
         onAiCheck={aiCheckDocument}
+        onCancelAiCheck={cancelAiCheckDocument}
         onPrepareReview={prepareReview}
         onNextProblem={() => moveToNextProblemDocument(focusedReviewDocument?.id)}
         onSelectPayment={selectPaymentDecision}
@@ -3546,6 +3601,7 @@ function ReviewFocusDialog({
   onSaveExtraction,
   onSaveExtractionAndPrepare,
   onAiCheck,
+  onCancelAiCheck,
   onPrepareReview,
   onNextProblem,
   onSelectPayment,
@@ -3698,11 +3754,11 @@ function ReviewFocusDialog({
               <button
                 className="secondary-button"
                 type="button"
-                onClick={() => onAiCheck(document)}
-                disabled={isBusy || hasUnsavedExtractionChanges}
+                onClick={() => (isAiChecking ? onCancelAiCheck(document.id) : onAiCheck(document))}
+                disabled={(!isAiChecking && isBusy) || hasUnsavedExtractionChanges}
                 title={hasUnsavedExtractionChanges ? "Bitte erst Extraktionsdaten speichern." : ""}
               >
-                {isAiChecking ? "KI läuft..." : "KI prüfen"}
+                {isAiChecking ? "KI abbrechen" : "KI prüfen"}
               </button>
             ) : null}
             {hasProblemFlow ? (
