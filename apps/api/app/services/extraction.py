@@ -757,6 +757,9 @@ def _build_pdf_text_result(document: dict) -> dict:
     ) or _find_text(
         text,
         r"Belegnummer:\s*([A-Z]{1,5}\d+)",
+    ) or _find_text(
+        text,
+        r"Belegnummer:\s*([0-9]{5,})",
     ) or _invoice_number_from_filename(document["original_filename"])
     customer_number = _find_customer_number(text)
     invoice_date = _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
@@ -1795,8 +1798,9 @@ def _is_iso_date(value: str) -> bool:
 
 def _find_visible_discount_base(text: str) -> Decimal | None:
     match = search(
-        r"(?:davon\s+skontof\S*hig|Skontof\S*higer\s+Betrag|skontierf\S*higer\s+Betrag\s+EUR)\s*:?\s*(-?[0-9.]+,\d{2})",
+        r"(?:davon\s+skontof\S*hig|Skontof\S*higer\s+Betrag|skontierf\S*higer\s+Betrag(?:\s+EUR)?)\s*:?\s*(-?[0-9.]+,\d{2})",
         text,
+        IGNORECASE,
     )
     return _money_to_decimal_signed(match.group(1)) if match else None
 
@@ -1821,6 +1825,13 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
         r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+([0-9]+,[0-9]{2})%\s+Skt=",
     )
     due_date = _find_date(text, r"Zahlbar bis\s+(\d{2}\.\d{2}\.\d{4})\s+ohne Abzug")
+    hagebau_terms = search(
+        r"Zahlungsziel\s+7\s+Tage\s+([0-9]+(?:,\d{1,2})?)%\s+Skonto,\s*14\s+Tage\s+netto,\s*"
+        r"Bei Zahlung bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+([0-9.]+,\d{2})\s+EUR,\s*"
+        r"Bei Zahlung bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+([0-9.]+,\d{2})\s+EUR",
+        text,
+        IGNORECASE,
+    )
     discounted_payable_amount = _find_money(
         text,
         r"Zahlbar bis\s+\d{2}\.\d{2}\.\d{4}\s+[0-9]+,[0-9]{2}%\s+Skt=\s*([0-9.]+,\d{2})",
@@ -1846,21 +1857,28 @@ def _find_visible_discount_terms(text: str) -> dict[str, Decimal | str | None]:
         "discount_due_date": discount_due_date
         or (haho_discount and _date_text_to_iso(haho_discount.group(1)))
         or (holz_junge_discount and _date_text_to_iso(holz_junge_discount.group(1)))
+        or (hagebau_terms and _date_text_to_iso(hagebau_terms.group(2)))
         or tabular_terms.get("discount_due_date"),
-        "due_date": due_date or haho_due_date or tabular_terms.get("due_date"),
+        "due_date": due_date or haho_due_date or (hagebau_terms and _date_text_to_iso(hagebau_terms.group(4))) or tabular_terms.get("due_date"),
         "discount_percent": (_money_to_decimal(percent_text) if percent_text else None)
         or (haho_discount and _percent_to_decimal(haho_discount.group(2)))
         or (holz_junge_discount and _percent_to_decimal(holz_junge_discount.group(2)))
+        or (hagebau_terms and _percent_to_decimal(hagebau_terms.group(1)))
         or tabular_terms.get("discount_percent"),
         "discount_base": _find_visible_discount_base(text),
         "discount_amount": discount_amount
         or (haho_discount and _money_to_decimal_signed(haho_discount.group(3)))
         or (holz_junge_discount and _money_to_decimal_signed(holz_junge_discount.group(3)))
+        or (
+            hagebau_terms
+            and (_money_to_decimal(hagebau_terms.group(5)) - _money_to_decimal(hagebau_terms.group(3))).quantize(Decimal("0.01"))
+        )
         or tabular_terms.get("discount_amount"),
         "discount_net_amount": tabular_terms.get("discount_net_amount"),
         "discount_tax_amount": tabular_terms.get("discount_tax_amount"),
         "discount_gross_amount": tabular_terms.get("discount_gross_amount"),
         "discounted_payable_amount": discounted_payable_amount
+        or (hagebau_terms and _money_to_decimal(hagebau_terms.group(3)))
         or tabular_terms.get("discounted_payable_amount"),
     }
 
@@ -2181,6 +2199,19 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "tax_amount": _money_to_decimal(europlanen_total.group(2)),
             "gross_amount": _money_to_decimal(europlanen_total.group(3)),
         }
+    hagebau_total = search(
+        r"Gesamt\s+Netto\s+MwSt\.?\s+Betrag\s+19,00%\s+Gesamt\s+Brutto\s*\n\s*"
+        r"(?:-?[0-9.]+,\d{2}\s+)?(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if hagebau_total and ("hagebau" in text.lower() or "mölders" in text.lower() or "mÃ¶lders" in text.lower()):
+        return {
+            "discount_base": _find_visible_discount_base(text),
+            "net_amount": _money_to_decimal_signed(hagebau_total.group(1)),
+            "tax_amount": _money_to_decimal_signed(hagebau_total.group(2)),
+            "gross_amount": _money_to_decimal_signed(hagebau_total.group(3)),
+        }
     boehm_total = search(r"Nettosumme\s+([0-9.]+,\d{2})\s*€", text)
     if boehm_total and ("maler-boehm.de" in text.lower() or "malereibetrieb" in text.lower()):
         return {
@@ -2493,6 +2524,12 @@ def _find_delivery_addresses(text: str) -> list[str]:
     ):
         street, postal_code, city = (part.strip() for part in match.groups())
         addresses.append(f"{street}, {postal_code} {city}")
+    for match in finditer(
+        r"Lieferadresse:\s*[^\n]*\n\s*([^\n]*?\d+[A-Za-z]?),?\s*(?:D\s*-\s*)?(\d{5})\s+([^\n,]+)",
+        text,
+    ):
+        street, postal_code, city = (part.strip(" ,") for part in match.groups())
+        addresses.append(f"{street}, {postal_code} {city}")
     return list(dict.fromkeys(addresses))
 
 
@@ -2699,6 +2736,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
         return "Rieprecht GmbH"
+    if "hagebau" in lower_text and ("mölders" in lower_text or "mÃ¶lders" in lower_text):
+        return "Mölders Baucentrum GmbH"
     if "konzept-54.de" in lower_text or "konzept 54 gmbh" in lower_text:
         return "konzept 54 GmbH & Co.KG"
     if "euro planen handel und service gmbh" in lower_text:

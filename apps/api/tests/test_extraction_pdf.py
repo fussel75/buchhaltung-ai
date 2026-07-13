@@ -2625,3 +2625,77 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_amount"], Decimal("46.82"))
         self.assertEqual(result["gross_amount"], Decimal("293.22"))
         self.assertEqual(result["warnings"], [])
+
+    def test_moelders_hagebau_invoice_reads_summary_totals_and_skonto(self):
+        text = """
+        Mölders hagebau
+        Mölders Baucentrum GmbH Niederlassung Hamburg Am Stadtrand 60, 22047 Hamburg
+        Firma
+        FriStD-Bau ZuB GmbH & Co. KG
+        Haldesdorfer Str. 44
+        22179 Hamburg
+        FriStD Bau
+        Weseler Weg 20
+        D - 20001 Hamburg
+        Rechnung
+        Belegnummer:
+        52595092
+        Belegdatum:
+        01.06.2026
+        Kundennummer:
+        224039
+        Beleg: Auftragsnummer 13067256 Lieferschein 19144216 vom 26.05.2026 Bearbeiter: Christoph Neubauer
+        Lieferadresse: FriStD Bau, Weseler Weg 20, D - 20001 Hamburg,
+        Pos. Art-Nr. Menge Einheit Artikelbeschreibung Einzelpreis Gesamtpreis
+        1,0 30006483 1 St Rigips Rigidur Nature Line Estrichkleber 23,86 23,86
+        EKZ 1,79% Gesamt Netto MwSt. Betrag 19,00% Gesamt Brutto
+        0,43 24,29 4,62 28,91
+        Skontierfähiger Betrag: 28,39 EUR
+        Zahlungsziel 7 Tage 2% Skonto, 14 Tage netto, Bei Zahlung bis zum 08.06.2026 28,34 EUR, Bei Zahlung bis zum 15.06.2026 28,91 EUR.
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung-52595092.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "moelders.pdf",
+            "size_bytes": 65432,
+            "sha256": "abc",
+        }
+        assignment = {
+            "code": "Wewe20",
+            "label": "Weseler Weg 20",
+            "kind": "construction_project",
+            "project_number": "25-00008",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+
+        def find_assignment(_tenant_id, lookup_text):
+            if lookup_text and "Weseler Weg 20" in lookup_text:
+                return assignment
+            return None
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", side_effect=find_assignment),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Mölders Baucentrum GmbH")
+        self.assertEqual(result["invoice_number"], "52595092")
+        self.assertEqual(result["customer_number"], "224039")
+        self.assertEqual(result["invoice_date"], "2026-06-01")
+        self.assertEqual(result["due_date"], "2026-06-15")
+        self.assertEqual(result["discount_due_date"], "2026-06-08")
+        self.assertEqual(result["assignment_code"], "Wewe20")
+        self.assertEqual(result["project_number"], "25-00008")
+        self.assertEqual(result["net_amount"], Decimal("24.29"))
+        self.assertEqual(result["tax_amount"], Decimal("4.62"))
+        self.assertEqual(result["gross_amount"], Decimal("28.91"))
+        self.assertEqual(result["discount_base"], Decimal("28.39"))
+        self.assertEqual(result["discount_amount"], Decimal("0.57"))
+        self.assertEqual(result["discounted_payable_amount"], Decimal("28.34"))
+        self.assertEqual(result["payment_terms"][0]["due_date"], "2026-06-15")
+        self.assertEqual(result["payment_terms"][1]["due_date"], "2026-06-08")
