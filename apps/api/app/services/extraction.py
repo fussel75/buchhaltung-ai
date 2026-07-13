@@ -173,6 +173,8 @@ def run_mock_extraction(
     *,
     force: bool = False,
     actor: str = "system",
+    allow_ai: bool = False,
+    allow_ocr: bool = True,
 ) -> dict:
     document = get_document(document_id)
     if document is None:
@@ -197,7 +199,7 @@ def run_mock_extraction(
         details={"previous_status": document.get("status")} if force else None,
     )
 
-    extraction = _build_extraction_result(document)
+    extraction = _build_extraction_result(document, allow_ai=allow_ai, allow_ocr=allow_ocr)
     return save_document_extraction(
         document_id=document_id,
         tenant_id=document["tenant_id"],
@@ -253,17 +255,17 @@ def run_ai_extraction(
     return saved
 
 
-def _build_extraction_result(document: dict) -> dict:
+def _build_extraction_result(document: dict, *, allow_ai: bool = True, allow_ocr: bool = True) -> dict:
     if _is_standalone_xml_document(document):
         structured = _build_standalone_xml_result(document)
         return structured or _build_mock_result(document)
 
     if _is_pdf_document(document):
-        structured = _build_embedded_xml_result(document)
+        structured = _build_embedded_xml_result(document, allow_ocr=allow_ocr)
         if structured:
             return structured
 
-        return _build_pdf_text_result(document)
+        return _build_pdf_text_result(document, allow_ai=allow_ai, allow_ocr=allow_ocr)
 
     return _build_mock_result(document)
 
@@ -288,7 +290,7 @@ def _normalized_structured_filename(filename: str | None, document: dict) -> str
     return f"{Path(filename).stem}.xml"
 
 
-def _build_embedded_xml_result(document: dict) -> dict | None:
+def _build_embedded_xml_result(document: dict, *, allow_ocr: bool = True) -> dict | None:
     if not _is_pdf_document(document):
         return None
 
@@ -297,7 +299,7 @@ def _build_embedded_xml_result(document: dict) -> dict | None:
         return None
 
     attachment_name, xml_content = xml_attachment
-    text = _extract_pdf_text(document["storage_path"])
+    text = _extract_pdf_text(document["storage_path"], allow_ocr=allow_ocr)
     return _build_structured_xml_result(document, attachment_name, xml_content, text)
 
 
@@ -690,27 +692,27 @@ def _build_ubl_xml_result(
     }
 
 
-def _build_pdf_text_result(document: dict) -> dict:
-    text = _extract_pdf_text(document["storage_path"])
+def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: bool = True) -> dict:
+    text = _extract_pdf_text(document["storage_path"], allow_ocr=allow_ocr)
     if len(text.strip()) < 80:
         supporting_document = _build_tax_supporting_document_result(document, text)
         if supporting_document:
-            return _finalize_pdf_result(document, supporting_document, text)
+            return _finalize_pdf_result(document, supporting_document, text, allow_ai=allow_ai)
         tank_receipt = _build_tank_receipt_result(document, text)
         if tank_receipt:
-            return _finalize_pdf_result(document, tank_receipt, text)
+            return _finalize_pdf_result(document, tank_receipt, text, allow_ai=allow_ai)
         dammers_invoice = _build_scanned_dammers_invoice_result(document)
         if dammers_invoice:
-            return _finalize_pdf_result(document, dammers_invoice, text)
-        return _finalize_pdf_result(document, _build_unreadable_pdf_result(document), text)
+            return _finalize_pdf_result(document, dammers_invoice, text, allow_ai=allow_ai)
+        return _finalize_pdf_result(document, _build_unreadable_pdf_result(document), text, allow_ai=allow_ai)
 
     supporting_document = _build_tax_supporting_document_result(document, text)
     if supporting_document:
-        return _finalize_pdf_result(document, supporting_document, text)
+        return _finalize_pdf_result(document, supporting_document, text, allow_ai=allow_ai)
 
     tank_receipt = _build_tank_receipt_result(document, text)
     if tank_receipt:
-        return _finalize_pdf_result(document, tank_receipt, text)
+        return _finalize_pdf_result(document, tank_receipt, text, allow_ai=allow_ai)
 
     invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
@@ -1018,7 +1020,7 @@ def _build_pdf_text_result(document: dict) -> dict:
         "warnings": warnings,
         "normalized_filename": normalized_filename,
         "source": "pdf_text_rules",
-    }, text)
+    }, text, allow_ai=allow_ai)
 
 
 def _build_tax_supporting_document_result(document: dict, text: str) -> dict | None:
@@ -1584,13 +1586,15 @@ def _tank_receipt_driver_from_filename(stem: str) -> str | None:
     return None
 
 
-def _extract_pdf_text(storage_path: str) -> str:
+def _extract_pdf_text(storage_path: str, *, allow_ocr: bool = True) -> str:
     text = _extract_pdf_text_pypdf(storage_path)
     if len(text.strip()) >= 80:
         return ExtractedPdfText(text, "pypdf")
     fallback_text = _extract_pdf_text_pymupdf(storage_path)
     if len(fallback_text.strip()) > len(text.strip()):
         return ExtractedPdfText(fallback_text, "pymupdf")
+    if not allow_ocr:
+        return ExtractedPdfText(text, "pypdf_short_no_ocr")
     ocr_text = _extract_pdf_text_pymupdf_ocr(storage_path)
     if len(ocr_text.strip()) > len(text.strip()):
         return ExtractedPdfText(ocr_text, "pymupdf_ocr")
@@ -1610,8 +1614,10 @@ def _with_pdf_text_diagnostics(result: dict, text: str) -> dict:
     return result
 
 
-def _finalize_pdf_result(document: dict, result: dict, text: str) -> dict:
+def _finalize_pdf_result(document: dict, result: dict, text: str, *, allow_ai: bool = True) -> dict:
     result = _with_pdf_text_diagnostics(result, text)
+    if not allow_ai:
+        return result
     return maybe_enhance_extraction_with_ai(document=document, extraction=result, pdf_text=str(text))
 
 

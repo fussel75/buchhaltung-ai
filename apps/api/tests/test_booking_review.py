@@ -2910,7 +2910,7 @@ class BookingSuggestionTests(TestCase):
                 bulk_job_service,
                 "run_mock_extraction",
                 side_effect=[None, HTTPException(status_code=409, detail="blockiert")],
-            ),
+            ) as run_extraction,
             patch.object(bulk_job_service, "mark_document_bulk_job_item") as mark_item,
             patch.object(bulk_job_service, "finish_document_bulk_job") as finish_job,
         ):
@@ -2926,6 +2926,12 @@ class BookingSuggestionTests(TestCase):
         )
         finish_job.assert_called_once_with(job_id, "completed")
         self.assertEqual(release_claim.call_count, 2)
+        run_extraction.assert_has_calls(
+            [
+                call(first_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
+                call(second_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
+            ]
+        )
 
     def test_bulk_job_runner_runs_ai_extraction_and_stores_summary(self):
         job_id = uuid4()

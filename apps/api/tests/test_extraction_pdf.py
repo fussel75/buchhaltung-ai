@@ -151,6 +151,37 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(text, "kurz")
         self.assertEqual(text.source, "pypdf_short")
 
+    def test_pdf_text_extraction_can_skip_ocr_for_bulk_runs(self):
+        with (
+            patch.object(extraction_service, "_extract_pdf_text_pypdf", return_value="kurz"),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf", return_value=""),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf_ocr") as ocr,
+        ):
+            text = extraction_service._extract_pdf_text("dammers.pdf", allow_ocr=False)
+
+        ocr.assert_not_called()
+        self.assertEqual(text, "kurz")
+        self.assertEqual(text.source, "pypdf_short_no_ocr")
+
+    def test_pdf_text_result_can_skip_automatic_ai_enrichment(self):
+        document = {
+            "id": "doc-1",
+            "tenant_id": "demo-mandant",
+            "original_filename": "rechnung.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "rechnung.pdf",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=extraction_service.ExtractedPdfText("x", "pypdf_short_no_ocr")),
+            patch.object(extraction_service, "_build_unreadable_pdf_result", return_value={"source": "unreadable_pdf"}),
+            patch.object(extraction_service, "maybe_enhance_extraction_with_ai") as enhance_ai,
+        ):
+            result = extraction_service._build_pdf_text_result(document, allow_ai=False, allow_ocr=False)
+
+        enhance_ai.assert_not_called()
+        self.assertEqual(result["pdf_text_source"], "pypdf_short_no_ocr")
+
     def test_assignment_match_uses_project_context_beyond_first_text_chunk(self):
         assignment = {
             "code": "Hk92",
