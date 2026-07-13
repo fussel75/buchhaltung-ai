@@ -115,6 +115,71 @@ class ExtractionPdfTests(TestCase):
         self.assertIsNone(result["gross_amount"])
         self.assertNotEqual(result["source"], "pdf_unreadable")
 
+    def test_freistellungsauftrag_is_stored_as_supporting_document(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "68717 - BvFA_ Bescheinigung Bauleistungen 2026 - 2027.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "freistellungsauftrag.pdf",
+            "size_bytes": 240000,
+            "sha256": "abc",
+        }
+        text = "Freistellungsauftrag Bauleistungen 2026 - 2027"
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_exemption_certificate")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["certificate_valid_until"], "2027-12-31")
+        self.assertIsNone(result["gross_amount"])
+
+    def test_aufmass_without_invoice_marker_is_project_document(self):
+        assignment = {
+            "code": "Wewe20",
+            "label": "Wewe20",
+            "kind": "construction_project",
+            "project_number": "25-00008",
+            "revenue_relevant": True,
+            "is_active": True,
+        }
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "F-2026-67-Aufmaß.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "aufmass.pdf",
+            "size_bytes": 120000,
+            "sha256": "abc",
+        }
+        text = """
+        F 2026 67 Aufmaß
+        Bauvorhaben Weseler Weg 20
+        Leistungsaufstellung und Mengen
+        """
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(
+                extraction_service,
+                "_assignment_unit_match",
+                return_value={"assignment": assignment, "score": 150, "source": "Belegtext", "reasons": ["Adresse"]},
+            ),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "project_document")
+        self.assertTrue(result["supporting_document"])
+        self.assertTrue(result["project_document"])
+        self.assertEqual(result["assignment_code"], "Wewe20")
+        self.assertEqual(result["project_number"], "25-00008")
+        self.assertIsNone(result["invoice_number"])
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("Aufmaß", result["normalized_filename"])
+
     def test_pdf_text_extraction_uses_pymupdf_when_pypdf_text_is_too_short(self):
         pymupdf_text = "DAMMERS\n" + ("Rechnungstext " * 12)
 

@@ -2432,6 +2432,8 @@ def _allocate_payment_delta(
 
 def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, Any]]:
     raw_result = extraction.get("raw_result") or {}
+    if _is_non_booking_document(raw_result):
+        return []
     booking_type = raw_result.get("document_type") or "incoming_invoice"
     currency = extraction.get("currency") or "EUR"
     cost_category = raw_result.get("cost_category")
@@ -4122,6 +4124,18 @@ def _serialize_extraction(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+NON_BOOKING_DOCUMENT_TYPES = {
+    "project_document",
+    "tax_exemption_certificate",
+    "reverse_charge_certificate",
+}
+
+
+def _is_non_booking_document(raw_result: dict[str, Any] | None) -> bool:
+    raw_result = raw_result or {}
+    return bool(raw_result.get("supporting_document")) or raw_result.get("document_type") in NON_BOOKING_DOCUMENT_TYPES
+
+
 def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] | None = None) -> list[str]:
     raw_result = raw_result or {}
     reasons: list[str] = []
@@ -4141,6 +4155,15 @@ def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] 
         if warnings:
             reason_label = "Hinweis" if len(warnings) == 1 else "Hinweise"
             reasons.append(f"{len(warnings)} {reason_label}")
+        return reasons
+    if _is_non_booking_document(raw_result):
+        warnings = row.get("warnings") or []
+        if warnings:
+            reason_label = "Hinweis" if len(warnings) == 1 else "Hinweise"
+            reasons.append(f"{len(warnings)} {reason_label}")
+        assignment_problem = _assignment_match_problem_reason(raw_result.get("assignment_match"))
+        if assignment_problem:
+            reasons.append(assignment_problem)
         return reasons
 
     if source == "mock":
@@ -4205,6 +4228,7 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
     document = document or {}
     extraction = document.get("extraction") or {}
     raw_result = extraction.get("raw_result") or {}
+    is_non_booking = _is_non_booking_document(raw_result)
     ai_extraction = raw_result.get("ai_extraction") if isinstance(raw_result.get("ai_extraction"), dict) else {}
     problem_reasons = list(extraction.get("problem_reasons") or [])
     assignment_type = raw_result.get("assignment_type")
@@ -4221,6 +4245,9 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
     review_required = "Zuordnung prÃ¼fen" in problem_reasons
     general_cost = assignment_type == "general_cost" and not has_assignment
     supplier_unresolved = "Lieferant ungeklÃ¤rt" in problem_reasons
+    if is_non_booking:
+        unresolved = False
+        general_cost = False
     problem_count = len(problem_reasons)
     severity_score = (
         (5 if unresolved else 0)

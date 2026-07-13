@@ -20,6 +20,7 @@ AI_EXTRACTABLE_DOCUMENT_TYPES = {
     "incoming_invoice",
     "credit_note",
     "fuel_receipt",
+    "project_document",
     "tax_exemption_certificate",
     "reverse_charge_certificate",
     "other",
@@ -126,7 +127,7 @@ def _should_run_ai(extraction: dict[str, Any], min_confidence: float) -> bool:
     for field_name in ("supplier_name", "invoice_number", "invoice_date", "gross_amount"):
         if not extraction.get(field_name) and not raw_result.get(field_name):
             return True
-    if raw_result.get("document_type") in {"tax_exemption_certificate", "reverse_charge_certificate"}:
+    if raw_result.get("document_type") in {"project_document", "tax_exemption_certificate", "reverse_charge_certificate"}:
         return False
     return False
 

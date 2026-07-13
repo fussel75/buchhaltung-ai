@@ -2399,6 +2399,51 @@ class BookingSuggestionTests(TestCase):
         self.assertFalse(health["has_assignment"])
         self.assertGreater(health["severity_score"], 0)
 
+    def test_document_extraction_health_ignores_invoice_required_fields_for_project_documents(self):
+        health = database_service.document_extraction_health(
+            {
+                "id": str(uuid4()),
+                "original_filename": "F-2026-67-Aufmaß.pdf",
+                "normalized_filename": "Unterlage, BV Wewe20, Aufmaß, 2026-05-28.pdf",
+                "extraction": {
+                    "supplier_name": "AF-Elektro GmbH",
+                    "invoice_number": None,
+                    "invoice_date": "2026-05-28",
+                    "gross_amount": None,
+                    "problem_reasons": ["1 Hinweis"],
+                    "raw_result": {
+                        "document_type": "project_document",
+                        "supporting_document": True,
+                        "project_document": True,
+                        "assignment_type": "assigned",
+                        "assignment_code": "Wewe20",
+                        "project_number": "25-00008",
+                    },
+                },
+            }
+        )
+
+        self.assertTrue(health["has_assignment"])
+        self.assertFalse(health["is_general_cost"])
+        self.assertFalse(health["is_assignment_unresolved"])
+        self.assertNotIn("Rechnungsnummer fehlt", health["problem_reasons"])
+        self.assertNotIn("Brutto fehlt", health["problem_reasons"])
+
+    def test_booking_suggestions_skip_non_booking_documents(self):
+        suggestions = database_service._booking_suggestions_from_extraction(
+            {"original_filename": "F-2026-67-Aufmaß.pdf"},
+            {
+                "supplier_name": "AF-Elektro GmbH",
+                "raw_result": {
+                    "document_type": "project_document",
+                    "supporting_document": True,
+                    "project_document": True,
+                },
+            },
+        )
+
+        self.assertEqual(suggestions, [])
+
     def test_reextraction_summary_counts_assignment_improvements(self):
         before = {
             "document_id": "doc-1",

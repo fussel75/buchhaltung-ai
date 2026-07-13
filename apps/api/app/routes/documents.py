@@ -178,7 +178,14 @@ class ExtractionUpdate(BaseModel):
     invoice_date: date | None = None
     service_period: str | None = Field(default=None, max_length=120)
     customer_number: str | None = Field(default=None, max_length=120)
-    document_type: Literal["incoming_invoice", "credit_note", "tax_exemption_certificate", "reverse_charge_certificate"] | None = None
+    document_type: Literal[
+        "incoming_invoice",
+        "credit_note",
+        "fuel_receipt",
+        "project_document",
+        "tax_exemption_certificate",
+        "reverse_charge_certificate",
+    ] | None = None
     cost_category: CostCategory | None = None
     assignment_code: str | None = Field(default=None, max_length=80)
     project_number: str | None = Field(default=None, max_length=80)

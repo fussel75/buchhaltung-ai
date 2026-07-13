@@ -489,7 +489,7 @@ def _build_cii_xml_result(
         "assignment_code": _assignment_code(assignment),
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
-        "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "assignment_revenue_relevant": assignment.get("revenue_relevant") if assignment else None,
         "assignment_code_label": tenant_profile["assignment_code_label"],
         "assignment_label_singular": tenant_profile["assignment_label_singular"],
         "assignment_label_plural": tenant_profile["assignment_label_plural"],
@@ -647,7 +647,7 @@ def _build_ubl_xml_result(
         "assignment_code": _assignment_code(assignment),
         "assignment_label": assignment["label"] if assignment else None,
         "assignment_kind": assignment["kind"] if assignment else None,
-        "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "assignment_revenue_relevant": assignment.get("revenue_relevant") if assignment else None,
         "assignment_code_label": tenant_profile["assignment_code_label"],
         "assignment_label_singular": tenant_profile["assignment_label_singular"],
         "assignment_label_plural": tenant_profile["assignment_label_plural"],
@@ -698,6 +698,9 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         supporting_document = _build_tax_supporting_document_result(document, text)
         if supporting_document:
             return _finalize_pdf_result(document, supporting_document, text, allow_ai=allow_ai)
+        project_document = _build_project_supporting_document_result(document, text)
+        if project_document:
+            return _finalize_pdf_result(document, project_document, text, allow_ai=allow_ai)
         tank_receipt = _build_tank_receipt_result(document, text)
         if tank_receipt:
             return _finalize_pdf_result(document, tank_receipt, text, allow_ai=allow_ai)
@@ -709,6 +712,10 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     supporting_document = _build_tax_supporting_document_result(document, text)
     if supporting_document:
         return _finalize_pdf_result(document, supporting_document, text, allow_ai=allow_ai)
+
+    project_document = _build_project_supporting_document_result(document, text)
+    if project_document:
+        return _finalize_pdf_result(document, project_document, text, allow_ai=allow_ai)
 
     tank_receipt = _build_tank_receipt_result(document, text)
     if tank_receipt:
@@ -1029,6 +1036,9 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
     if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
+    elif "freistellungsauftrag" in normalized_text or "freistellungsbescheinigung" in normalized_text:
+        document_type = "tax_exemption_certificate"
+        certificate_kind = "Freistellungsbescheinigung Bauleistungen"
     elif "bescheinigungbauleistungen" in normalized_text or "bvfabescheinigungbauleistungen" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
@@ -1112,6 +1122,142 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
         "normalized_filename": normalized_filename,
         "source": "pdf_text_certificate_rules",
     }
+
+
+def _build_project_supporting_document_result(document: dict, text: str) -> dict | None:
+    original_filename = document["original_filename"]
+    combined_text = f"{text}\n{original_filename}"
+    normalized_text = _compact_search_text(combined_text)
+    if not _looks_like_project_supporting_document(normalized_text):
+        return None
+    if _looks_like_invoice_document(normalized_text):
+        return None
+
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(original_filename)
+    delivery_addresses = _find_delivery_addresses(text)
+    delivery_address = (
+        delivery_addresses[0]
+        if delivery_addresses
+        else (_find_delivery_address(text) or _find_reference_delivery_address(text))
+    )
+    assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
+    assignment = assignment_match["assignment"] if assignment_match else None
+    document_date = _invoice_date_from_filename(original_filename) or _find_date(text, r"(\d{1,2}\.\d{1,2}\.\d{2,4})")
+    document_title = _project_supporting_document_title(original_filename, normalized_text)
+    assignment_type = "assigned" if assignment else "supporting_document"
+    normalized_filename = _normalized_project_supporting_document_filename(
+        document_title=document_title,
+        assignment=assignment,
+        tenant_profile=tenant_profile,
+        document_date=document_date,
+    )
+    warnings = ["Projektunterlage erkannt: nicht als Eingangsrechnung buchen."]
+    if not assignment:
+        warnings.append("Projektzuordnung offen: Unterlage bei Bedarf einem Projektordner zuweisen.")
+
+    return {
+        "supplier_name": _supplier_name(document, text) if text.strip() else _supplier_from_filename(Path(original_filename).stem),
+        "invoice_number": None,
+        "customer_number": None,
+        "customer_reference": customer_reference,
+        "invoice_date": document_date,
+        "due_date": None,
+        "discount_due_date": None,
+        "service_period": document_date[:7] if document_date else None,
+        "delivery_address": delivery_address,
+        "delivery_addresses": delivery_addresses,
+        "allocation_lines": [],
+        "assignment_code": _assignment_code(assignment),
+        "assignment_label": assignment["label"] if assignment else None,
+        "assignment_kind": assignment["kind"] if assignment else None,
+        "assignment_revenue_relevant": assignment["revenue_relevant"] if assignment else None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
+        "project_code": _legacy_project_code(assignment),
+        "project_number": _project_number(assignment),
+        "project_name": assignment["label"] if _legacy_project_code(assignment) else None,
+        "assignment_type": assignment_type,
+        "assignment_match": _assignment_match_payload(assignment_match),
+        "cost_category": None,
+        "product_name": document_title,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "reverse_charge": False,
+        "reverse_charge_basis": None,
+        "document_type": "project_document",
+        "supporting_document": True,
+        "project_document": True,
+        "project_document_kind": document_title,
+        "payment_terms": [],
+        "currency": "EUR",
+        "confidence": Decimal("0.90") if assignment else Decimal("0.82"),
+        "warnings": warnings,
+        "normalized_filename": normalized_filename,
+        "source": "pdf_text_project_document_rules",
+    }
+
+
+def _looks_like_invoice_document(normalized_text: str) -> bool:
+    invoice_markers = (
+        "rechnung",
+        "rechnug",
+        "teilrechnung",
+        "abschlagrechnung",
+        "schlussrechnung",
+        "invoice",
+        "gutschrift",
+        "creditnote",
+        "creditmemo",
+    )
+    return any(marker in normalized_text for marker in invoice_markers)
+
+
+def _looks_like_project_supporting_document(normalized_text: str) -> bool:
+    project_document_markers = (
+        "aufmaß",
+        "aufmass",
+        "aufmas",
+        "massblatt",
+        "maßblatt",
+        "abrechnungsaufmaß",
+        "abrechnungsaufmass",
+    )
+    return any(marker in normalized_text for marker in project_document_markers)
+
+
+def _project_supporting_document_title(original_filename: str, normalized_text: str) -> str:
+    if "aufmaß" in normalized_text or "aufmass" in normalized_text or "aufmas" in normalized_text:
+        return "Aufmaß"
+    if "massblatt" in normalized_text or "maßblatt" in normalized_text:
+        return "Maßblatt"
+    return _filename_part(Path(original_filename).stem)[:80] or "Projektunterlage"
+
+
+def _normalized_project_supporting_document_filename(
+    document_title: str,
+    assignment: dict | None,
+    tenant_profile: dict,
+    document_date: str | None,
+) -> str:
+    assignment_part = (
+        f"{tenant_profile['assignment_code_prefix']} {_assignment_code(assignment)}"
+        if assignment
+        else f"{tenant_profile['assignment_label_singular']} ungeklärt"
+    )
+    parts = ["Unterlage", assignment_part, document_title, document_date or "ohne Datum"]
+    return ", ".join(_filename_part(part) for part in parts) + ".pdf"
 
 
 def _reverse_charge_info(text: str) -> dict[str, str | bool | None]:

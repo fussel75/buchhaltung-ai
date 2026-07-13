@@ -3036,6 +3036,8 @@ function ExtractionEditForm({
           <select name="document_type" value={form.document_type} onChange={(event) => updateField("document_type", event.target.value)} disabled={isApproved}>
             <option value="incoming_invoice">Eingangsrechnung</option>
             <option value="credit_note">Gutschrift</option>
+            <option value="fuel_receipt">Tankbeleg</option>
+            <option value="project_document">Projektunterlage</option>
             <option value="tax_exemption_certificate">Freistellungsbescheinigung</option>
             <option value="reverse_charge_certificate">§13b-Nachweis</option>
           </select>
@@ -6886,7 +6888,9 @@ function formatBookingStatus(status) {
 function formatDocumentType(value) {
   const labels = {
     credit_note: "Gutschrift",
+    fuel_receipt: "Tankbeleg",
     incoming_invoice: "Eingangsrechnung",
+    project_document: "Projektunterlage",
     reverse_charge_certificate: "§13b-Nachweis",
     tax_exemption_certificate: "Freistellungsbescheinigung",
   };
