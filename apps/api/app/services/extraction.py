@@ -1,4 +1,5 @@
 from calendar import monthrange
+from base64 import b64encode
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -235,13 +236,24 @@ def run_ai_extraction(
         document["storage_path"],
         force_ocr=_should_force_ocr_for_ai(existing_extraction),
     )
+    settings = get_settings()
+    pdf_images = []
+    if _should_use_vision_for_ai(existing_extraction, text) and settings.ai_extraction_vision_enabled:
+        pdf_images = _extract_pdf_page_images(
+            document["storage_path"],
+            max_pages=settings.ai_extraction_vision_max_pages,
+            dpi=settings.ai_extraction_vision_dpi,
+        )
     extraction = maybe_enhance_extraction_with_ai(
         document=document,
         extraction=existing_extraction,
         pdf_text=str(text),
+        pdf_images=pdf_images,
         force=True,
     )
     extraction = _with_pdf_text_diagnostics(extraction, text)
+    if pdf_images:
+        extraction["pdf_vision_pages"] = len(pdf_images)
     saved = save_document_extraction(
         document_id=document_id,
         tenant_id=document["tenant_id"],
@@ -1746,6 +1758,21 @@ def _should_force_ocr_for_ai(extraction: dict) -> bool:
     return False
 
 
+def _should_use_vision_for_ai(extraction: dict, text: str) -> bool:
+    raw_result = extraction.get("raw_result") or extraction
+    if raw_result.get("document_type") == "fuel_receipt":
+        return True
+    text_source = getattr(text, "source", "")
+    if text_source in {"pymupdf_ocr", "pypdf_short", "pypdf_short_no_ocr"}:
+        return True
+    if len(str(text).strip()) < 400:
+        return True
+    for field_name in ("net_amount", "tax_amount", "gross_amount"):
+        if not extraction.get(field_name) and not raw_result.get(field_name):
+            return True
+    return False
+
+
 def _extract_pdf_text(storage_path: str, *, allow_ocr: bool = True, force_ocr: bool = False) -> str:
     text = _extract_pdf_text_pypdf(storage_path)
     if len(text.strip()) >= 80 and not force_ocr:
@@ -1769,6 +1796,28 @@ def _extract_pdf_text(storage_path: str, *, allow_ocr: bool = True, force_ocr: b
     if len(ocr_text.strip()) > len(text.strip()):
         return ExtractedPdfText(ocr_text, "pymupdf_ocr")
     return ExtractedPdfText(text, "pypdf_short")
+
+
+def _extract_pdf_page_images(storage_path: str, *, max_pages: int = 2, dpi: int = 150) -> list[str]:
+    try:
+        import fitz
+    except ImportError:
+        return []
+
+    pdf_path = get_settings().storage_root / storage_path
+    if not pdf_path.is_file():
+        return []
+
+    page_images = []
+    try:
+        with fitz.open(pdf_path) as pdf:
+            for index in range(min(len(pdf), max(1, max_pages))):
+                page = pdf[index]
+                pixmap = page.get_pixmap(dpi=max(72, dpi), alpha=False)
+                page_images.append(f"data:image/png;base64,{b64encode(pixmap.tobytes('png')).decode('ascii')}")
+    except (RuntimeError, ValueError, OSError):
+        return []
+    return page_images
 
 
 class ExtractedPdfText(str):

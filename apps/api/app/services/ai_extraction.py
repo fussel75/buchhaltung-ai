@@ -76,6 +76,7 @@ def maybe_enhance_extraction_with_ai(
     document: dict[str, Any],
     extraction: dict[str, Any],
     pdf_text: str | None,
+    pdf_images: list[str] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     settings = get_settings()
@@ -84,20 +85,25 @@ def maybe_enhance_extraction_with_ai(
     if not force and not _should_run_ai(extraction, settings.ai_extraction_min_confidence):
         return extraction
 
+    vision_images = pdf_images or []
+    model = _model_for_request(settings, bool(vision_images))
     try:
         assignment_units = list_assignment_units(document["tenant_id"])
         ai_payload = _call_ai_extractor(
             document=document,
             extraction=extraction,
             pdf_text=pdf_text or "",
+            pdf_images=vision_images,
             assignment_units=assignment_units,
             settings=settings,
+            model=model,
         )
         return _merge_ai_payload(
             extraction=extraction,
             ai_payload=ai_payload,
             assignment_units=assignment_units,
-            model=settings.ai_extraction_model,
+            model=model,
+            used_vision=bool(vision_images),
         )
     except Exception as error:  # noqa: BLE001 - extraction must keep working without the AI provider
         enriched = deepcopy(extraction)
@@ -108,7 +114,8 @@ def maybe_enhance_extraction_with_ai(
         raw_result["ai_extraction"] = {
             "status": "failed",
             "error": _short_error(error),
-            "model": settings.ai_extraction_model,
+            "model": model,
+            "used_vision": bool(vision_images),
             "provider": "openai_compatible",
         }
         enriched["raw_result"] = raw_result
@@ -137,26 +144,38 @@ def _call_ai_extractor(
     document: dict[str, Any],
     extraction: dict[str, Any],
     pdf_text: str,
+    pdf_images: list[str] | None,
     assignment_units: list[dict[str, Any]],
     settings: Any,
+    model: str,
 ) -> dict[str, Any]:
     base_url = settings.ai_extraction_base_url.rstrip("/") + "/"
     endpoint = urljoin(base_url, "chat/completions")
+    user_prompt = _user_prompt(
+        document=document,
+        extraction=extraction,
+        pdf_text=pdf_text[: settings.ai_extraction_max_text_chars],
+        assignment_units=assignment_units,
+    )
+    user_content: str | list[dict[str, Any]]
+    if pdf_images:
+        user_content = [{"type": "text", "text": user_prompt}]
+        user_content.extend(
+            {
+                "type": "image_url",
+                "image_url": {"url": image_url, "detail": "high"},
+            }
+            for image_url in pdf_images
+        )
+    else:
+        user_content = user_prompt
     body = {
-        "model": settings.ai_extraction_model,
+        "model": model,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": _system_prompt()},
-            {
-                "role": "user",
-                "content": _user_prompt(
-                    document=document,
-                    extraction=extraction,
-                    pdf_text=pdf_text[: settings.ai_extraction_max_text_chars],
-                    assignment_units=assignment_units,
-                ),
-            },
+            {"role": "user", "content": user_content},
         ],
     }
     request = Request(
@@ -346,6 +365,7 @@ def _merge_ai_payload(
     ai_payload: dict[str, Any],
     assignment_units: list[dict[str, Any]],
     model: str,
+    used_vision: bool = False,
 ) -> dict[str, Any]:
     enriched = deepcopy(extraction)
     raw_result = dict(enriched.get("raw_result") or enriched)
@@ -384,6 +404,7 @@ def _merge_ai_payload(
     raw_result["ai_extraction"] = {
         "status": "applied" if accepted else "no_changes",
         "model": model,
+        "used_vision": used_vision,
         "accepted_fields": sorted(accepted.keys()),
         "confidence": str(ai_confidence) if ai_confidence is not None else None,
         "evidence": normalized_ai.get("evidence") or [],
@@ -592,6 +613,14 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _model_for_request(settings: Any, use_vision: bool) -> str:
+    if use_vision:
+        vision_model = getattr(settings, "ai_extraction_vision_model", None)
+        if vision_model:
+            return vision_model
+    return settings.ai_extraction_model
 
 
 def _normalize_lookup(value: Any) -> str:

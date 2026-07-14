@@ -1281,6 +1281,40 @@ button:disabled {
   line-height: 1;
 }
 
+.ai-summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.ai-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 0 8px;
+  color: #3730a3;
+  background: #eef2ff;
+  font-size: 0.73rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.ai-summary-pill.applied,
+.ai-summary-pill.vision {
+  border-color: #bbf7d0;
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.ai-summary-pill.failed {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
 .problem-summary {
   display: flex;
   flex-wrap: wrap;

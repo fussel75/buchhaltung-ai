@@ -166,6 +166,48 @@ class AiExtractionTests(TestCase):
         self.assertEqual(result["raw_result"]["customer_number"], "425590")
         self.assertEqual(result["raw_result"]["ai_extraction"]["status"], "applied")
 
+    def test_ai_extraction_uses_vision_model_when_images_are_supplied(self):
+        extraction = {
+            "supplier_name": "Tankstelle",
+            "gross_amount": None,
+            "confidence": Decimal("0.62"),
+            "warnings": [],
+            "raw_result": {"document_type": "fuel_receipt"},
+        }
+        ai_payload = {
+            "gross_amount": "56.00",
+            "net_amount": "47.06",
+            "tax_amount": "8.94",
+            "confidence": "0.95",
+            "evidence": ["Summe 56,00 EUR"],
+            "warnings": [],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="text-model",
+            ai_extraction_vision_model="vision-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload) as mocked_call,
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "tank.pdf"},
+                extraction=extraction,
+                pdf_text="OCR Text",
+                pdf_images=["data:image/png;base64,AAA"],
+                force=True,
+            )
+
+        self.assertEqual(mocked_call.call_args.kwargs["model"], "vision-model")
+        self.assertEqual(mocked_call.call_args.kwargs["pdf_images"], ["data:image/png;base64,AAA"])
+        self.assertEqual(result["gross_amount"], Decimal("56.00"))
+        self.assertTrue(result["raw_result"]["ai_extraction"]["used_vision"])
+
     def test_ai_assignment_resolves_partial_project_reference_to_masterdata(self):
         extraction = {
             "supplier_name": "773934 606",

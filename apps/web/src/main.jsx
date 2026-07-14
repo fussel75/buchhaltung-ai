@@ -754,10 +754,15 @@ function UploadApp() {
 
         const result = await response.json();
         await loadDocuments();
-        const aiStatus = result.document?.extraction?.raw_result?.ai_extraction?.status;
-        setNotice(aiStatus === "applied"
-          ? `KI-Prüfung übernommen: ${result.document.original_filename}`
-          : `KI-Prüfung abgeschlossen: ${result.document.original_filename}`);
+        const ai = result.document?.extraction?.raw_result?.ai_extraction || {};
+        const acceptedFields = Array.isArray(ai.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
+        if (ai.status === "failed") {
+          setError(`KI-Prüfung ohne Ergebnis: ${ai.error || "Anbieter hat keine auswertbare Antwort geliefert."}`);
+        } else if (ai.status === "applied") {
+          setNotice(`KI-Prüfung übernommen: ${acceptedFields.length ? acceptedFields.map(formatAiFieldLabel).join(", ") : result.document.original_filename}`);
+        } else {
+          setNotice(`KI-Prüfung abgeschlossen: keine neuen Werte übernommen (${result.document.original_filename}).`);
+        }
       } catch (aiError) {
         if (aiError.name === "AbortError") {
           setError(timedOut
@@ -2120,6 +2125,7 @@ function UploadApp() {
                           {problemReasons.map((reason) => <span key={reason}>{reason}</span>)}
                         </div>
                       ) : null}
+                      <AiSummaryPill rawResult={document.extraction?.raw_result} />
                     </div>
                   </div>
                   <div className="document-actions">
@@ -3231,6 +3237,28 @@ function AiExtractionNote({ rawResult }) {
         </ul>
       ) : null}
       {warnings.length ? <p>{warnings.join(" · ")}</p> : null}
+    </div>
+  );
+}
+
+function AiSummaryPill({ rawResult }) {
+  const ai = rawResult?.ai_extraction;
+  if (!ai) return null;
+
+  const acceptedFields = Array.isArray(ai.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
+  const statusText = {
+    applied: acceptedFields.length
+      ? `KI übernommen: ${acceptedFields.slice(0, 3).map(formatAiFieldLabel).join(", ")}`
+      : "KI übernommen",
+    no_changes: "KI geprüft: keine Änderung",
+    failed: `KI Fehler${ai.error ? `: ${String(ai.error).slice(0, 80)}` : ""}`,
+  }[ai.status] || "KI geprüft";
+  const visionText = ai.used_vision ? "Bildprüfung" : null;
+
+  return (
+    <div className="ai-summary-pills" aria-label="KI-Prüfung Ergebnis">
+      <span className={`ai-summary-pill ${ai.status || "checked"}`}>{statusText}</span>
+      {visionText ? <span className="ai-summary-pill vision">{visionText}</span> : null}
     </div>
   );
 }

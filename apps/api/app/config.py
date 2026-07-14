@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     ai_extraction_api_key: str | None = None
     ai_extraction_base_url: str = "https://openrouter.ai/api/v1"
     ai_extraction_model: str = "openai/gpt-4o-mini"
+    ai_extraction_vision_enabled: bool = True
+    ai_extraction_vision_model: str | None = "openai/gpt-4o-mini"
+    ai_extraction_vision_max_pages: int = 2
+    ai_extraction_vision_dpi: int = 150
     ai_extraction_timeout_seconds: int = 45
     ai_extraction_min_confidence: float = 0.90
     ai_extraction_max_text_chars: int = 12000
