@@ -208,6 +208,11 @@ class ExtractionUpdate(BaseModel):
     discount_amount: Decimal | None = None
     discounted_payable_amount: Decimal | None = None
     item_summary: str | None = Field(default=None, max_length=500)
+    certificate_subject: str | None = Field(default=None, max_length=300)
+    certificate_valid_from: date | None = None
+    certificate_valid_until: date | None = None
+    certificate_tax_number: str | None = Field(default=None, max_length=120)
+    certificate_vat_id: str | None = Field(default=None, max_length=120)
 
     def normalized(self) -> dict[str, Any]:
         values = self.model_dump(exclude_unset=True)

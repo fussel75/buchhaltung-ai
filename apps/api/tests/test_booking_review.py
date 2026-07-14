@@ -2631,6 +2631,83 @@ class BookingSuggestionTests(TestCase):
         audit_event.assert_called_once()
         self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.extraction_updated")
 
+    def test_update_document_extraction_saves_certificate_dates(self):
+        document_id = uuid4()
+        tenant_id = "demo-mandant"
+        now = datetime(2026, 7, 14, tzinfo=UTC)
+        document = {
+            "id": document_id,
+            "tenant_id": tenant_id,
+            "status": "extracted",
+            "original_filename": "68717 - BvFA_ Bescheinigung Bauleistungen 2026 - 2027.pdf",
+            "normalized_filename": None,
+            "storage_path": None,
+            "extraction": {
+                "supplier_name": "Finanzamt Hamburg-Altona",
+                "invoice_number": None,
+                "invoice_date": date(2026, 6, 1),
+                "service_period": None,
+                "net_amount": None,
+                "tax_amount": None,
+                "gross_amount": None,
+                "currency": "EUR",
+                "confidence": Decimal("0.92"),
+                "warnings": [],
+                "raw_result": {
+                    "document_type": "tax_exemption_certificate",
+                    "certificate_kind": "Freistellungsbescheinigung",
+                },
+            },
+        }
+        updated_document = {**document, "status": "extracted"}
+        extraction_row = {
+            "id": uuid4(),
+            "document_id": document_id,
+            "tenant_id": tenant_id,
+            "supplier_name": "Finanzamt Hamburg-Altona",
+            "invoice_number": None,
+            "invoice_date": date(2026, 6, 1),
+            "service_period": None,
+            "net_amount": None,
+            "tax_amount": None,
+            "gross_amount": None,
+            "currency": "EUR",
+            "confidence": Decimal("1.00"),
+            "warnings": [],
+            "raw_result": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        cursor = RecordingCursor(fetchone_result=extraction_row)
+
+        with (
+            patch.object(database_service, "get_document", side_effect=[document, updated_document]),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "Jsonb", side_effect=lambda value: value),
+            patch.object(database_service, "insert_audit_event") as audit_event,
+        ):
+            database_service.update_document_extraction(
+                document_id=document_id,
+                values={
+                    "document_type": "tax_exemption_certificate",
+                    "certificate_subject": "AF - Elektro GmbH",
+                    "certificate_valid_from": date(2026, 5, 19),
+                    "certificate_valid_until": date(2027, 5, 17),
+                    "certificate_tax_number": "10/123/45678",
+                    "certificate_vat_id": "DE123456789",
+                },
+                actor="admin@example.com",
+            )
+
+        update_params = next(params for statement, params in cursor.statements if "update document_extractions" in statement)
+        raw_result = update_params[10]
+        self.assertEqual(raw_result["certificate_subject"], "AF - Elektro GmbH")
+        self.assertEqual(raw_result["certificate_valid_from"], "2026-05-19")
+        self.assertEqual(raw_result["certificate_valid_until"], "2027-05-17")
+        self.assertEqual(raw_result["certificate_tax_number"], "10/123/45678")
+        self.assertEqual(raw_result["certificate_vat_id"], "DE123456789")
+        audit_event.assert_called_once()
+
     def test_bulk_extraction_validation_blocks_non_pending_documents(self):
         document_id = uuid4()
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))

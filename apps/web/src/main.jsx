@@ -3021,6 +3021,11 @@ function ExtractionEditForm({
     : isProjectSupporting
       ? "Projektunterlage, keine Buchung"
       : "bearbeitbar vor Buchungsvorschlag und Freigabe";
+  const certificateSubject = form.certificate_subject || rawResult.certificate_subject || form.supplier_name;
+  const certificateValidUntil = form.certificate_valid_until || inputDateValue(rawResult.certificate_valid_until);
+  const certificateValidFrom = form.certificate_valid_from || inputDateValue(rawResult.certificate_valid_from);
+  const certificateTaxNumber = form.certificate_tax_number || rawResult.certificate_tax_number || "";
+  const certificateVatId = form.certificate_vat_id || rawResult.certificate_vat_id || "";
 
   return (
     <form className="extraction-edit-form" onSubmit={submit}>
@@ -3042,14 +3047,14 @@ function ExtractionEditForm({
       ) : null}
       {isTaxSupporting ? (
         <div className="supporting-document-panel">
-          <InfoTile label="Firma" value={rawResult.certificate_subject || form.supplier_name} />
+          <InfoTile label="Firma" value={certificateSubject} />
           <InfoTile label="Nachweis" value={rawResult.certificate_kind || formatDocumentType(form.document_type)} />
-          <InfoTile label="Gültig bis" value={formatDate(rawResult.certificate_valid_until)} />
+          <InfoTile label="Gültig bis" value={formatDate(certificateValidUntil)} />
           <InfoTile
             label="Steuernr. / USt-ID"
-            value={[rawResult.certificate_tax_number, rawResult.certificate_vat_id].filter(Boolean).join(" / ")}
+            value={[certificateTaxNumber, certificateVatId].filter(Boolean).join(" / ")}
           />
-          <InfoTile label="Status" value={rawResult.certificate_valid_until ? "Ablaufdatum erkannt" : "Ablauf unklar"} />
+          <InfoTile label="Status" value={certificateValidUntil ? "Ablaufdatum erkannt" : "Ablauf unklar"} />
         </div>
       ) : null}
       <div className="form-grid extraction-edit-grid">
@@ -3064,6 +3069,25 @@ function ExtractionEditForm({
         <FormField label={isTaxSupporting ? "Ausstellungsdatum" : "Datum"}>
           <input name="invoice_date" type="date" value={form.invoice_date} onChange={(event) => updateField("invoice_date", event.target.value)} disabled={isApproved} />
         </FormField>
+        {isTaxSupporting ? (
+          <>
+            <FormField label="Firma laut Nachweis">
+              <input name="certificate_subject" value={certificateSubject} onChange={(event) => updateField("certificate_subject", event.target.value)} disabled={isApproved} />
+            </FormField>
+            <FormField label="Gültig von">
+              <input name="certificate_valid_from" type="date" value={certificateValidFrom} onChange={(event) => updateField("certificate_valid_from", event.target.value)} disabled={isApproved} />
+            </FormField>
+            <FormField label="Gültig bis">
+              <input name="certificate_valid_until" type="date" value={certificateValidUntil} onChange={(event) => updateField("certificate_valid_until", event.target.value)} disabled={isApproved} />
+            </FormField>
+            <FormField label="Steuernr.">
+              <input name="certificate_tax_number" value={certificateTaxNumber} onChange={(event) => updateField("certificate_tax_number", event.target.value)} disabled={isApproved} />
+            </FormField>
+            <FormField label="USt-ID">
+              <input name="certificate_vat_id" value={certificateVatId} onChange={(event) => updateField("certificate_vat_id", event.target.value)} disabled={isApproved} />
+            </FormField>
+          </>
+        ) : null}
         {!isNonBookingDocument ? (
           <FormField label="Kunden-Nr.">
             <input name="customer_number" value={form.customer_number} onChange={(event) => updateField("customer_number", event.target.value)} disabled={isApproved} />
@@ -6651,6 +6675,11 @@ function extractionFormFromDocument(document) {
     discount_amount: moneyDraftValue(raw.discount_amount),
     discounted_payable_amount: moneyDraftValue(raw.discounted_payable_amount),
     item_summary: raw.item_summary || "",
+    certificate_subject: raw.certificate_subject || "",
+    certificate_valid_from: inputDateValue(raw.certificate_valid_from),
+    certificate_valid_until: inputDateValue(raw.certificate_valid_until),
+    certificate_tax_number: raw.certificate_tax_number || "",
+    certificate_vat_id: raw.certificate_vat_id || "",
   };
 }
 
@@ -6676,6 +6705,11 @@ function normalizeExtractionUpdate(values) {
     discount_amount: decimalOrNull(values.discount_amount),
     discounted_payable_amount: decimalOrNull(values.discounted_payable_amount),
     item_summary: values.item_summary?.trim() || null,
+    certificate_subject: values.certificate_subject?.trim() || null,
+    certificate_valid_from: values.certificate_valid_from || null,
+    certificate_valid_until: values.certificate_valid_until || null,
+    certificate_tax_number: values.certificate_tax_number?.trim() || null,
+    certificate_vat_id: values.certificate_vat_id?.trim() || null,
   };
 }
 

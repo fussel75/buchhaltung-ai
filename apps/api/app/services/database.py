@@ -1096,6 +1096,11 @@ def update_document_extraction(
         "discount_amount",
         "discounted_payable_amount",
         "item_summary",
+        "certificate_subject",
+        "certificate_valid_from",
+        "certificate_valid_until",
+        "certificate_tax_number",
+        "certificate_vat_id",
     }
 
     for field_name in top_level_fields:
@@ -1220,8 +1225,10 @@ def _manual_assignment_type(raw_result: dict[str, Any], assignment_code: str | N
     return "general_cost"
 
 
-def _manual_normalized_invoice_filename(document: dict[str, Any], extraction: dict[str, Any]) -> str:
+def _manual_normalized_invoice_filename(document: dict[str, Any], extraction: dict[str, Any]) -> str | None:
     raw_result = extraction.get("raw_result") or {}
+    if _is_non_booking_document(raw_result):
+        return document.get("normalized_filename")
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
     assignment_code = raw_result.get("assignment_code")
     assignment = get_assignment_unit_by_code(
