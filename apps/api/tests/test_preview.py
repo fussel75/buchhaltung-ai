@@ -61,6 +61,43 @@ class PdfPreviewTest(TestCase):
             self.assertEqual(preview.page_number, 2)
             self.assertFalse(preview.truncated)
             self.assertIn("Testrechnung Seite 2", preview.text)
+            self.assertEqual(preview.source, "embedded")
+
+    def test_pdf_preview_uses_ocr_when_page_has_no_embedded_text(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            pdf_path = root / "scan.pdf"
+            self._write_pdf(pdf_path, pages=1, text="")
+
+            class FakePage:
+                def get_textpage_ocr(self, **_kwargs):
+                    return "fake-textpage"
+
+                def get_text(self, *_args, **kwargs):
+                    if kwargs.get("textpage") == "fake-textpage":
+                        return "OCR Gültigkeit 19.05.2026 bis 17.05.2027"
+                    return ""
+
+            class FakePdf:
+                page_count = 1
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return None
+
+                def load_page(self, _index):
+                    return FakePage()
+
+            with (
+                patch.object(storage_service, "get_settings", return_value=SimpleNamespace(storage_root=root)),
+                patch("fitz.open", return_value=FakePdf()),
+            ):
+                preview = extract_pdf_preview_text("scan.pdf", 1)
+
+            self.assertEqual(preview.source, "ocr")
+            self.assertIn("Gültigkeit", preview.text)
 
     def test_pdf_preview_text_is_limited(self):
         with TemporaryDirectory() as directory:

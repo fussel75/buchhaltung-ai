@@ -24,6 +24,7 @@ class PdfPreviewText:
     page_number: int
     text: str
     truncated: bool
+    source: str
 
 
 def pdf_page_count(storage_path: str) -> int:
@@ -86,12 +87,19 @@ def extract_pdf_preview_text(storage_path: str, page_number: int) -> PdfPreviewT
 
         page = pdf.load_page(page_number - 1)
         text = page.get_text("text").strip()
+        source = "embedded"
+        if len(text) < 20:
+            ocr_text = _extract_page_ocr_text(page)
+            if len(ocr_text) > len(text):
+                text = ocr_text
+                source = "ocr"
         truncated = len(text) > MAX_PREVIEW_TEXT_CHARS
         return PdfPreviewText(
             page_count=page_count,
             page_number=page_number,
             text=text[:MAX_PREVIEW_TEXT_CHARS],
             truncated=truncated,
+            source=source,
         )
 
 
@@ -99,3 +107,11 @@ def _safe_zoom(width: float, height: float, requested_zoom: float) -> float:
     longest_edge = max(width, height, 1)
     max_zoom = MAX_PREVIEW_EDGE_PIXELS / longest_edge
     return max(0.1, min(requested_zoom, max_zoom))
+
+
+def _extract_page_ocr_text(page) -> str:
+    try:
+        textpage = page.get_textpage_ocr(full=True, dpi=200, language="deu+eng")
+    except Exception:
+        return ""
+    return page.get_text("text", textpage=textpage).strip()

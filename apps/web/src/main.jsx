@@ -3411,6 +3411,7 @@ function DocumentPreview({ document }) {
   const [previewMode, setPreviewMode] = useState("pan");
   const [pageText, setPageText] = useState(null);
   const [pageTextTruncated, setPageTextTruncated] = useState(false);
+  const [pageTextSource, setPageTextSource] = useState("");
   const [textError, setTextError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
   const previewUrl = isPdf ? apiUrl(`/documents/${document.id}/preview/pages/${pageNumber}`) : fileUrl;
@@ -3426,6 +3427,7 @@ function DocumentPreview({ document }) {
     setPreviewMode("pan");
     setPageText(null);
     setPageTextTruncated(false);
+    setPageTextSource("");
     setTextError("");
     setCopyNotice("");
     setIsDragging(false);
@@ -3469,6 +3471,7 @@ function DocumentPreview({ document }) {
     const controller = new AbortController();
     setPageText(null);
     setPageTextTruncated(false);
+    setPageTextSource("");
     setTextError("");
     setCopyNotice("");
     fetch(apiUrl(`/documents/${document.id}/preview/pages/${pageNumber}/text`), {
@@ -3482,6 +3485,7 @@ function DocumentPreview({ document }) {
         }
         setPageText(result.text ?? "");
         setPageTextTruncated(Boolean(result.truncated));
+        setPageTextSource(result.source || "");
       })
       .catch((error) => {
         if (error.name !== "AbortError") {
@@ -3658,6 +3662,7 @@ function DocumentPreview({ document }) {
               ) : pageText ? (
                 <>
                   <pre>{pageText}</pre>
+                  {pageTextSource === "ocr" ? <span className="document-preview-copy-note">OCR-Text aus gescannter PDF-Seite.</span> : null}
                   {pageTextTruncated ? <span className="document-preview-copy-note">Text gekürzt. Komplette PDF über „Öffnen“ ansehen.</span> : null}
                   {copyNotice ? <span className="document-preview-copy-note">{copyNotice}</span> : null}
                 </>

@@ -740,6 +740,7 @@ def get_document_preview_page_text(document_id: UUID, page_number: int, request:
             "page_number": preview.page_number,
             "text": preview.text,
             "truncated": preview.truncated,
+            "source": preview.source,
         },
         headers={
             "Cache-Control": "private, no-store",
