@@ -260,6 +260,7 @@ function UploadApp() {
       extracted: documents.filter((document) => document.status === "extracted").length,
       ready: documents.filter((document) => document.status === "review_ready").length,
       approved: documents.filter((document) => document.status === "review_approved").length,
+      supporting: documents.filter(isSupportingDocument).length,
     }),
     [documents],
   );
@@ -282,6 +283,7 @@ function UploadApp() {
         .filter((document) => {
           if (reviewFilter === "all") return true;
           if (reviewFilter === "problems") return documentMatchesProblemSummary(document, problemReasonFilter);
+          if (reviewFilter === "supporting") return isSupportingDocument(document);
           return document.status === reviewFilter;
         })
         .filter((document) => !searchText || documentSearchText(document).includes(searchText))
@@ -1886,6 +1888,9 @@ function UploadApp() {
               </button>
               <button type="button" className={reviewFilter === "review_approved" ? "active" : ""} onClick={() => { setReviewFilter("review_approved"); setProblemReasonFilter(""); }}>
                 Freigegeben {queueStats.approved}
+              </button>
+              <button type="button" className={reviewFilter === "supporting" ? "active" : ""} onClick={() => { setReviewFilter("supporting"); setProblemReasonFilter(""); }}>
+                Unterlagen {queueStats.supporting}
               </button>
               <button type="button" className={reviewFilter === "problems" && !problemReasonFilter ? "active" : ""} onClick={() => { setReviewFilter("problems"); setProblemReasonFilter(""); setReviewSort("problem_desc"); }}>
                 Probleme {problemDocuments.length}
@@ -6923,6 +6928,17 @@ function formatDocumentType(value) {
     tax_exemption_certificate: "Freistellungsbescheinigung",
   };
   return labels[value] ?? value ?? "-";
+}
+
+const SUPPORTING_DOCUMENT_TYPES = new Set([
+  "project_document",
+  "reverse_charge_certificate",
+  "tax_exemption_certificate",
+]);
+
+function isSupportingDocument(document) {
+  const raw = document?.extraction?.raw_result || {};
+  return Boolean(raw.supporting_document) || SUPPORTING_DOCUMENT_TYPES.has(raw.document_type);
 }
 
 function formatCertificateExpiryStatus(document) {
