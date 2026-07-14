@@ -3262,7 +3262,8 @@ code {
     minmax(105px, 0.58fr)
     minmax(150px, 0.78fr)
     minmax(120px, 0.62fr)
-    minmax(190px, 1.2fr);
+    minmax(190px, 1.2fr)
+    minmax(96px, 0.48fr);
 }
 
 .tax-doc-table .data-row > .inline-note,

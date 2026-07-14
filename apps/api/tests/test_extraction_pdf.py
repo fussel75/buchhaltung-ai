@@ -59,6 +59,34 @@ class ExtractionPdfTests(TestCase):
         self.assertIsNone(result["gross_amount"])
         self.assertIn("Freistellungsbescheinigung", result["normalized_filename"])
 
+    def test_freistellungsbescheinigung_validity_table_sets_exact_expiry(self):
+        text = """
+        Finanzamt Hamburg-Altona
+        Freistellungsbescheinigung zum Steuerabzug bei Bauleistungen gemaess 48b EStG
+        Name, Anschrift AF - Elektro GmbH, Theodorstr. 41, 22761 Hamburg
+        Gueltigkeit 19.05.2026 bis 17.05.2027
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "68717 - BvFA_ Bescheinigung Bauleistungen 2026 - 2027.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "freistellung-af-elektro.pdf",
+            "size_bytes": 132000,
+            "sha256": "af-elektro",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_exemption_certificate")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["certificate_valid_from"], "2026-05-19")
+        self.assertEqual(result["certificate_valid_until"], "2027-05-17")
+        self.assertIn("2027-05-17", result["normalized_filename"])
+
     def test_reverse_charge_certificate_is_stored_as_supporting_document(self):
         text = """
         Finanzamt Hamburg-Nord

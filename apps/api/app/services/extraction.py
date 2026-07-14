@@ -1071,9 +1071,11 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
         or _find_date(text, r"Datum\s*\n\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
         or _invoice_date_from_filename(document["original_filename"])
     )
-    valid_from = _find_date(text, r"gilt vom\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+    range_valid_from, range_valid_until = _certificate_validity_range(text)
+    valid_from = range_valid_from or _find_date(text, r"gilt vom\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
     valid_until = (
-        _find_date(text, r"bis zum\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+        range_valid_until
+        or _find_date(text, r"bis zum\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
         or _find_date(text, r"G[üu]ltigkeit mit Ablauf des:\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
         or _certificate_expiry_from_filename(document["original_filename"])
     )
@@ -2218,6 +2220,17 @@ def _find_date(text: str, pattern: str) -> str | None:
     if not value:
         return None
     return _date_text_to_iso(value)
+
+
+def _certificate_validity_range(text: str) -> tuple[str | None, str | None]:
+    match = search(
+        r"G(?:[Ã¼üu]|ue)ltigkeit\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})\s*(?:bis|-|–|—)\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})",
+        text,
+        IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return _date_text_to_iso(match.group(1)), _date_text_to_iso(match.group(2))
 
 
 def _date_text_to_iso(value: str) -> str:

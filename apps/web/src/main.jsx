@@ -1627,6 +1627,22 @@ function UploadApp() {
     window.open(apiUrl(`/documents/${document.id}/file?disposition=inline`), "_blank", "noopener");
   }, []);
 
+  const openReviewDocumentDetails = useCallback((documentId) => {
+    if (!documentId) return;
+    setActiveView("review");
+    setReviewFilter("supporting");
+    setProblemReasonFilter("");
+    setReviewSearch("");
+    setReviewSort("created_desc");
+    setFocusedReviewDocumentId(documentId);
+    setExpandedDocumentIds((current) => (
+      current.includes(documentId) ? current : [...current, documentId]
+    ));
+    setNotice("Nachweis im Review geöffnet. Gültigkeitsdaten können dort bearbeitet und gespeichert werden.");
+    scrollReviewQueueIntoView();
+    window.setTimeout(() => focusReviewDocumentCard(documentId, { focusAction: false }), 120);
+  }, [scrollReviewQueueIntoView]);
+
   const downloadDocument = useCallback(
     async (document) => {
       setError("");
@@ -2399,6 +2415,7 @@ function UploadApp() {
           onAccountingRuleSaved={returnToApprovalAfterAccountingRule}
           onAssignmentUnitDraftConsumed={clearAssignmentUnitDraft}
           onAssignmentUnitSaved={returnToApprovalAfterAssignmentUnit}
+          onOpenSupportingDocument={openReviewDocumentDetails}
           onProfileSaved={(profile) => {
             setTenantProfile(profile);
             loadAssignmentUnits();
@@ -4654,6 +4671,7 @@ function MasterdataAdmin({
   onAccountingRuleSaved,
   onAssignmentUnitDraftConsumed,
   onAssignmentUnitSaved,
+  onOpenSupportingDocument,
   onProfileSaved,
 }) {
   const [assignmentUnits, setAssignmentUnits] = useState([]);
@@ -5625,6 +5643,7 @@ function MasterdataAdmin({
               <span>Steuernr. / USt-ID</span>
               <span>Status</span>
               <span>Datei</span>
+              <span>Aktion</span>
             </div>
             {taxSupportingDocuments.map((taxDocument) => (
               <div className="data-row" key={taxDocument.id}>
@@ -5634,6 +5653,13 @@ function MasterdataAdmin({
                 <span>{[taxDocument.certificate_tax_number, taxDocument.certificate_vat_id].filter(Boolean).join(" / ") || "-"}</span>
                 <StatusPill value={formatCertificateExpiryStatus(taxDocument)} tone={certificateExpiryTone(taxDocument.expiry_status)} />
                 <span>{safeVisibleFilename(taxDocument.normalized_filename || taxDocument.original_filename)}</span>
+                <button
+                  className="secondary-button compact-button"
+                  type="button"
+                  onClick={() => onOpenSupportingDocument?.(taxDocument.id)}
+                >
+                  Bearbeiten
+                </button>
                 {taxDocument.warnings?.length ? (
                   <p className="inline-note">{taxDocument.warnings.join(" ")}</p>
                 ) : null}
