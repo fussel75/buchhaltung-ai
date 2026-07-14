@@ -2857,6 +2857,33 @@ code {
   padding-left: 18px;
 }
 
+.supporting-document-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  border: 1px solid #d7eadf;
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #f7fcf9;
+}
+
+.info-tile {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.info-tile span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.info-tile strong {
+  overflow-wrap: anywhere;
+}
+
 .extraction-edit-grid {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   border-top: 0;

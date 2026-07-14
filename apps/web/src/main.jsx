@@ -3012,13 +3012,23 @@ function ExtractionEditForm({
     onSaveAndPrepare?.(document, { ...form, remember_supplier_rule: rememberSupplierRule });
   }
 
+  const isTaxSupporting = isTaxSupportingDocumentType(form.document_type);
+  const isProjectSupporting = form.document_type === "project_document";
+  const isNonBookingDocument = isTaxSupporting || isProjectSupporting;
+  const detailTitle = isTaxSupporting ? "Nachweisdaten" : isProjectSupporting ? "Unterlagendaten" : "Extraktionsdaten";
+  const detailSubtitle = isTaxSupporting
+    ? "steuerlicher Nachweis, keine Eingangsrechnung"
+    : isProjectSupporting
+      ? "Projektunterlage, keine Buchung"
+      : "bearbeitbar vor Buchungsvorschlag und Freigabe";
+
   return (
     <form className="extraction-edit-form" onSubmit={submit}>
       <div className="detail-section-header">
         <div>
-          <h3>Extraktionsdaten</h3>
+          <h3>{detailTitle}</h3>
           <span>
-            bearbeitbar vor Buchungsvorschlag und Freigabe
+            {detailSubtitle}
             {pdfTextDiagnostic ? ` · ${pdfTextDiagnostic}` : ""}
           </span>
         </div>
@@ -3030,19 +3040,35 @@ function ExtractionEditForm({
       {document.status === "review_ready" ? (
         <p className="inline-note">Speichern verwirft bestehende Vorschläge. Danach bitte „Vorschlag neu“ erstellen.</p>
       ) : null}
+      {isTaxSupporting ? (
+        <div className="supporting-document-panel">
+          <InfoTile label="Firma" value={rawResult.certificate_subject || form.supplier_name} />
+          <InfoTile label="Nachweis" value={rawResult.certificate_kind || formatDocumentType(form.document_type)} />
+          <InfoTile label="Gültig bis" value={formatDate(rawResult.certificate_valid_until)} />
+          <InfoTile
+            label="Steuernr. / USt-ID"
+            value={[rawResult.certificate_tax_number, rawResult.certificate_vat_id].filter(Boolean).join(" / ")}
+          />
+          <InfoTile label="Status" value={rawResult.certificate_valid_until ? "Ablaufdatum erkannt" : "Ablauf unklar"} />
+        </div>
+      ) : null}
       <div className="form-grid extraction-edit-grid">
-        <FormField label="Lieferant">
+        <FormField label={isTaxSupporting ? "Aussteller" : "Lieferant"}>
           <input name="supplier_name" value={form.supplier_name} onChange={(event) => updateField("supplier_name", event.target.value)} disabled={isApproved} />
         </FormField>
-        <FormField label="Rechnung">
-          <input name="invoice_number" value={form.invoice_number} onChange={(event) => updateField("invoice_number", event.target.value)} disabled={isApproved} />
-        </FormField>
-        <FormField label="Datum">
+        {!isNonBookingDocument ? (
+          <FormField label="Rechnung">
+            <input name="invoice_number" value={form.invoice_number} onChange={(event) => updateField("invoice_number", event.target.value)} disabled={isApproved} />
+          </FormField>
+        ) : null}
+        <FormField label={isTaxSupporting ? "Ausstellungsdatum" : "Datum"}>
           <input name="invoice_date" type="date" value={form.invoice_date} onChange={(event) => updateField("invoice_date", event.target.value)} disabled={isApproved} />
         </FormField>
-        <FormField label="Kunden-Nr.">
-          <input name="customer_number" value={form.customer_number} onChange={(event) => updateField("customer_number", event.target.value)} disabled={isApproved} />
-        </FormField>
+        {!isNonBookingDocument ? (
+          <FormField label="Kunden-Nr.">
+            <input name="customer_number" value={form.customer_number} onChange={(event) => updateField("customer_number", event.target.value)} disabled={isApproved} />
+          </FormField>
+        ) : null}
         <FormField label="Belegart">
           <select name="document_type" value={form.document_type} onChange={(event) => updateField("document_type", event.target.value)} disabled={isApproved}>
             <option value="incoming_invoice">Eingangsrechnung</option>
@@ -3053,14 +3079,18 @@ function ExtractionEditForm({
             <option value="reverse_charge_certificate">§13b-Nachweis</option>
           </select>
         </FormField>
-        <FormField label="Kostenart">
-          <select name="cost_category" value={form.cost_category} onChange={(event) => updateField("cost_category", event.target.value)} disabled={isApproved}>
-            <option value="">-</option>
-            {COST_CATEGORY_OPTIONS.map(([category, label]) => (
-              <option key={category} value={category}>{label}</option>
-            ))}
-          </select>
-        </FormField>
+        {!isNonBookingDocument ? (
+          <FormField label="Kostenart">
+            <select name="cost_category" value={form.cost_category} onChange={(event) => updateField("cost_category", event.target.value)} disabled={isApproved}>
+              <option value="">-</option>
+              {COST_CATEGORY_OPTIONS.map(([category, label]) => (
+                <option key={category} value={category}>{label}</option>
+              ))}
+            </select>
+          </FormField>
+        ) : null}
+        {!isTaxSupporting ? (
+          <>
         <FormField label={`${tenantProfile.assignment_label_singular} aus Stammdaten`} className="assignment-picker-field">
           <input
             className="assignment-search-input"
@@ -3133,6 +3163,10 @@ function ExtractionEditForm({
             <AssignmentKindOptions />
           </select>
         </FormField>
+          </>
+        ) : null}
+        {!isNonBookingDocument ? (
+          <>
         <FormField label="Netto">
           <input name="net_amount" inputMode="decimal" value={form.net_amount} onChange={(event) => updateField("net_amount", event.target.value)} disabled={isApproved} />
         </FormField>
@@ -3160,11 +3194,13 @@ function ExtractionEditForm({
         <FormField label="Zahlbetrag Skonto">
           <input name="discounted_payable_amount" inputMode="decimal" value={form.discounted_payable_amount} onChange={(event) => updateField("discounted_payable_amount", event.target.value)} disabled={isApproved} />
         </FormField>
-        <FormField label="Artikel / Leistung">
+          </>
+        ) : null}
+        <FormField label={isTaxSupporting ? "Bemerkung" : isProjectSupporting ? "Titel / Inhalt" : "Artikel / Leistung"}>
           <input name="item_summary" value={form.item_summary} onChange={(event) => updateField("item_summary", event.target.value)} disabled={isApproved} />
         </FormField>
       </div>
-      {!isApproved ? (
+      {!isApproved && !isNonBookingDocument ? (
         <label className="remember-rule-option">
           <input
             type="checkbox"
@@ -6023,6 +6059,15 @@ function FormField({ label, children, error, className = "" }) {
   );
 }
 
+function InfoTile({ label, value }) {
+  return (
+    <div className="info-tile">
+      <span>{label}</span>
+      <strong>{value || "-"}</strong>
+    </div>
+  );
+}
+
 function InlineEditField({ children, error }) {
   return (
     <div className="inline-edit-field">
@@ -6939,6 +6984,10 @@ const SUPPORTING_DOCUMENT_TYPES = new Set([
 function isSupportingDocument(document) {
   const raw = document?.extraction?.raw_result || {};
   return Boolean(raw.supporting_document) || SUPPORTING_DOCUMENT_TYPES.has(raw.document_type);
+}
+
+function isTaxSupportingDocumentType(documentType) {
+  return documentType === "tax_exemption_certificate" || documentType === "reverse_charge_certificate";
 }
 
 function formatCertificateExpiryStatus(document) {
