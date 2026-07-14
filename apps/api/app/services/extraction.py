@@ -230,10 +230,14 @@ def run_ai_extraction(
         details={"previous_status": document.get("status")},
     )
 
-    text = _extract_pdf_text(document["storage_path"])
+    existing_extraction = dict(document["extraction"])
+    text = _extract_pdf_text(
+        document["storage_path"],
+        force_ocr=_should_force_ocr_for_ai(existing_extraction),
+    )
     extraction = maybe_enhance_extraction_with_ai(
         document=document,
-        extraction=dict(document["extraction"]),
+        extraction=existing_extraction,
         pdf_text=str(text),
         force=True,
     )
@@ -1732,16 +1736,36 @@ def _tank_receipt_driver_from_filename(stem: str) -> str | None:
     return None
 
 
-def _extract_pdf_text(storage_path: str, *, allow_ocr: bool = True) -> str:
+def _should_force_ocr_for_ai(extraction: dict) -> bool:
+    raw_result = extraction.get("raw_result") or extraction
+    if raw_result.get("document_type") == "fuel_receipt":
+        return True
+    for field_name in ("net_amount", "tax_amount", "gross_amount"):
+        if not extraction.get(field_name) and not raw_result.get(field_name):
+            return True
+    return False
+
+
+def _extract_pdf_text(storage_path: str, *, allow_ocr: bool = True, force_ocr: bool = False) -> str:
     text = _extract_pdf_text_pypdf(storage_path)
-    if len(text.strip()) >= 80:
+    if len(text.strip()) >= 80 and not force_ocr:
         return ExtractedPdfText(text, "pypdf")
     fallback_text = _extract_pdf_text_pymupdf(storage_path)
-    if len(fallback_text.strip()) > len(text.strip()):
+    if len(fallback_text.strip()) > len(text.strip()) and not force_ocr:
         return ExtractedPdfText(fallback_text, "pymupdf")
     if not allow_ocr:
         return ExtractedPdfText(text, "pypdf_short_no_ocr")
     ocr_text = _extract_pdf_text_pymupdf_ocr(storage_path)
+    if force_ocr:
+        candidates = [
+            (text, "pypdf"),
+            (fallback_text, "pymupdf"),
+            (ocr_text, "pymupdf_ocr"),
+        ]
+        best_text, source = max(candidates, key=lambda candidate: len(candidate[0].strip()))
+        if source == "pypdf" and len(best_text.strip()) < 80:
+            source = "pypdf_short"
+        return ExtractedPdfText(best_text, source)
     if len(ocr_text.strip()) > len(text.strip()):
         return ExtractedPdfText(ocr_text, "pymupdf_ocr")
     return ExtractedPdfText(text, "pypdf_short")

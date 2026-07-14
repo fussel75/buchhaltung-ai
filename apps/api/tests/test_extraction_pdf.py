@@ -228,6 +228,25 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(text, "kurz")
         self.assertEqual(text.source, "pypdf_short_no_ocr")
 
+    def test_pdf_text_extraction_can_force_ocr_for_single_ai_checks(self):
+        regular_text = "Tankstelle\n" + ("PDF Text " * 20)
+        ocr_text = regular_text + "\nSumme EUR 56,00\nNetto 47,06\nMwSt 8,94"
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text_pypdf", return_value=regular_text),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf", return_value=regular_text),
+            patch.object(extraction_service, "_extract_pdf_text_pymupdf_ocr", return_value=ocr_text),
+        ):
+            text = extraction_service._extract_pdf_text("tank.pdf", force_ocr=True)
+
+        self.assertEqual(text, ocr_text)
+        self.assertEqual(text.source, "pymupdf_ocr")
+
+    def test_ai_extraction_forces_ocr_for_fuel_receipts(self):
+        extraction = {"document_type": "fuel_receipt", "gross_amount": None}
+
+        self.assertTrue(extraction_service._should_force_ocr_for_ai(extraction))
+
     def test_pdf_text_result_can_skip_automatic_ai_enrichment(self):
         document = {
             "id": "doc-1",
