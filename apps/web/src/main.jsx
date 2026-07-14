@@ -7406,8 +7406,9 @@ function formatPdfTextSource(source) {
 function problemExtractionReasons(document) {
   const extraction = document?.extraction;
   if (!extraction) return [];
+  const supportingDocument = isSupportingDocument(document);
   if (Array.isArray(extraction.problem_reasons) && extraction.problem_reasons.length) {
-    return extraction.problem_reasons;
+    return supportingDocument ? filterInvoiceRequiredProblemReasons(extraction.problem_reasons) : extraction.problem_reasons;
   }
   const reasons = [];
   const confidence = Number(extraction.confidence);
@@ -7429,14 +7430,16 @@ function problemExtractionReasons(document) {
   if (extraction.warnings?.length) {
     reasons.push(`${extraction.warnings.length} ${extraction.warnings.length === 1 ? "Hinweis" : "Hinweise"}`);
   }
-  if (!extraction.invoice_number) {
-    reasons.push("Rechnungsnummer fehlt");
-  }
-  if (!extraction.invoice_date) {
-    reasons.push("Datum fehlt");
-  }
-  if (extraction.gross_amount === null || extraction.gross_amount === undefined || extraction.gross_amount === "") {
-    reasons.push("Brutto fehlt");
+  if (!supportingDocument) {
+    if (!extraction.invoice_number) {
+      reasons.push("Rechnungsnummer fehlt");
+    }
+    if (!extraction.invoice_date) {
+      reasons.push("Datum fehlt");
+    }
+    if (extraction.gross_amount === null || extraction.gross_amount === undefined || extraction.gross_amount === "") {
+      reasons.push("Brutto fehlt");
+    }
   }
   if (
     rawResult.assignment_type === "assignment_unresolved"
@@ -7449,6 +7452,11 @@ function problemExtractionReasons(document) {
   }
 
   return reasons;
+}
+
+function filterInvoiceRequiredProblemReasons(reasons) {
+  const invoiceRequiredReasons = new Set(["Rechnungsnummer fehlt", "Datum fehlt", "Brutto fehlt"]);
+  return reasons.filter((reason) => !invoiceRequiredReasons.has(problemExtractionSummaryKey(reason)));
 }
 
 function isProblemExtraction(document) {
