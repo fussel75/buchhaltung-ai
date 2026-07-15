@@ -2263,6 +2263,16 @@ function UploadApp() {
                     >
                       Ansehen
                     </button>
+                    {document.status !== "review_approved" ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => ignoreDocument(document)}
+                        disabled={ignoringIds.includes(document.id)}
+                      >
+                        {ignoringIds.includes(document.id) ? "Ignoriere..." : "Ignorieren"}
+                      </button>
+                    ) : null}
                     <button
                       className="secondary-button"
                       type="button"
