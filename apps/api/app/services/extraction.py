@@ -939,6 +939,9 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     if supplier_rule:
         supplier_name = supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
+    if _is_internal_warehouse_disposal(supplier_name, text, delivery_address):
+        delivery_address = None
+        delivery_addresses = []
     supplier_is_filename_guess = _supplier_name_is_filename_guess(document, supplier_name, supplier_rule)
     assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
     assignment = assignment_match["assignment"] if assignment_match else None
@@ -2345,12 +2348,20 @@ def _find_customer_number(text: str) -> str | None:
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
+    currency_marker = r"(?:â‚¬|€|EUR)?"
     rieprecht_total = search(
         r"Nettobetrag\s*€\s*([0-9.]+,\d{2})[\s\S]*?"
         r"Mwst\.\s*gesamt\s*€\s*([0-9.]+,\d{2})[\s\S]*?"
         r"Zahlbetrag\s*€\s*([0-9.]+,\d{2})",
         text,
     )
+    if not rieprecht_total:
+        rieprecht_total = search(
+            rf"Nettobetrag\s*{currency_marker}\s*([0-9.]+,\d{{2}})[\s\S]*?"
+            rf"Mwst\.\s*gesamt\s*{currency_marker}\s*([0-9.]+,\d{{2}})[\s\S]*?"
+            rf"Zahlbetrag\s*{currency_marker}\s*([0-9.]+,\d{{2}})",
+            text,
+        )
     if rieprecht_total:
         return {
             "discount_base": None,
@@ -3204,6 +3215,28 @@ def _assignment_type(delivery_address: str | None, assignment: dict | None) -> s
     return "general_cost"
 
 
+def _is_internal_warehouse_disposal(
+    supplier_name: str | None,
+    text: str,
+    delivery_address: str | None,
+) -> bool:
+    haystack = " ".join([supplier_name or "", delivery_address or "", text[:3000]]).lower()
+    if "rieprecht" not in haystack:
+        return False
+    if "haldesdorfer" not in haystack:
+        return False
+    return any(
+        term in haystack
+        for term in [
+            "baumisch",
+            "container",
+            "boden ohne analyse",
+            "abholung",
+            "entsorgung",
+        ]
+    )
+
+
 def _cost_category_for_supplier_rule(
     supplier_rule: dict | None,
     supplier_name: str | None,
@@ -3239,8 +3272,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
-    if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung"]):
-        return "subcontractor"
+    if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung", "container"]):
+        return "disposal"
     if any(term in haystack for term in ["wärmepumpen-support", "waermepumpen-support", "kundendienst"]):
         return "subcontractor"
     if any(term in haystack for term in ["böhm malereibetrieb", "boehm malereibetrieb", "maler l. böhm", "maler l. boehm"]):

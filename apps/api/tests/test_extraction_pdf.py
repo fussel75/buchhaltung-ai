@@ -2514,7 +2514,7 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["delivery_address"], "Weseler Weg 20, Hamburg")
         self.assertEqual(result["assignment_code"], "Wewe20")
         self.assertEqual(result["project_number"], "25-00008")
-        self.assertEqual(result["cost_category"], "subcontractor")
+        self.assertEqual(result["cost_category"], "disposal")
         self.assertEqual(result["product_name"], "Gestellung Container")
         self.assertEqual(result["net_amount"], Decimal("120.00"))
         self.assertEqual(result["tax_amount"], Decimal("22.80"))
@@ -2578,11 +2578,59 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["due_date"], "2025-09-18")
         self.assertEqual(result["assignment_code"], "FaLastr36b")
         self.assertEqual(result["project_number"], "25-00006")
+        self.assertEqual(result["cost_category"], "disposal")
         self.assertEqual(result["product_name"], "Boden/Plattemsand Container")
         self.assertEqual(result["net_amount"], Decimal("2323.68"))
         self.assertEqual(result["tax_amount"], Decimal("441.50"))
         self.assertEqual(result["gross_amount"], Decimal("2765.18"))
         self.assertEqual(result["warnings"], [])
+
+    def test_rieprecht_warehouse_container_is_disposal_general_cost(self):
+        text = """
+        FriStD Bau ZuB GmbH & Co.KG
+        R e c h n u n g   N r .   2 6 0 0 2 0 8
+        Rg.-Datum Kunden-Nr. Bestellung Vertreter/ADM Bearbeiter Seite
+        12.06.2026 10501 Ronny Friedrich                    RI  1
+        Haldesdorfer Str. 44
+        22179 Hamburg
+        Pos. Artikel-Nr./Bezeichnung Menge / Einheit E-Preis EUR Rabatt Mwst.% G-Preis EUR
+        1 Baumisch Container                    1,000 Stueck          1.000,00        19.00     1.000,00
+        Nettobetrag  EUR     1.000,00
+        Mwst. gesamt €       190,00
+        Zahlung ohne Abzug bis 22.06.2026
+        Zahlbetrag   EUR     1.190,00
+        Rieprecht GmbH Heinrichstr. 11, 22946 Brunsbek
+        stefan@rieprecht-gmbh.de
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rg2600208_RIEP_mit_Belegen.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "rieprecht-warehouse.pdf",
+            "size_bytes": 232000,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Rieprecht GmbH")
+        self.assertEqual(result["invoice_number"], "2600208")
+        self.assertEqual(result["customer_number"], "10501")
+        self.assertEqual(result["invoice_date"], "2026-06-12")
+        self.assertEqual(result["due_date"], "2026-06-22")
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertIsNone(result["assignment_code"])
+        self.assertEqual(result["cost_category"], "disposal")
+        self.assertEqual(result["product_name"], "Baumisch Container")
+        self.assertEqual(result["net_amount"], Decimal("1000.00"))
+        self.assertEqual(result["tax_amount"], Decimal("190.00"))
+        self.assertEqual(result["gross_amount"], Decimal("1190.00"))
 
     def test_konzept54_invoice_reads_project_support_totals_and_due_date(self):
         text = """

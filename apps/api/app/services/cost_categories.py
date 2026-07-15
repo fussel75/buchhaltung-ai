@@ -4,6 +4,7 @@ from typing import Literal
 CostCategory = Literal[
     "material",
     "subcontractor",
+    "disposal",
     "fuel_vehicle",
     "software_subscription",
     "security_subscription",
@@ -13,6 +14,7 @@ CostCategory = Literal[
 VALID_COST_CATEGORIES: set[str] = {
     "material",
     "subcontractor",
+    "disposal",
     "fuel_vehicle",
     "software_subscription",
     "security_subscription",
@@ -22,6 +24,7 @@ VALID_COST_CATEGORIES: set[str] = {
 COST_CATEGORY_LABELS = {
     "material": "Material",
     "subcontractor": "Fremdleistung",
+    "disposal": "Entsorgung",
     "fuel_vehicle": "Fahrzeug/Tanken",
     "software_subscription": "Software/Abo",
     "security_subscription": "Überwachung/Abo",

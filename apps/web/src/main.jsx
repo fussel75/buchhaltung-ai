@@ -8,6 +8,7 @@ const AI_CHECK_TIMEOUT_MS = 60_000;
 const COST_CATEGORY_OPTIONS = [
   ["material", "Material"],
   ["subcontractor", "Fremdleistung"],
+  ["disposal", "Entsorgung"],
   ["fuel_vehicle", "Fahrzeug/Tanken"],
   ["software_subscription", "Software/Abo"],
   ["security_subscription", "Überwachung/Abo"],
@@ -3354,6 +3355,7 @@ function AssignmentKindOptions() {
       <option value="construction_project">Bauvorhaben</option>
       <option value="location">Standort</option>
       <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+      <option value="general_cost">Allgemeine Kosten</option>
       <option value="cost_object">Kostenobjekt</option>
       <option value="vehicle">Fahrzeug</option>
       <option value="subscription">Abo/Vertrag</option>
@@ -5529,6 +5531,7 @@ function MasterdataAdmin({
                 <option value="construction_project">Bauvorhaben</option>
                 <option value="location">Standort</option>
                 <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
+                <option value="general_cost">Allgemeine Kosten</option>
                 <option value="cost_object">Kostenobjekt</option>
                 <option value="vehicle">Fahrzeug</option>
                 <option value="subscription">Abo/Vertrag</option>
@@ -6018,6 +6021,7 @@ function MasterdataAdmin({
                 <option value="">Alle Kostenarten</option>
                 <option value="material">Material</option>
                 <option value="subcontractor">Fremdleistung</option>
+                <option value="disposal">Entsorgung</option>
                 <option value="fuel_vehicle">Fahrzeug/Tanken</option>
                 <option value="software_subscription">Software/Abo</option>
                 <option value="security_subscription">Überwachung/Abo</option>
@@ -6531,6 +6535,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                   <option value="construction_project">Bauvorhaben</option>
                   <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
                   <option value="location">Standort</option>
+                  <option value="general_cost">Allgemeine Kosten</option>
                   <option value="cost_object">Kostenobjekt</option>
                   <option value="vehicle">Fahrzeug</option>
                   <option value="subscription">Abo/Vertrag</option>
@@ -6547,6 +6552,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                 <option value="">-</option>
                 <option value="material">Material</option>
                 <option value="subcontractor">Fremdleistung</option>
+                <option value="disposal">Entsorgung</option>
                 <option value="fuel_vehicle">Fahrzeug/Tanken</option>
                 <option value="software_subscription">Software/Abo</option>
                 <option value="security_subscription">Überwachung/Abo</option>
@@ -7360,6 +7366,7 @@ function formatAssignmentKind(value, tenantProfile = defaultTenantProfile("gener
     construction_project: "Bauvorhaben",
     construction_or_dropoff_site: "Bauvorhaben / Stellplatz",
     location: "Standort",
+    general_cost: "Allgemeine Kosten",
     cost_object: "Kostenobjekt",
     vehicle: "Fahrzeug",
     subscription: "Abo/Vertrag",
