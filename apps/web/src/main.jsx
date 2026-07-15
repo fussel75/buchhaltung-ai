@@ -212,6 +212,7 @@ function UploadApp() {
   const [aiCheckingIds, setAiCheckingIds] = useState([]);
   const [activeView, setActiveView] = useState("review");
   const [deletingIds, setDeletingIds] = useState([]);
+  const [ignoringIds, setIgnoringIds] = useState([]);
   const [approvingIds, setApprovingIds] = useState([]);
   const [validatingIds, setValidatingIds] = useState([]);
   const [savingSuggestionIds, setSavingSuggestionIds] = useState([]);
@@ -1111,6 +1112,37 @@ function UploadApp() {
         setError(deleteError.message);
       } finally {
         setDeletingIds((current) => current.filter((id) => id !== document.id));
+      }
+    },
+    [apiFetch, loadDocuments],
+  );
+
+  const ignoreDocument = useCallback(
+    async (document) => {
+      const confirmed = window.confirm(
+        `Dokument "${document.original_filename}" ignorieren?\n\nEs verschwindet aus Review-Queue und Problemfiltern, wird aber nicht gelöscht.`,
+      );
+      if (!confirmed) return;
+
+      setError("");
+      setNotice("");
+      setIgnoringIds((current) => [...current, document.id]);
+
+      try {
+        const response = await apiFetch(`/documents/${document.id}/ignore`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Ignorieren fehlgeschlagen: ${response.status}`);
+        }
+
+        await loadDocuments();
+        setNotice(`Dokument ignoriert: ${document.original_filename}`);
+      } catch (ignoreError) {
+        setError(ignoreError.message);
+      } finally {
+        setIgnoringIds((current) => current.filter((id) => id !== document.id));
       }
     },
     [apiFetch, loadDocuments],
@@ -2235,6 +2267,16 @@ function UploadApp() {
                             disabled={extractingIds.includes(document.id)}
                           >
                             {extractingIds.includes(document.id) ? "Läuft..." : "Neu extrahieren"}
+                          </button>
+                        ) : null}
+                        {document.status !== "review_approved" ? (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => ignoreDocument(document)}
+                            disabled={ignoringIds.includes(document.id)}
+                          >
+                            {ignoringIds.includes(document.id) ? "Ignoriere..." : "Ignorieren"}
                           </button>
                         ) : null}
                         <button

@@ -23,6 +23,7 @@ from app.services.database import (
     create_document_record,
     delete_document,
     get_document_bulk_job,
+    ignore_document,
     list_document_bulk_jobs,
     list_document_ids_for_bulk_action,
     list_documents,
@@ -899,6 +900,16 @@ def update_document_payment_decision(
     if document is None:
         raise HTTPException(status_code=404, detail="document with extraction not found")
     return {"document": document}
+
+
+@router.post("/{document_id}/ignore")
+def ignore_review_document(document_id: UUID, request: Request) -> dict[str, Any]:
+    current_document = require_document_access(request, document_id)
+    _ensure_not_processing(current_document)
+    document = ignore_document(document_id, actor=_actor(request))
+    if document is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return {"document": document, "status": "ignored"}
 
 
 @router.delete("/{document_id}")

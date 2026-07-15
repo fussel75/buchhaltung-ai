@@ -512,6 +512,7 @@ def list_documents(tenant_id: str, limit: int = 500) -> list[dict[str, Any]]:
                 left join document_extractions e on e.document_id = d.id
                 left join document_payment_decisions pd on pd.document_id = d.id
                 where d.tenant_id = %s
+                    and d.status <> 'ignored'
                 order by d.created_at desc
                 limit %s
                 """,
@@ -572,6 +573,7 @@ def list_documents_for_month(tenant_id: str, year: int, month: int) -> list[dict
                 left join document_extractions e on e.document_id = d.id
                 left join document_payment_decisions pd on pd.document_id = d.id
                 where d.tenant_id = %s
+                    and d.status <> 'ignored'
                     and coalesce(e.invoice_date, d.created_at::date) >= %s
                     and coalesce(e.invoice_date, d.created_at::date) < %s
                 order by coalesce(e.invoice_date, d.created_at::date) desc, d.created_at desc
@@ -653,6 +655,43 @@ def delete_document(document_id: UUID) -> dict[str, Any] | None:
             cursor.execute("delete from documents where id = %s", (document_id,))
 
     return document
+
+
+def ignore_document(document_id: UUID, actor: str = "system") -> dict[str, Any] | None:
+    document = get_document(document_id)
+    if document is None:
+        return None
+    if document["status"] == "ignored":
+        return document
+
+    insert_audit_event(
+        tenant_id=document["tenant_id"],
+        event_type="document.ignored",
+        document_id=document_id,
+        actor=actor,
+        details={
+            "original_filename": document["original_filename"],
+            "previous_status": document["status"],
+            "sha256": document["sha256"],
+        },
+    )
+
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update documents
+                set status = 'ignored',
+                    processing_job_id = null,
+                    processing_started_at = null,
+                    updated_at = %s
+                where id = %s
+                """,
+                (now, document_id),
+            )
+
+    return get_document(document_id)
 
 
 class BulkJobConflictError(ValueError):

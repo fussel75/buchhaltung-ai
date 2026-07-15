@@ -79,6 +79,32 @@ class SequenceCursor(RecordingCursor):
         return self.fetchone_results.pop(0)
 
 
+class DocumentIgnoreTests(TestCase):
+    def test_ignore_route_marks_document_without_deleting_file(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"email": "admin@example.test", "role": "admin"}))
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "original_filename": "BANKVERBINDUNG.pdf",
+            "status": "extracted",
+            "processing_job_id": None,
+            "processing_started_at": None,
+        }
+        ignored = {**document, "status": "ignored"}
+
+        with (
+            patch.object(documents_route, "require_document_access", return_value=document) as require_access,
+            patch.object(documents_route, "ignore_document", return_value=ignored) as ignore_document,
+        ):
+            result = documents_route.ignore_review_document(document_id, request)
+
+        require_access.assert_called_once_with(request, document_id)
+        ignore_document.assert_called_once_with(document_id, actor="admin@example.test")
+        self.assertEqual(result["status"], "ignored")
+        self.assertEqual(result["document"]["status"], "ignored")
+
+
 class TenantProfileTests(TestCase):
     def test_tenant_profile_route_passes_accounting_framework(self):
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin"}))
