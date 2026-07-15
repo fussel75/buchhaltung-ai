@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.services.cost_categories import CostCategory
 from app.services.database import (
     approve_document_review,
+    apply_document_ignore_rule,
     BulkJobConflictError,
     build_booking_export_rows,
     cancel_document_bulk_job,
@@ -34,6 +35,7 @@ from app.services.database import (
     select_payment_decision,
     update_booking_suggestion,
     update_document_extraction,
+    upsert_document_ignore_rule,
     validate_booking_export_rows,
     validate_document_review,
     validate_document_review_details,
@@ -129,6 +131,11 @@ class DocumentBulkAllRequest(BaseModel):
 
 class DocumentReextractRequest(BaseModel):
     confirm: bool = False
+
+
+class DocumentIgnoreRequest(BaseModel):
+    remember_similar: bool = False
+    match_text: str | None = Field(default=None, max_length=120)
 
 
 class BookingSuggestionUpdate(BaseModel):
@@ -903,13 +910,45 @@ def update_document_payment_decision(
 
 
 @router.post("/{document_id}/ignore")
-def ignore_review_document(document_id: UUID, request: Request) -> dict[str, Any]:
+def ignore_review_document(
+    document_id: UUID,
+    request: Request,
+    payload: DocumentIgnoreRequest | None = None,
+) -> dict[str, Any]:
     current_document = require_document_access(request, document_id)
     _ensure_not_processing(current_document)
-    document = ignore_document(document_id, actor=_actor(request))
+    actor = _actor(request)
+    ignore_rule = None
+    ignored_count = 1
+    if payload and payload.remember_similar:
+        match_text = (payload.match_text or current_document["original_filename"] or "").strip()
+        if len(match_text) < 3:
+            raise HTTPException(status_code=400, detail="Ignoriermuster braucht mindestens 3 Zeichen.")
+        try:
+            ignore_rule = upsert_document_ignore_rule(
+                tenant_id=current_document["tenant_id"],
+                match_text=match_text,
+                actor=actor,
+                description="Aus Review-Queue erstellt",
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        ignored_count = apply_document_ignore_rule(
+            tenant_id=current_document["tenant_id"],
+            rule_id=UUID(ignore_rule["id"]),
+            actor=actor,
+        )
+        document = require_document_access(request, document_id)
+    else:
+        document = ignore_document(document_id, actor=actor)
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
-    return {"document": document, "status": "ignored"}
+    return {
+        "document": document,
+        "status": "ignored",
+        "ignore_rule": ignore_rule,
+        "ignored_count": ignored_count,
+    }
 
 
 @router.delete("/{document_id}")

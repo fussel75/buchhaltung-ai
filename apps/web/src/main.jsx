@@ -1123,6 +1123,17 @@ function UploadApp() {
         `Dokument "${document.original_filename}" ignorieren?\n\nEs verschwindet aus Review-Queue und Problemfiltern, wird aber nicht gelöscht.`,
       );
       if (!confirmed) return;
+      const rememberSimilar = window.confirm(
+        "Ähnliche Dokumente dieser Art künftig automatisch ignorieren?\n\nDie Regel kann später in den Stammdaten wieder deaktiviert werden.",
+      );
+      const suggestedPattern = suggestDocumentIgnorePattern(document);
+      const matchText = rememberSimilar
+        ? window.prompt(
+          "Welcher Text im Dateinamen soll dauerhaft ignoriert werden?\n\nBeispiel: Benefitliste, Bestellliste oder liste-SU01764",
+          suggestedPattern,
+        )
+        : "";
+      if (rememberSimilar && !matchText?.trim()) return;
 
       setError("");
       setNotice("");
@@ -1131,14 +1142,25 @@ function UploadApp() {
       try {
         const response = await apiFetch(`/documents/${document.id}/ignore`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            remember_similar: rememberSimilar,
+            match_text: rememberSimilar ? matchText.trim() : null,
+          }),
         });
 
         if (!response.ok) {
-          throw new Error(`Ignorieren fehlgeschlagen: ${response.status}`);
+          const apiError = await readApiError(response, "Ignorieren fehlgeschlagen");
+          throw new Error(apiError.message);
         }
 
+        const result = await response.json();
         await loadDocuments();
-        setNotice(`Dokument ignoriert: ${document.original_filename}`);
+        setNotice(
+          result.ignore_rule
+            ? `Ignorierregel angelegt: "${result.ignore_rule.match_text}". ${result.ignored_count ?? 1} Dokumente ausgeblendet.`
+            : `Dokument ignoriert: ${document.original_filename}`,
+        );
       } catch (ignoreError) {
         setError(ignoreError.message);
       } finally {
@@ -4727,6 +4749,7 @@ function MasterdataAdmin({
   const [accountingRules, setAccountingRules] = useState([]);
   const [bwaImports, setBwaImports] = useState([]);
   const [taxSupportingDocuments, setTaxSupportingDocuments] = useState([]);
+  const [documentIgnoreRules, setDocumentIgnoreRules] = useState([]);
   const [assignmentEditId, setAssignmentEditId] = useState(null);
   const [assignmentEditForm, setAssignmentEditForm] = useState(null);
   const [supplierEditId, setSupplierEditId] = useState(null);
@@ -4818,15 +4841,16 @@ function MasterdataAdmin({
   }, [tenantProfile]);
 
   const loadMasterdata = useCallback(async () => {
-    const [assignmentsResponse, suppliersResponse, capabilitiesResponse, accountingResponse, bwaResponse, taxDocsResponse] = await Promise.all([
+    const [assignmentsResponse, suppliersResponse, capabilitiesResponse, accountingResponse, bwaResponse, taxDocsResponse, ignoreRulesResponse] = await Promise.all([
       apiFetch(`/masterdata/assignment-units?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/supplier-rules?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch("/masterdata/extraction-capabilities"),
       apiFetch(`/masterdata/accounting-rules?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/bwa-imports?tenant_id=${encodeURIComponent(tenantId)}`),
       apiFetch(`/masterdata/tax-supporting-documents?tenant_id=${encodeURIComponent(tenantId)}`),
+      apiFetch(`/masterdata/document-ignore-rules?tenant_id=${encodeURIComponent(tenantId)}`),
     ]);
-    if (!assignmentsResponse.ok || !suppliersResponse.ok || !capabilitiesResponse.ok || !accountingResponse.ok || !bwaResponse.ok || !taxDocsResponse.ok) {
+    if (!assignmentsResponse.ok || !suppliersResponse.ok || !capabilitiesResponse.ok || !accountingResponse.ok || !bwaResponse.ok || !taxDocsResponse.ok || !ignoreRulesResponse.ok) {
       throw new Error("Stammdaten konnten nicht geladen werden.");
     }
     const assignmentsResult = await assignmentsResponse.json();
@@ -4835,12 +4859,14 @@ function MasterdataAdmin({
     const accountingResult = await accountingResponse.json();
     const bwaResult = await bwaResponse.json();
     const taxDocsResult = await taxDocsResponse.json();
+    const ignoreRulesResult = await ignoreRulesResponse.json();
     setAssignmentUnits(assignmentsResult.assignment_units ?? []);
     setSupplierRules(suppliersResult.supplier_rules ?? []);
     setExtractionCapabilities(capabilitiesResult.capabilities ?? []);
     setAccountingRules(accountingResult.accounting_rules ?? []);
     setBwaImports(bwaResult.bwa_imports ?? []);
     setTaxSupportingDocuments(taxDocsResult.tax_supporting_documents ?? []);
+    setDocumentIgnoreRules(ignoreRulesResult.document_ignore_rules ?? []);
   }, [apiFetch, tenantId]);
 
   useEffect(() => {
@@ -5153,6 +5179,26 @@ function MasterdataAdmin({
     await loadMasterdata();
     setMessageTone("notice");
     setMessage("Lieferantenregel aktualisiert.");
+  }
+
+  async function updateDocumentIgnoreRule(rule, payload) {
+    const response = await apiFetch(`/masterdata/document-ignore-rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        is_active: rule.is_active,
+        ...payload,
+      }),
+    });
+    if (!response.ok) {
+      const apiError = await readApiError(response, "Ignorierregel konnte nicht aktualisiert werden");
+      setMessageTone("error");
+      setMessage(apiError.message);
+      return;
+    }
+    await loadMasterdata();
+    setMessageTone("notice");
+    setMessage("Ignorierregel aktualisiert.");
   }
 
   function startSupplierEdit(rule) {
@@ -5769,6 +5815,53 @@ function MasterdataAdmin({
             {!filteredExtractionCapabilities.length ? (
               <div className="data-row empty-row">
                 <span>Keine Rechnungssteller für diese Auswahl gefunden.</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Einlesen und Extraktion</p>
+              <h3>Ignorierregeln</h3>
+            </div>
+            <StatusPill value={`${documentIgnoreRules.length} Regeln`} tone={documentIgnoreRules.length ? "green" : "gray"} />
+          </div>
+          <p className="form-hint">
+            Aktive Muster blenden passende Dateien beim Upload oder E-Mail-Import automatisch aus der Review-Queue aus. Deaktivieren stoppt das Ignorieren für künftige Eingänge.
+          </p>
+          <div className="data-table ignore-rules-table">
+            <div className="data-row data-head">
+              <span>Muster im Dateinamen</span>
+              <span>Modus</span>
+              <span>Status</span>
+              <span>Aktion</span>
+            </div>
+            {documentIgnoreRules.map((rule) => (
+              <div className="data-row" key={rule.id}>
+                <strong>{rule.match_text}</strong>
+                <span>{rule.match_mode === "filename_contains" ? "Dateiname enthält" : rule.match_mode}</span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={rule.is_active}
+                    onChange={(event) => updateDocumentIgnoreRule(rule, { is_active: event.target.checked })}
+                  />
+                  <span>{rule.is_active ? "aktiv" : "inaktiv"}</span>
+                </label>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => updateDocumentIgnoreRule(rule, { is_active: !rule.is_active })}
+                >
+                  {rule.is_active ? "Deaktivieren" : "Aktivieren"}
+                </button>
+              </div>
+            ))}
+            {!documentIgnoreRules.length ? (
+              <div className="data-row empty-row">
+                <span>Noch keine dauerhaften Ignoriermuster angelegt.</span>
               </div>
             ) : null}
           </div>
@@ -7443,6 +7536,18 @@ function formatPdfTextSource(source) {
     default:
       return source || "";
   }
+}
+
+function suggestDocumentIgnorePattern(document) {
+  const filename = String(document?.original_filename || document?.normalized_filename || "").replace(/\.[^.]+$/, "");
+  const listMatch = filename.match(/(?:Benefitliste|Bestellliste)-([A-Z0-9]+)/i);
+  if (listMatch?.[1]) return `liste-${listMatch[1]}`;
+  const firstWord = filename.match(/^[A-Za-zÄÖÜäöüß]{4,}/u)?.[0];
+  if (firstWord) return firstWord;
+  const meaningfulPart = filename
+    .split(/[\s,_-]+/)
+    .find((part) => part.length >= 4 && /[A-Za-zÄÖÜäöüß]/u.test(part));
+  return meaningfulPart || filename.slice(0, 60);
 }
 
 function problemExtractionReasons(document) {

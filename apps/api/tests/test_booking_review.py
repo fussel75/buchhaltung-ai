@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import ANY, call, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 from fastapi import HTTPException, UploadFile
@@ -103,6 +103,71 @@ class DocumentIgnoreTests(TestCase):
         ignore_document.assert_called_once_with(document_id, actor="admin@example.test")
         self.assertEqual(result["status"], "ignored")
         self.assertEqual(result["document"]["status"], "ignored")
+
+    def test_ignore_route_can_create_persistent_rule(self):
+        document_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"email": "admin@example.test", "role": "admin"}))
+        document = {
+            "id": str(document_id),
+            "tenant_id": "demo-mandant",
+            "original_filename": "Benefitliste-SU01764-26-05.pdf",
+            "status": "extracted",
+            "processing_job_id": None,
+            "processing_started_at": None,
+        }
+        ignored = {**document, "status": "ignored"}
+        rule = {
+            "id": str(uuid4()),
+            "tenant_id": "demo-mandant",
+            "match_text": "liste-SU01764",
+            "match_mode": "filename_contains",
+            "is_active": True,
+        }
+        payload = documents_route.DocumentIgnoreRequest(remember_similar=True, match_text="liste-SU01764")
+
+        with (
+            patch.object(documents_route, "require_document_access", side_effect=[document, ignored]) as require_access,
+            patch.object(documents_route, "upsert_document_ignore_rule", return_value=rule) as upsert_rule,
+            patch.object(documents_route, "apply_document_ignore_rule", return_value=3) as apply_rule,
+        ):
+            result = documents_route.ignore_review_document(document_id, request, payload)
+
+        self.assertEqual(require_access.call_count, 2)
+        upsert_rule.assert_called_once_with(
+            tenant_id="demo-mandant",
+            match_text="liste-SU01764",
+            actor="admin@example.test",
+            description="Aus Review-Queue erstellt",
+        )
+        apply_rule.assert_called_once_with(
+            tenant_id="demo-mandant",
+            rule_id=UUID(rule["id"]),
+            actor="admin@example.test",
+        )
+        self.assertEqual(result["ignore_rule"], rule)
+        self.assertEqual(result["ignored_count"], 3)
+
+    def test_document_ignore_rule_toggle_route(self):
+        rule_id = uuid4()
+        request = SimpleNamespace(state=SimpleNamespace(user={"email": "admin@example.test", "role": "admin"}))
+        payload = masterdata_route.DocumentIgnoreRuleUpdateRequest(is_active=False)
+        rule = {
+            "id": str(rule_id),
+            "tenant_id": "demo-mandant",
+            "match_text": "liste-SU01764",
+            "match_mode": "filename_contains",
+            "is_active": False,
+        }
+
+        with (
+            patch.object(masterdata_route, "require_admin") as require_admin,
+            patch.object(masterdata_route, "update_document_ignore_rule", return_value=rule) as update_rule,
+        ):
+            result = masterdata_route.patch_document_ignore_rule(rule_id, payload, request)
+
+        require_admin.assert_called_once_with(request)
+        update_rule.assert_called_once_with(rule_id=rule_id, is_active=False, actor="admin@example.test")
+        self.assertEqual(result["document_ignore_rule"], rule)
 
 
 class TenantProfileTests(TestCase):

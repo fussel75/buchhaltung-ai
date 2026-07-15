@@ -11,6 +11,7 @@ from app.services.database import (
     create_accounting_rule,
     create_assignment_unit,
     create_bwa_import,
+    list_document_ignore_rules,
     create_supplier_rule,
     ensure_tenant_profile,
     get_tenant_profile,
@@ -22,6 +23,7 @@ from app.services.database import (
     tenant_profile_template,
     update_accounting_rule,
     update_assignment_unit,
+    update_document_ignore_rule,
     update_supplier_rule,
     upsert_tenant_profile,
 )
@@ -92,6 +94,10 @@ class SupplierRuleRequest(BaseModel):
         if invalid:
             raise ValueError(f"Unbekannte Kostenart: {', '.join(invalid)}")
         return value
+
+
+class DocumentIgnoreRuleUpdateRequest(BaseModel):
+    is_active: bool
 
 
 class AccountingRuleRequest(BaseModel):
@@ -411,6 +417,33 @@ def get_supplier_rules(
 ) -> dict:
     require_admin(request)
     return {"supplier_rules": list_supplier_rules(_normalize_tenant_id(tenant_id))}
+
+
+@router.get("/document-ignore-rules")
+def get_document_ignore_rules(
+    request: Request,
+    tenant_id: str = Query("demo-mandant", min_length=1),
+) -> dict:
+    require_admin(request)
+    return {"document_ignore_rules": list_document_ignore_rules(_normalize_tenant_id(tenant_id))}
+
+
+@router.patch("/document-ignore-rules/{rule_id}")
+def patch_document_ignore_rule(
+    rule_id: UUID,
+    payload: DocumentIgnoreRuleUpdateRequest,
+    request: Request,
+) -> dict:
+    require_admin(request)
+    user = getattr(request.state, "user", None) or {}
+    rule = update_document_ignore_rule(
+        rule_id=rule_id,
+        is_active=payload.is_active,
+        actor=user.get("email") or "system",
+    )
+    if not rule:
+        raise HTTPException(status_code=404, detail="document ignore rule not found")
+    return {"document_ignore_rule": rule}
 
 
 @router.get("/extraction-capabilities")

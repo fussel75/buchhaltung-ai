@@ -292,6 +292,26 @@ def init_database() -> None:
             )
             cursor.execute(
                 """
+                create table if not exists tenant_document_ignore_rules (
+                    id uuid primary key,
+                    tenant_id text not null,
+                    match_text text not null,
+                    match_mode text not null default 'filename_contains',
+                    description text,
+                    is_active boolean not null default true,
+                    created_at timestamptz not null,
+                    updated_at timestamptz not null
+                )
+                """
+            )
+            cursor.execute(
+                """
+                create index if not exists tenant_document_ignore_rules_tenant_idx
+                    on tenant_document_ignore_rules (tenant_id, is_active)
+                """
+            )
+            cursor.execute(
+                """
                 create table if not exists tenant_accounting_rules (
                     id uuid primary key,
                     tenant_id text not null,
@@ -424,6 +444,8 @@ def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict
     document_id = uuid4()
     audit_event_type = "document.uploaded"
     audit_document_id: UUID | None = None
+    matching_ignore_rule = find_document_ignore_rule_for_filename(tenant_id, stored.original_filename)
+    initial_status = "ignored" if matching_ignore_rule else "review_pending"
 
     with _connect() as connection:
         with connection.cursor() as cursor:
@@ -442,7 +464,7 @@ def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict
                     created_at,
                     updated_at
                 )
-                values (%s, %s, %s, %s, null, %s, %s, %s, 'review_pending', %s, %s)
+                values (%s, %s, %s, %s, null, %s, %s, %s, %s, %s, %s)
                 on conflict (tenant_id, sha256) do nothing
                 returning *
                 """,
@@ -454,6 +476,7 @@ def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict
                     stored.sha256,
                     stored.size_bytes,
                     str(stored.storage_path),
+                    initial_status,
                     now,
                     now,
                 ),
@@ -483,9 +506,14 @@ def create_document_record(tenant_id: str, stored: StoredDocument) -> tuple[dict
 
     insert_audit_event(
         tenant_id=tenant_id,
-        event_type=audit_event_type,
+        event_type="document.ignored_by_rule" if inserted and matching_ignore_rule else audit_event_type,
         document_id=audit_document_id,
-        details={"sha256": stored.sha256, "original_filename": stored.original_filename},
+        details={
+            "sha256": stored.sha256,
+            "original_filename": stored.original_filename,
+            "ignore_rule_id": matching_ignore_rule["id"] if inserted and matching_ignore_rule else None,
+            "ignore_match_text": matching_ignore_rule["match_text"] if inserted and matching_ignore_rule else None,
+        },
     )
     return document, is_duplicate
 
@@ -692,6 +720,177 @@ def ignore_document(document_id: UUID, actor: str = "system") -> dict[str, Any] 
             )
 
     return get_document(document_id)
+
+
+def list_document_ignore_rules(tenant_id: str) -> list[dict[str, Any]]:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_document_ignore_rules
+                where tenant_id = %s
+                order by is_active desc, match_text asc
+                """,
+                (tenant_id,),
+            )
+            return [_serialize_document_ignore_rule(row) for row in cursor.fetchall()]
+
+
+def find_document_ignore_rule_for_filename(tenant_id: str, filename: str | None) -> dict[str, Any] | None:
+    haystack = _normalize_match_text(filename or "")
+    if not haystack:
+        return None
+    for rule in list_document_ignore_rules(tenant_id):
+        if not rule["is_active"]:
+            continue
+        if rule["match_mode"] == "filename_contains" and _normalize_match_text(rule["match_text"]) in haystack:
+            return rule
+    return None
+
+
+def upsert_document_ignore_rule(
+    tenant_id: str,
+    match_text: str,
+    actor: str = "system",
+    match_mode: str = "filename_contains",
+    description: str | None = None,
+) -> dict[str, Any]:
+    normalized_match = match_text.strip()
+    if len(normalized_match) < 3:
+        raise ValueError("ignore rule match_text too short")
+    if match_mode != "filename_contains":
+        raise ValueError("unsupported ignore rule match_mode")
+
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_document_ignore_rules
+                where tenant_id = %s
+                    and match_mode = %s
+                    and lower(match_text) = lower(%s)
+                limit 1
+                """,
+                (tenant_id, match_mode, normalized_match),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute(
+                    """
+                    update tenant_document_ignore_rules
+                    set is_active = true,
+                        description = coalesce(%s, description),
+                        updated_at = %s
+                    where id = %s
+                    returning *
+                    """,
+                    (description.strip() if description else None, now, existing["id"]),
+                )
+                rule = _serialize_document_ignore_rule(cursor.fetchone())
+            else:
+                cursor.execute(
+                    """
+                    insert into tenant_document_ignore_rules (
+                        id, tenant_id, match_text, match_mode, description,
+                        is_active, created_at, updated_at
+                    )
+                    values (%s, %s, %s, %s, %s, true, %s, %s)
+                    returning *
+                    """,
+                    (
+                        uuid4(),
+                        tenant_id,
+                        normalized_match,
+                        match_mode,
+                        description.strip() if description else None,
+                        now,
+                        now,
+                    ),
+                )
+                rule = _serialize_document_ignore_rule(cursor.fetchone())
+
+    insert_audit_event(
+        tenant_id=tenant_id,
+        event_type="document_ignore_rule.upserted",
+        actor=actor,
+        details={"match_text": rule["match_text"], "match_mode": rule["match_mode"]},
+    )
+    return rule
+
+
+def update_document_ignore_rule(rule_id: UUID, is_active: bool, actor: str = "system") -> dict[str, Any] | None:
+    now = datetime.now(UTC)
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                update tenant_document_ignore_rules
+                set is_active = %s,
+                    updated_at = %s
+                where id = %s
+                returning *
+                """,
+                (is_active, now, rule_id),
+            )
+            row = cursor.fetchone()
+            rule = _serialize_document_ignore_rule(row) if row else None
+
+    if rule:
+        insert_audit_event(
+            tenant_id=rule["tenant_id"],
+            event_type="document_ignore_rule.updated",
+            actor=actor,
+            details={"match_text": rule["match_text"], "is_active": rule["is_active"]},
+        )
+    return rule
+
+
+def apply_document_ignore_rule(tenant_id: str, rule_id: UUID, actor: str = "system") -> int:
+    with _connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select *
+                from tenant_document_ignore_rules
+                where id = %s and tenant_id = %s and is_active = true
+                limit 1
+                """,
+                (rule_id, tenant_id),
+            )
+            rule_row = cursor.fetchone()
+            if not rule_row:
+                return 0
+            rule = _serialize_document_ignore_rule(rule_row)
+            match_pattern = f"%{rule['match_text'].lower()}%"
+            now = datetime.now(UTC)
+            cursor.execute(
+                """
+                update documents
+                set status = 'ignored',
+                    processing_job_id = null,
+                    processing_started_at = null,
+                    updated_at = %s
+                where tenant_id = %s
+                    and status not in ('ignored', 'review_approved')
+                    and (
+                        lower(original_filename) like %s
+                        or lower(coalesce(normalized_filename, '')) like %s
+                    )
+                """,
+                (now, tenant_id, match_pattern, match_pattern),
+            )
+            ignored_count = cursor.rowcount or 0
+
+    insert_audit_event(
+        tenant_id=tenant_id,
+        event_type="document_ignore_rule.applied",
+        actor=actor,
+        details={"rule_id": str(rule_id), "match_text": rule["match_text"], "ignored_count": ignored_count},
+    )
+    return ignored_count
 
 
 class BulkJobConflictError(ValueError):
@@ -4560,6 +4759,19 @@ def _serialize_supplier_rule(row: dict[str, Any]) -> dict[str, Any]:
         "default_cost_category": row["default_cost_category"],
         "default_cost_categories": cost_categories,
         "default_assignment_code": row["default_assignment_code"],
+        "is_active": row["is_active"],
+        "created_at": _serialize_date(row["created_at"]),
+        "updated_at": _serialize_date(row["updated_at"]),
+    }
+
+
+def _serialize_document_ignore_rule(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "tenant_id": row["tenant_id"],
+        "match_text": row["match_text"],
+        "match_mode": row["match_mode"],
+        "description": row.get("description"),
         "is_active": row["is_active"],
         "created_at": _serialize_date(row["created_at"]),
         "updated_at": _serialize_date(row["updated_at"]),
