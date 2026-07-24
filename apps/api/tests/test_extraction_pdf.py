@@ -894,6 +894,7 @@ class ExtractionPdfTests(TestCase):
             result = _build_pdf_text_result(document)
 
         self.assertEqual(result["source"], "pdf_scan_filename_rules")
+        self.assertEqual(result["document_type"], "fuel_receipt")
         self.assertEqual(result["supplier_name"], "Tankstelle")
         self.assertEqual(result["invoice_number"], "HH-FB 814 2025-12-10")
         self.assertEqual(result["customer_reference"], "HH-FB 814")
@@ -931,6 +932,7 @@ class ExtractionPdfTests(TestCase):
             result = _build_pdf_text_result(document)
 
         self.assertEqual(result["invoice_number"], "HH-FB 4753 2025-11-25")
+        self.assertEqual(result["document_type"], "fuel_receipt")
         self.assertEqual(result["customer_reference"], "HH-FB 4753")
         self.assertEqual(result["driver"], "PhS")
         self.assertEqual(result["invoice_date"], "2025-11-25")
@@ -963,6 +965,7 @@ class ExtractionPdfTests(TestCase):
             result = _build_pdf_text_result(document)
 
         self.assertEqual(result["source"], "pdf_scan_filename_rules")
+        self.assertEqual(result["document_type"], "fuel_receipt")
         self.assertEqual(result["supplier_name"], "Aral")
         self.assertEqual(result["invoice_number"], "HH-FB 236 2026-06-30")
         self.assertEqual(result["vehicle"], "HH-FB 236")

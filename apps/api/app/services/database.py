@@ -2679,7 +2679,8 @@ def _booking_suggestions_from_extraction(document: dict[str, Any], extraction: d
     raw_result = extraction.get("raw_result") or {}
     if _is_non_booking_document(raw_result):
         return []
-    booking_type = raw_result.get("document_type") or "incoming_invoice"
+    document_type = raw_result.get("document_type") or "incoming_invoice"
+    booking_type = "credit_note" if document_type == "credit_note" else "incoming_invoice"
     currency = extraction.get("currency") or "EUR"
     cost_category = raw_result.get("cost_category")
     description = raw_result.get("item_summary") or extraction.get("supplier_name") or document["original_filename"]
@@ -4375,10 +4376,57 @@ NON_BOOKING_DOCUMENT_TYPES = {
     "reverse_charge_certificate",
 }
 
+FUEL_RECEIPT_DOCUMENT_TYPES = {"fuel_receipt"}
+
+INVOICE_REQUIRED_PROBLEM_REASONS = {
+    "Rechnungsnummer fehlt",
+    "Datum fehlt",
+    "Brutto fehlt",
+}
+
+ASSIGNMENT_PROBLEM_REASONS = {
+    "Zuordnung ungeklärt",
+    "Zuordnung prüfen",
+}
+
+FUEL_RECEIPT_IGNORED_PROBLEM_REASONS = {
+    "Rechnungsnummer fehlt",
+    "Zuordnung ungeklärt",
+    "Zuordnung prüfen",
+    "Lieferant ungeklärt",
+}
+
 
 def _is_non_booking_document(raw_result: dict[str, Any] | None) -> bool:
     raw_result = raw_result or {}
     return bool(raw_result.get("supporting_document")) or raw_result.get("document_type") in NON_BOOKING_DOCUMENT_TYPES
+
+
+def _is_fuel_receipt_document(raw_result: dict[str, Any] | None) -> bool:
+    raw_result = raw_result or {}
+    return raw_result.get("document_type") in FUEL_RECEIPT_DOCUMENT_TYPES
+
+
+def _problem_reason_key(reason: str) -> str:
+    if reason.startswith("Sicherheit "):
+        return "Sicherheit"
+    if reason.endswith(" Hinweis") or reason.endswith(" Hinweise"):
+        return "Hinweise"
+    return reason
+
+
+def _filter_problem_reasons_for_document_type(
+    reasons: list[str],
+    raw_result: dict[str, Any] | None,
+) -> list[str]:
+    raw_result = raw_result or {}
+    if _is_non_booking_document(raw_result):
+        ignored = INVOICE_REQUIRED_PROBLEM_REASONS | ASSIGNMENT_PROBLEM_REASONS | {"Lieferant ungeklärt"}
+    elif _is_fuel_receipt_document(raw_result):
+        ignored = FUEL_RECEIPT_IGNORED_PROBLEM_REASONS
+    else:
+        ignored = set()
+    return [reason for reason in reasons if _problem_reason_key(reason) not in ignored]
 
 
 def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] | None = None) -> list[str]:
@@ -4409,7 +4457,25 @@ def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] 
         assignment_problem = _assignment_match_problem_reason(raw_result.get("assignment_match"))
         if assignment_problem:
             reasons.append(assignment_problem)
-        return reasons
+        return _filter_problem_reasons_for_document_type(reasons, raw_result)
+
+    if _is_fuel_receipt_document(raw_result):
+        if source == "pdf_unreadable":
+            reasons.append("PDF nicht lesbar")
+        confidence = row.get("confidence")
+        if confidence is not None:
+            confidence_value = Decimal(str(confidence))
+            if confidence_value < Decimal("0.80"):
+                reasons.append(f"Sicherheit {int((confidence_value * 100).quantize(Decimal('1')))} %")
+        warnings = row.get("warnings") or []
+        if warnings:
+            reason_label = "Hinweis" if len(warnings) == 1 else "Hinweise"
+            reasons.append(f"{len(warnings)} {reason_label}")
+        if not row.get("invoice_date"):
+            reasons.append("Datum fehlt")
+        if row.get("gross_amount") in (None, ""):
+            reasons.append("Brutto fehlt")
+        return _filter_problem_reasons_for_document_type(reasons, raw_result)
 
     if source == "mock":
         reasons.append("Mock-Erkennung")
@@ -4443,7 +4509,7 @@ def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] 
     assignment_problem = _assignment_match_problem_reason(raw_result.get("assignment_match"))
     if assignment_problem:
         reasons.append(assignment_problem)
-    return reasons
+    return _filter_problem_reasons_for_document_type(reasons, raw_result)
 
 
 def _assignment_match_problem_reason(match_payload: dict[str, Any] | None) -> str | None:
@@ -4475,7 +4541,10 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
     raw_result = extraction.get("raw_result") or {}
     is_non_booking = _is_non_booking_document(raw_result)
     ai_extraction = raw_result.get("ai_extraction") if isinstance(raw_result.get("ai_extraction"), dict) else {}
-    problem_reasons = list(extraction.get("problem_reasons") or [])
+    problem_reasons = _filter_problem_reasons_for_document_type(
+        list(extraction.get("problem_reasons") or []),
+        raw_result,
+    )
     assignment_type = raw_result.get("assignment_type")
     allocation_lines = raw_result.get("allocation_lines") or []
     assignment_code = raw_result.get("assignment_code") or raw_result.get("project_code")

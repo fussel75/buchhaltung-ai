@@ -2520,6 +2520,37 @@ class BookingSuggestionTests(TestCase):
         self.assertNotIn("Rechnungsnummer fehlt", health["problem_reasons"])
         self.assertNotIn("Brutto fehlt", health["problem_reasons"])
 
+    def test_document_extraction_health_ignores_assignment_and_invoice_number_for_fuel_receipts(self):
+        health = database_service.document_extraction_health(
+            {
+                "id": str(uuid4()),
+                "original_filename": "HH-FB 236, Bareinlage, FS, 2026-05-29.pdf",
+                "normalized_filename": "HH-FB 236, Bareinlage, FS, 2026-05-29.pdf",
+                "extraction": {
+                    "supplier_name": "Tankstelle",
+                    "invoice_number": None,
+                    "invoice_date": "2026-05-29",
+                    "gross_amount": None,
+                    "problem_reasons": [
+                        "Rechnungsnummer fehlt",
+                        "Zuordnung ungeklärt",
+                        "Brutto fehlt",
+                    ],
+                    "raw_result": {
+                        "document_type": "fuel_receipt",
+                        "assignment_type": "general_cost",
+                        "cost_category": "fuel_vehicle",
+                    },
+                },
+            }
+        )
+
+        self.assertFalse(health["is_assignment_unresolved"])
+        self.assertFalse(health["needs_assignment_review"])
+        self.assertNotIn("Rechnungsnummer fehlt", health["problem_reasons"])
+        self.assertNotIn("Zuordnung ungeklärt", health["problem_reasons"])
+        self.assertIn("Brutto fehlt", health["problem_reasons"])
+
     def test_booking_suggestions_skip_non_booking_documents(self):
         suggestions = database_service._booking_suggestions_from_extraction(
             {"original_filename": "F-2026-67-Aufmaß.pdf"},
@@ -2534,6 +2565,30 @@ class BookingSuggestionTests(TestCase):
         )
 
         self.assertEqual(suggestions, [])
+
+    def test_booking_suggestions_book_fuel_receipts_as_incoming_invoice(self):
+        suggestions = database_service._booking_suggestions_from_extraction(
+            {"original_filename": "HH-FB 236, Bareinlage, FS, 2026-05-29.pdf"},
+            {
+                "supplier_name": "Tankstelle",
+                "invoice_date": "2026-05-29",
+                "net_amount": "10.00",
+                "tax_amount": "1.90",
+                "gross_amount": "11.90",
+                "currency": "EUR",
+                "raw_result": {
+                    "document_type": "fuel_receipt",
+                    "assignment_type": "general_cost",
+                    "cost_category": "fuel_vehicle",
+                    "item_summary": "Diesel",
+                },
+            },
+        )
+
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["booking_type"], "incoming_invoice")
+        self.assertEqual(suggestions[0]["cost_category"], "fuel_vehicle")
+        self.assertIsNone(suggestions[0]["assignment_kind"])
 
     def test_reextraction_summary_counts_assignment_improvements(self):
         before = {
@@ -4470,7 +4525,7 @@ class BookingSuggestionTests(TestCase):
                 "confidence": Decimal("0.88"),
                 "warnings": [],
                 "raw_result": {
-                    "document_type": "incoming_invoice",
+                    "document_type": "fuel_receipt",
                     "assignment_type": "general_cost",
                     "cost_category": "fuel_vehicle",
                 },

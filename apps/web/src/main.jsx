@@ -7217,6 +7217,10 @@ function isSupportingDocument(document) {
   return Boolean(raw.supporting_document) || SUPPORTING_DOCUMENT_TYPES.has(raw.document_type);
 }
 
+function isFuelReceiptDocument(document) {
+  return document?.extraction?.raw_result?.document_type === "fuel_receipt";
+}
+
 function isTaxSupportingDocumentType(documentType) {
   return documentType === "tax_exemption_certificate" || documentType === "reverse_charge_certificate";
 }
@@ -7602,8 +7606,9 @@ function problemExtractionReasons(document) {
   const extraction = document?.extraction;
   if (!extraction) return [];
   const supportingDocument = isSupportingDocument(document);
+  const fuelReceipt = isFuelReceiptDocument(document);
   if (Array.isArray(extraction.problem_reasons) && extraction.problem_reasons.length) {
-    return supportingDocument ? filterInvoiceRequiredProblemReasons(extraction.problem_reasons) : extraction.problem_reasons;
+    return filterProblemReasonsForDocumentType(document, extraction.problem_reasons);
   }
   const reasons = [];
   const confidence = Number(extraction.confidence);
@@ -7616,7 +7621,7 @@ function problemExtractionReasons(document) {
   if (source === "pdf_unreadable") {
     reasons.push("PDF nicht lesbar");
   }
-  if (supplierNeedsReview(extraction.supplier_name, extraction.invoice_number)) {
+  if (!supportingDocument && !fuelReceipt && supplierNeedsReview(extraction.supplier_name, extraction.invoice_number)) {
     reasons.push("Lieferant ungeklärt");
   }
   if (!Number.isNaN(confidence) && confidence < 0.8) {
@@ -7625,7 +7630,7 @@ function problemExtractionReasons(document) {
   if (extraction.warnings?.length) {
     reasons.push(`${extraction.warnings.length} ${extraction.warnings.length === 1 ? "Hinweis" : "Hinweise"}`);
   }
-  if (!supportingDocument) {
+  if (!supportingDocument && !fuelReceipt) {
     if (!extraction.invoice_number) {
       reasons.push("Rechnungsnummer fehlt");
     }
@@ -7637,21 +7642,43 @@ function problemExtractionReasons(document) {
     }
   }
   if (
-    rawResult.assignment_type === "assignment_unresolved"
-    || (rawResult.delivery_address && !rawResult.assignment_code && !rawResult.project_number)
+    !supportingDocument
+    && !fuelReceipt
+    && (
+      rawResult.assignment_type === "assignment_unresolved"
+      || (rawResult.delivery_address && !rawResult.assignment_code && !rawResult.project_number)
+    )
   ) {
     reasons.push("Zuordnung ungeklärt");
   }
-  if (assignmentMatchNeedsReview(rawResult.assignment_match)) {
+  if (!supportingDocument && !fuelReceipt && assignmentMatchNeedsReview(rawResult.assignment_match)) {
     reasons.push("Zuordnung prüfen");
   }
 
-  return reasons;
+  return filterProblemReasonsForDocumentType(document, reasons);
 }
 
-function filterInvoiceRequiredProblemReasons(reasons) {
-  const invoiceRequiredReasons = new Set(["Rechnungsnummer fehlt", "Datum fehlt", "Brutto fehlt"]);
-  return reasons.filter((reason) => !invoiceRequiredReasons.has(problemExtractionSummaryKey(reason)));
+function filterProblemReasonsForDocumentType(document, reasons) {
+  const ignoredReasons = new Set();
+  if (isSupportingDocument(document)) {
+    [
+      "Rechnungsnummer fehlt",
+      "Datum fehlt",
+      "Brutto fehlt",
+      "Zuordnung ungeklärt",
+      "Zuordnung prüfen",
+      "Lieferant ungeklärt",
+    ].forEach((reason) => ignoredReasons.add(reason));
+  }
+  if (isFuelReceiptDocument(document)) {
+    [
+      "Rechnungsnummer fehlt",
+      "Zuordnung ungeklärt",
+      "Zuordnung prüfen",
+      "Lieferant ungeklärt",
+    ].forEach((reason) => ignoredReasons.add(reason));
+  }
+  return reasons.filter((reason) => !ignoredReasons.has(problemExtractionSummaryKey(reason)));
 }
 
 function isProblemExtraction(document) {

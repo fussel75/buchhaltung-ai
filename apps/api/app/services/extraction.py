@@ -1542,7 +1542,7 @@ def _build_tank_receipt_result(document: dict, text: str) -> dict | None:
         "discount_gross_amount": None,
         "discounted_payable_amount": None,
         "is_credit_note": False,
-        "document_type": "incoming_invoice",
+        "document_type": "fuel_receipt",
         "payment_terms": _payment_terms(
             gross_amount=gross_amount,
             due_date=invoice_date,
