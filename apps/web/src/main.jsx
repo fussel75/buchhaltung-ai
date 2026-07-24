@@ -14,6 +14,16 @@ const COST_CATEGORY_OPTIONS = [
   ["security_subscription", "Überwachung/Abo"],
   ["general_overhead", "Sonstige Gemeinkosten"],
 ];
+const ASSIGNMENT_KIND_OPTIONS = [
+  ["construction_project", "Bauvorhaben"],
+  ["location", "Standort"],
+  ["construction_or_dropoff_site", "Bauvorhaben / Stellplatz"],
+  ["general_cost", "Allgemeine Kosten"],
+  ["cost_object", "Kostenobjekt"],
+  ["vehicle", "Fahrzeug"],
+  ["subscription", "Abo/Vertrag"],
+  ["department", "Bereich"],
+];
 
 function resolveApiBaseUrl(configuredUrl) {
   if (typeof window === "undefined") return configuredUrl;
@@ -3038,6 +3048,10 @@ function ExtractionEditForm({
   function updateField(field, value) {
     setForm((current) => {
       const next = { ...current, [field]: value };
+      if (field === "assignment_kind" && value === "general_cost") {
+        next.assignment_code = "";
+        next.project_number = "";
+      }
       if (field === "assignment_code") {
         const assignment = findAssignmentOption(assignmentOptions, "assignment_code", value);
         if (assignment) {
@@ -3118,6 +3132,8 @@ function ExtractionEditForm({
   const certificateValidFrom = form.certificate_valid_from || inputDateValue(rawResult.certificate_valid_from);
   const certificateTaxNumber = form.certificate_tax_number || rawResult.certificate_tax_number || "";
   const certificateVatId = form.certificate_vat_id || rawResult.certificate_vat_id || "";
+  const isGeneralCostAssignment = form.assignment_kind === "general_cost";
+  const assignmentKindHelp = assignmentKindHelpText(form.assignment_kind, tenantProfile);
 
   return (
     <form className="extraction-edit-form" onSubmit={submit}>
@@ -3214,7 +3230,7 @@ function ExtractionEditForm({
             onChange={(event) => setAssignmentSearch(event.target.value)}
             onKeyDown={handleAssignmentKeyDown}
             placeholder="Projekt suchen: Nummer, Name, Adresse, Bauherr"
-            disabled={isApproved || assignmentOptions.length === 0}
+            disabled={isApproved || isGeneralCostAssignment || assignmentOptions.length === 0}
           />
           <div
             className="assignment-combobox"
@@ -3234,7 +3250,7 @@ function ExtractionEditForm({
                     ref={(element) => {
                       if (element) assignmentOptionRefs.current[assignment.id] = element;
                     }}
-                    disabled={isApproved}
+                    disabled={isApproved || isGeneralCostAssignment}
                     role="option"
                     aria-selected={isSelected}
                   >
@@ -3249,12 +3265,14 @@ function ExtractionEditForm({
           </div>
           <small>
             {assignmentOptions.length
-              ? `${filteredAssignmentOptions.length} von ${assignmentOptions.length} Projekten sichtbar. Setzt Projektnr., ${tenantProfile.assignment_code_label} und Zuordnungsart gemeinsam.`
+              ? isGeneralCostAssignment
+                ? "Bei Allgemeinen Kosten bleibt das Projekt bewusst leer."
+                : `${filteredAssignmentOptions.length} von ${assignmentOptions.length} Projekten sichtbar. Setzt Projektnr., ${tenantProfile.assignment_code_label} und Zuordnungsart gemeinsam.`
               : "Noch keine Projektstammdaten geladen."}
           </small>
         </FormField>
         <FormField label={tenantProfile.assignment_code_label}>
-          <input name="assignment_code" list={`assignment-code-options-${document.id}`} placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved} />
+          <input name="assignment_code" list={`assignment-code-options-${document.id}`} placeholder="z.B. Wewe20" value={form.assignment_code} onChange={(event) => updateField("assignment_code", event.target.value)} disabled={isApproved || isGeneralCostAssignment} />
           <datalist id={`assignment-code-options-${document.id}`}>
             {assignmentOptions.map((assignment) => (
               <option key={`code-${assignment.id}`} value={assignment.review_code}>
@@ -3264,7 +3282,7 @@ function ExtractionEditForm({
           </datalist>
         </FormField>
         <FormField label="Projektnr.">
-          <input name="project_number" list={`project-number-options-${document.id}`} placeholder="z.B. 26-00007" value={form.project_number} onChange={(event) => updateField("project_number", event.target.value)} disabled={isApproved} />
+          <input name="project_number" list={`project-number-options-${document.id}`} placeholder="z.B. 26-00007" value={form.project_number} onChange={(event) => updateField("project_number", event.target.value)} disabled={isApproved || isGeneralCostAssignment} />
           <datalist id={`project-number-options-${document.id}`}>
             {assignmentOptions.filter((assignment) => assignment.project_number).map((assignment) => (
               <option key={`project-${assignment.id}`} value={assignment.project_number}>
@@ -3278,6 +3296,7 @@ function ExtractionEditForm({
             <option value="">-</option>
             <AssignmentKindOptions />
           </select>
+          {assignmentKindHelp ? <small className="field-help">{assignmentKindHelp}</small> : null}
         </FormField>
           </>
         ) : null}
@@ -3352,14 +3371,9 @@ function ExtractionEditForm({
 function AssignmentKindOptions() {
   return (
     <>
-      <option value="construction_project">Bauvorhaben</option>
-      <option value="location">Standort</option>
-      <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
-      <option value="general_cost">Allgemeine Kosten</option>
-      <option value="cost_object">Kostenobjekt</option>
-      <option value="vehicle">Fahrzeug</option>
-      <option value="subscription">Abo/Vertrag</option>
-      <option value="department">Bereich</option>
+      {ASSIGNMENT_KIND_OPTIONS.map(([value, label]) => (
+        <option key={value} value={value}>{label}</option>
+      ))}
     </>
   );
 }
@@ -6443,13 +6457,20 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
   const isLocked = document.status === "review_approved";
 
   function updateDraft(suggestionId, patch) {
-    setDrafts((current) => ({
-      ...current,
-      [suggestionId]: {
+    setDrafts((current) => {
+      const nextDraft = {
         ...current[suggestionId],
         ...patch,
-      },
-    }));
+      };
+      if (patch.assignment_kind === "general_cost") {
+        nextDraft.assignment_code = "";
+        nextDraft.project_number = "";
+      }
+      return {
+        ...current,
+        [suggestionId]: nextDraft,
+      };
+    });
   }
 
   function selectedAssignmentIdForDraft(draft) {
@@ -6491,6 +6512,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
         {suggestions.map((suggestion) => {
           const draft = drafts[suggestion.id] ?? bookingSuggestionDraft(suggestion);
           const isHighlighted = highlightedLineNo && String(suggestion.line_no) === String(highlightedLineNo);
+          const isGeneralCostDraft = draft.assignment_kind === "general_cost";
           return (
             <div
               className={`booking-edit-row${isHighlighted ? " booking-edit-row-highlight" : ""}`}
@@ -6509,10 +6531,10 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                   className="assignment-pick-select"
                   value={selectedAssignmentIdForDraft(draft)}
                   onChange={(event) => applyAssignmentToDraft(suggestion.id, event.target.value)}
-                  disabled={isLocked || assignmentOptions.length === 0}
+                  disabled={isLocked || isGeneralCostDraft || assignmentOptions.length === 0}
                   aria-label={`Projekt aus Stammdaten Zeile ${suggestion.line_no}`}
                 >
-                  <option value="">{assignmentOptions.length ? "Projekt wählen" : "Keine Stammdaten"}</option>
+                  <option value="">{isGeneralCostDraft ? "Kein Projekt" : assignmentOptions.length ? "Projekt wählen" : "Keine Stammdaten"}</option>
                   {assignmentOptions.map((assignment) => (
                     <option key={`booking-assignment-${suggestion.id}-${assignment.id}`} value={assignment.id}>
                       {formatAssignmentPickerLabel(assignment)}
@@ -6522,7 +6544,7 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                 <input
                   value={draft.assignment_code}
                   onChange={(event) => updateDraft(suggestion.id, { assignment_code: event.target.value })}
-                  disabled={isLocked}
+                  disabled={isLocked || isGeneralCostDraft}
                   aria-label={`${tenantProfile.assignment_code_label} Zeile ${suggestion.line_no}`}
                 />
                 <select
@@ -6532,16 +6554,9 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                   aria-label={`Zuordnungsart Zeile ${suggestion.line_no}`}
                 >
                   <option value="">-</option>
-                  <option value="construction_project">Bauvorhaben</option>
-                  <option value="construction_or_dropoff_site">Bauvorhaben / Stellplatz</option>
-                  <option value="location">Standort</option>
-                  <option value="general_cost">Allgemeine Kosten</option>
-                  <option value="cost_object">Kostenobjekt</option>
-                  <option value="vehicle">Fahrzeug</option>
-                  <option value="subscription">Abo/Vertrag</option>
-                  <option value="department">Bereich</option>
+                  <AssignmentKindOptions />
                 </select>
-                <small>Projektnr. {draft.project_number || suggestion.assignment_project_number || "-"}</small>
+                <small>{isGeneralCostDraft ? "Kein Projekt bei Allgemeinen Kosten" : `Projektnr. ${draft.project_number || suggestion.assignment_project_number || "-"}`}</small>
               </div>
               <select
                 value={draft.cost_category}
@@ -7373,6 +7388,22 @@ function formatAssignmentKind(value, tenantProfile = defaultTenantProfile("gener
     department: "Bereich",
   };
   return labels[value] ?? tenantProfile.assignment_label_singular ?? value;
+}
+
+function assignmentKindHelpText(value, tenantProfile = defaultTenantProfile("general")) {
+  const singular = tenantProfile.assignment_label_singular || "Zuordnung";
+  const codeLabel = tenantProfile.assignment_code_label || "Code";
+  const labels = {
+    construction_project: `Direkt einem ${singular} zuordnen, z.B. Material oder Fremdleistung für ein konkretes Bauvorhaben. ${codeLabel} und Projektnr. auswählen.`,
+    construction_or_dropoff_site: "Für Fälle, die entweder auf ein Bauvorhaben oder auf einen Stellplatz/Lagerplatz gehören.",
+    location: "Für Kosten, die zu einem festen Standort gehören, z.B. Studio, Lager oder Niederlassung.",
+    general_cost: "Für zentrale Kosten ohne Projektbezug. Projektfelder bleiben bewusst leer.",
+    cost_object: "Für interne Sammelstellen wie Lager, Kleinprojekte, Werkstatt oder sonstige Kostenobjekte.",
+    vehicle: "Für Tankbelege, Reparaturen, Versicherung oder andere Fahrzeugkosten.",
+    subscription: "Für laufende Verträge wie Software, Hosting, Wartung, Überwachung oder Abo-Leistungen.",
+    department: "Für Abteilungen oder Bereiche wie Büro, Verwaltung, Baustelle oder Vertrieb.",
+  };
+  return labels[value] || "";
 }
 
 function usesProjectNumber(kind) {

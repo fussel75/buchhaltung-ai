@@ -2972,6 +2972,14 @@ code {
   line-height: 1.3;
 }
 
+.field-help {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .extraction-edit-form input,
 .extraction-edit-form select {
   min-height: 36px;
