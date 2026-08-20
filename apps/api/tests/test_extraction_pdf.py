@@ -621,6 +621,30 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["confidence"], Decimal("0.20"))
         self.assertIn("OCR", " ".join(result["warnings"]))
 
+    def test_scanned_freistellung_filename_is_tax_supporting_document(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Freistellung Basri, 2026 02 16, PDF nicht lesbar, 2026-02-16.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "freistellung-basri.pdf",
+            "created_at": "2026-02-16T10:00:00+00:00",
+            "size_bytes": 476933,
+            "sha256": "abcdef123456",
+        }
+
+        with patch.object(extraction_service, "_extract_pdf_text", return_value=""):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["document_type"], "tax_exemption_certificate")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["assignment_type"], "supporting_document")
+        self.assertEqual(result["source"], "pdf_text_certificate_rules")
+        self.assertIsNone(result["gross_amount"])
+        self.assertEqual(
+            result["normalized_filename"],
+            "Nachweis, Freistellungsbescheinigung Bauleistungen, Freistellung Basri, gültig bis ungeklärt.pdf",
+        )
+
     def test_unknown_filename_supplier_is_marked_for_review(self):
         text = """
         Rechnung

@@ -1060,7 +1060,7 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
     if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
-    elif "freistellungsauftrag" in normalized_text or "freistellungsbescheinigung" in normalized_text:
+    elif "freistellungsauftrag" in normalized_text or "freistellungsbescheinigung" in normalized_text or "freistellung" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
     elif "bescheinigungbauleistungen" in normalized_text or "bvfabescheinigungbauleistungen" in normalized_text:
@@ -1155,6 +1155,7 @@ def _looks_like_regular_invoice_before_tax_supporting_document(normalized_text: 
     supporting_filename_markers = (
         "freistellungsbescheinigung",
         "freistellungsauftrag",
+        "freistellung",
         "bescheinigungbauleistungen",
         "bvfabescheinigungbauleistungen",
         "nachweiszursteuerschuldnerschaft",
@@ -1521,6 +1522,8 @@ def _certificate_subject_from_filename(filename: str) -> str:
     cleaned = sub(r"\b(?:Bauvorhaben|BV)\s+ungeklärt,?\s*", "", cleaned, flags=IGNORECASE)
     cleaned = sub(r",?\s*PDF\s+nicht\s+lesbar,?", "", cleaned, flags=IGNORECASE)
     cleaned = sub(r",?\s*ohne\s+Datum,?", "", cleaned, flags=IGNORECASE)
+    cleaned = sub(r"\b\d{4}\s*[-/ ]\s*\d{1,2}\s*[-/ ]\s*\d{1,2}\b", "", cleaned)
+    cleaned = sub(r"\b\d{1,2}\s*[-/. ]\s*\d{1,2}\s*[-/. ]\s*\d{2,4}\b", "", cleaned)
     cleaned = sub(r"\b20\d{2}\s*[-/ ]\s*20\d{2}\b", "", cleaned)
     cleaned = sub(r"\s+", " ", cleaned).strip(" ,-")
     return cleaned or _supplier_from_filename(stem)

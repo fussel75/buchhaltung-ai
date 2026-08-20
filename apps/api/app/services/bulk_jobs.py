@@ -83,7 +83,13 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
 
 def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id: UUID) -> None:
     if action == "extract":
-        run_mock_extraction(document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False)
+        document = get_document(document_id)
+        run_mock_extraction(
+            document_id,
+            processing_job_id=job_id,
+            allow_ai=False,
+            allow_ocr=_should_allow_initial_ocr(document),
+        )
         return
     if action == "reextract":
         run_mock_extraction(document_id, processing_job_id=job_id, force=True, actor=actor, allow_ai=False, allow_ocr=True)
@@ -97,6 +103,28 @@ def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id
             raise ValueError("document with extraction not found")
         return
     raise ValueError("unsupported bulk action")
+
+
+def _should_allow_initial_ocr(document: dict | None) -> bool:
+    if not document:
+        return False
+    filename = str(document.get("original_filename") or "").lower()
+    markers = (
+        "pdf nicht lesbar",
+        "nicht lesbar",
+        "freistellung",
+        "freistellungsbescheinigung",
+        "freistellungsauftrag",
+        "bescheinigung",
+        "nachweis",
+        "steuerbescheid",
+        "kst bescheid",
+        "gewst bescheid",
+        "gewerbesteuer",
+        "tankbeleg",
+        "bareinlage",
+    )
+    return any(marker in filename for marker in markers)
 
 
 def _expected_status(action: str) -> str | list[str]:

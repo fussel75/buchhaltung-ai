@@ -3193,6 +3193,7 @@ class BookingSuggestionTests(TestCase):
         with (
             patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
             patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(first_document_id)}),
+            patch.object(bulk_job_service, "get_document", return_value={"original_filename": "rechnung.pdf"}),
             patch.object(bulk_job_service, "release_document_bulk_claim") as release_claim,
             patch.object(
                 bulk_job_service,
@@ -3220,6 +3221,34 @@ class BookingSuggestionTests(TestCase):
                 call(second_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
             ]
         )
+
+    def test_bulk_initial_extraction_allows_ocr_for_scanned_supporting_documents(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "extract",
+            "status": "running",
+            "items": [{"document_id": str(document_id), "status": "queued"}],
+        }
+        document = {
+            "id": str(document_id),
+            "original_filename": "Freistellung Basri, 2026 02 16, PDF nicht lesbar, 2026-02-16.pdf",
+        }
+
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(document_id)}),
+            patch.object(bulk_job_service, "get_document", return_value=document),
+            patch.object(bulk_job_service, "release_document_bulk_claim"),
+            patch.object(bulk_job_service, "run_mock_extraction") as run_extraction,
+            patch.object(bulk_job_service, "mark_document_bulk_job_item"),
+            patch.object(bulk_job_service, "finish_document_bulk_job"),
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        run_extraction.assert_called_once_with(document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=True)
 
     def test_bulk_reextraction_allows_ocr_for_scanned_problem_documents(self):
         job_id = uuid4()
