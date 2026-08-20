@@ -190,6 +190,41 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["certificate_valid_until"], "2027-12-31")
         self.assertIsNone(result["gross_amount"])
 
+    def test_invoice_with_tax_exemption_note_stays_invoice(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_2600148.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "boehm-rechnung.pdf",
+            "size_bytes": 240000,
+            "sha256": "boehm",
+        }
+        text = """
+        Böhm Malereibetrieb GmbH
+        Rechnung 2600148
+        Kunden Nummer: 12988
+        Projekt-Nummer: 00014/25
+        25.06.2026 Original
+        BV Weseler Weg 20 : Spachtelarbeiten im Dachausbau
+        Nettosumme 3.124,40 €
+        Summe des Nettoabschlages -96,63 €
+        USt. 19 % 575,48 €
+        Rechnungsbetrag 3.603,25 €
+        Handelsregister Hamburg HRA 128641, Umsatzsteuer-Nummer 47/709/00922
+        Freistellungsbescheinigung liegt vor.
+        """
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "incoming_invoice")
+        self.assertFalse(result.get("supporting_document", False))
+        self.assertEqual(result["invoice_number"], "2600148")
+        self.assertEqual(result["supplier_name"], "Böhm Malereibetrieb GmbH")
+
     def test_aufmass_without_invoice_marker_is_project_document(self):
         assignment = {
             "code": "Wewe20",

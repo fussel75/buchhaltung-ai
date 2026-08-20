@@ -1055,6 +1055,8 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
     tax_notice = _build_tax_notice_result(document, text, normalized_text)
     if tax_notice:
         return tax_notice
+    if _looks_like_regular_invoice_before_tax_supporting_document(normalized_text, original_filename):
+        return None
     if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
@@ -1146,6 +1148,36 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
         "normalized_filename": normalized_filename,
         "source": "pdf_text_certificate_rules",
     }
+
+
+def _looks_like_regular_invoice_before_tax_supporting_document(normalized_text: str, original_filename: str) -> bool:
+    filename_text = _compact_search_text(original_filename)
+    supporting_filename_markers = (
+        "freistellungsbescheinigung",
+        "freistellungsauftrag",
+        "bescheinigungbauleistungen",
+        "bvfabescheinigungbauleistungen",
+        "nachweiszursteuerschuldnerschaft",
+        "13bnachweis",
+    )
+    if any(marker in filename_text for marker in supporting_filename_markers):
+        return False
+    if not _looks_like_invoice_document(normalized_text):
+        return False
+    invoice_core_markers = (
+        "rechnungsnummer",
+        "rechnungsnr",
+        "rechnungnr",
+        "kundennummer",
+        "kundennr",
+        "gesamtpreis",
+        "gesamtbrutto",
+        "nettosumme",
+        "nettowert",
+        "mehrwertsteuer",
+        "mwst",
+    )
+    return any(marker in normalized_text for marker in invoice_core_markers)
 
 
 def _build_tax_notice_result(document: dict, text: str, normalized_text: str) -> dict | None:
