@@ -1087,7 +1087,7 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
         or _find_date(text, r"G[üu]ltigkeit mit Ablauf des:\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
         or _certificate_expiry_from_filename(document["original_filename"])
     )
-    tax_number = _find_text(text, r"Steuernummer\s*:?\s*([0-9\s/I-]{8,})")
+    tax_number = _find_tax_number(text)
     vat_id = _find_text(text, r"(DE[0-9]{9})")
     normalized_filename = _normalized_supporting_document_filename(
         certificate_kind=certificate_kind,
@@ -1187,14 +1187,14 @@ def _build_tax_notice_result(document: dict, text: str, normalized_text: str) ->
 
     original_filename = document["original_filename"]
     issuer = _find_text(text, r"(Finanzamt\s+[A-Za-zÄÖÜäöüß -]+)") or "Finanzamt"
-    subject_name = _tax_notice_subject_name(text, original_filename)
+    tax_number = _find_tax_number(f"{text}\n{original_filename}")
+    subject_name = _tax_notice_subject_name(text, original_filename, tax_number=tax_number)
     notice_kind = _tax_notice_kind(normalized_text, original_filename)
     notice_year = _tax_notice_year(text, original_filename)
     issue_date = (
         _find_date(text, r"(?:Datum|Bescheiddatum|vom)\s*:?\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
         or _invoice_date_from_filename(original_filename)
     )
-    tax_number = _find_text(text, r"Steuernummer\s*:?\s*([0-9\s/I-]{8,})")
     normalized_filename = _normalized_tax_notice_filename(
         notice_kind=notice_kind,
         subject_name=subject_name,
@@ -1283,20 +1283,71 @@ def _looks_like_tax_notice(normalized_text: str) -> bool:
     )
 
 
-def _tax_notice_subject_name(text: str, filename: str) -> str:
+def _tax_notice_subject_name(text: str, filename: str, tax_number: str | None = None) -> str:
     combined = sub(r"\s+", " ", f"{text} {filename}")
     patterns = (
         r"(FriStD\s*-?\s*Bau\s+Verwaltungs\s+GmbH)",
         r"(FriStD\s*-?\s*Bau\s+ZuB\s+GmbH\s*&\s*Co\.?\s*KG)",
+        r"(FriStD\s*-?\s*Bau\s+ZuB\s+GmbH\s+Co\.?\s*KG)",
     )
     for pattern in patterns:
         match = search(pattern, combined, IGNORECASE)
         if match:
-            return sub(r"\s+", " ", match.group(1)).replace(" - ", "-").strip()
+            return _normalize_fristd_entity_name(match.group(1))
     filename_text = _compact_search_text(filename)
-    if "zub" in filename_text:
+    normalized_combined = _compact_search_text(combined)
+    if _tax_number_matches_zub(tax_number) or "zub" in filename_text or "zubgmbh" in normalized_combined or "co.kg" in normalized_combined or "cokg" in normalized_combined:
         return "FriStD-Bau ZuB GmbH & Co. KG"
+    if (
+        "verwaltung" in filename_text
+        or "verwaltungs" in filename_text
+        or "verwaltungs" in normalized_combined
+        or "koerperschaftsteuer" in normalized_combined
+        or "körperschaftsteuer" in normalized_combined
+        or "kstbescheid" in normalized_combined
+        or "27kstg" in normalized_combined
+        or "gewst" in normalized_combined
+        or "gewerbesteuer" in normalized_combined
+    ):
+        return "FriStD-Bau Verwaltungs GmbH"
     return "FriStD-Bau Verwaltungs GmbH"
+
+
+def _normalize_fristd_entity_name(value: str) -> str:
+    compacted = sub(r"\s+", " ", value).replace(" - ", "-").strip()
+    normalized = _compact_search_text(compacted)
+    if "verwaltung" in normalized:
+        return "FriStD-Bau Verwaltungs GmbH"
+    if "zub" in normalized:
+        return "FriStD-Bau ZuB GmbH & Co. KG"
+    return compacted
+
+
+def _find_tax_number(text: str) -> str | None:
+    patterns = (
+        r"(?:Steuer\s*[- ]?\s*(?:nummer|Nr\.?)|Steuernummer|St\.?\s*[- ]?\s*Nr\.?)\s*:?\s*([0-9]{2,3}\s*/\s*[0-9]{3}\s*/\s*[0-9]{3,5})",
+        r"\b([0-9]{2,3}\s*/\s*[0-9]{3}\s*/\s*[0-9]{3,5})\b",
+        r"(?:Steuer\s*[- ]?\s*(?:nummer|Nr\.?)|Steuernummer|St\.?\s*[- ]?\s*Nr\.?)\s*:?\s*([0-9]{6}\s*/\s*[0-9]{3,5})",
+        r"(?:Steuer\s*[- ]?\s*(?:nummer|Nr\.?)|Steuernummer|St\.?\s*[- ]?\s*Nr\.?)\s*:?\s*([0-9]{2,3}\s+[0-9]{3}\s*/\s*[0-9]{3,5})",
+    )
+    for pattern in patterns:
+        match = search(pattern, text, IGNORECASE | MULTILINE)
+        if match:
+            return _normalize_tax_number(match.group(1))
+    return None
+
+
+def _normalize_tax_number(value: str) -> str:
+    normalized = sub(r"\s+", "", value.strip())
+    spaced_slash = normalized.replace("/", " / ")
+    return sub(r"\s+", " ", spaced_slash)
+
+
+def _tax_number_matches_zub(tax_number: str | None) -> bool:
+    if not tax_number:
+        return False
+    compact = tax_number.replace(" ", "")
+    return compact in {"50/620/01587", "501620/01587"}
 
 
 def _tax_notice_kind(normalized_text: str, filename: str) -> str:

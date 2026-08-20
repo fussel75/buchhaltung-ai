@@ -131,6 +131,60 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["tax_notice_kind"], "Gewerbesteuerbescheid")
         self.assertEqual(result["tax_notice_year"], "2024")
 
+    def test_tax_notice_never_keeps_generic_fristd_bau_subject(self):
+        text = """
+        Finanzamt Hamburg
+        Bescheid fuer FriStD-Bau
+        Gewerbesteuerbescheid fuer 2024
+        Steuernummer: 50/620/01587
+        Datum: 25.02.2026
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "1705715 - GewSt-Verlust-Bescheid von FA 2024 vom 25.02.2026.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "gewst-verlust.pdf",
+            "size_bytes": 433536,
+            "sha256": "gewst-verlust",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_notice")
+        self.assertEqual(result["certificate_subject"], "FriStD-Bau ZuB GmbH & Co. KG")
+        self.assertEqual(result["tax_notice_tax_number"], "50 / 620 / 01587")
+        self.assertNotEqual(result["certificate_subject"], "FriStD-Bau")
+
+    def test_tax_notice_extracts_st_nr_variant(self):
+        text = """
+        Finanzamt Hamburg
+        Körperschaftsteuerbescheid fuer 2024
+        FriStD-Bau Verwaltungs GmbH
+        St.-Nr.: 41/700/00329
+        Bescheiddatum: 25.02.2026
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "KSt Bescheid 2024 vom 25.02.2026.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "kst.pdf",
+            "size_bytes": 433536,
+            "sha256": "kst-tax-number",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["certificate_subject"], "FriStD-Bau Verwaltungs GmbH")
+        self.assertEqual(result["tax_notice_tax_number"], "41 / 700 / 00329")
+
     def test_freistellungsbescheinigung_validity_table_sets_exact_expiry(self):
         text = """
         Finanzamt Hamburg-Altona

@@ -4864,6 +4864,18 @@ function MasterdataAdmin({
     () => Array.from(new Set(extractionCapabilities.map((capability) => capability.status).filter(Boolean))).sort((left, right) => compareReviewValues(left, right)),
     [extractionCapabilities],
   );
+  const taxCertificateDocuments = useMemo(
+    () => taxSupportingDocuments
+      .filter((taxDocument) => taxDocument.document_type !== "tax_notice")
+      .sort(compareTaxCertificates),
+    [taxSupportingDocuments],
+  );
+  const taxNoticeDocuments = useMemo(
+    () => taxSupportingDocuments
+      .filter((taxDocument) => taxDocument.document_type === "tax_notice")
+      .sort(compareTaxNotices),
+    [taxSupportingDocuments],
+  );
 
   useEffect(() => {
     setProfileForm(tenantProfile);
@@ -5755,24 +5767,24 @@ function MasterdataAdmin({
           <div className="card-header">
             <div>
               <p className="eyebrow">Steuerliche Nachweise</p>
-              <h3>Steuerliche Unterlagen</h3>
+              <h3>Freistellung und §13b</h3>
             </div>
-            <StatusPill value={`${taxSupportingDocuments.length} Unterlagen`} tone={taxSupportingDocuments.length ? "green" : "gray"} />
+            <StatusPill value={`${taxCertificateDocuments.length} Nachweise`} tone={taxCertificateDocuments.length ? "green" : "gray"} />
           </div>
           <p className="form-hint">
-            Hochgeladene Freistellungsbescheinigungen, §13b-Nachweise und Steuerbescheide werden hier gesammelt. Ablaufdaten dienen als Prüfhilfe und ersetzen keine fachliche Steuerprüfung.
+            Freistellungsbescheinigungen anderer Firmen und §13b-Nachweise werden hier separat gesammelt. Ablaufdaten dienen als Prüfhilfe und ersetzen keine fachliche Steuerprüfung.
           </p>
           <div className="data-table tax-doc-table">
             <div className="data-row data-head">
               <span>Firma</span>
-              <span>Unterlage</span>
-              <span>Datum / gültig bis</span>
+              <span>Nachweis</span>
+              <span>Gültig bis</span>
               <span>Steuernr. / USt-ID</span>
               <span>Status</span>
               <span>Datei</span>
               <span>Aktion</span>
             </div>
-            {taxSupportingDocuments.map((taxDocument) => (
+            {taxCertificateDocuments.map((taxDocument) => (
               <div className="data-row" key={taxDocument.id}>
                 <strong>{taxDocument.certificate_subject || "-"}</strong>
                 <span>{taxDocument.certificate_kind || formatDocumentType(taxDocument.document_type)}</span>
@@ -5792,9 +5804,65 @@ function MasterdataAdmin({
                 ) : null}
               </div>
             ))}
-            {!taxSupportingDocuments.length ? (
+            {!taxCertificateDocuments.length ? (
               <div className="data-row empty-row">
-                <span>Noch keine steuerlichen Unterlagen erkannt.</span>
+                <span>Noch keine Freistellungsbescheinigungen oder §13b-Nachweise erkannt.</span>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="admin-card admin-card-wide">
+          <div className="card-header">
+            <div>
+              <p className="eyebrow">Steuerliche Unterlagen</p>
+              <h3>Steuerbescheide</h3>
+            </div>
+            <StatusPill value={`${taxNoticeDocuments.length} Bescheide`} tone={taxNoticeDocuments.length ? "green" : "gray"} />
+          </div>
+          <p className="form-hint">
+            Steuerbescheide werden nach Rechtseinheit, Steuerart und Jahr abgelegt. Wenn nur „FriStD-Bau“ erkannt wird, muss die Rechtseinheit über Steuernummer oder Inhalt geprüft werden.
+          </p>
+          <div className="data-table tax-notice-table">
+            <div className="data-row data-head">
+              <span>Firma</span>
+              <span>Steuerart</span>
+              <span>Jahr</span>
+              <span>Bescheiddatum</span>
+              <span>Steuernr. / USt-ID</span>
+              <span>Status</span>
+              <span>Datei</span>
+              <span>Aktion</span>
+            </div>
+            {taxNoticeDocuments.map((taxDocument) => (
+              <div className="data-row" key={taxDocument.id}>
+                <strong>
+                  {taxDocument.tax_notice_subject || taxDocument.certificate_subject || "-"}
+                  {isAmbiguousTaxSubject(taxDocument.tax_notice_subject || taxDocument.certificate_subject) ? (
+                    <small className="field-warning">Rechtseinheit prüfen</small>
+                  ) : null}
+                </strong>
+                <span>{taxDocument.tax_notice_kind || taxDocument.certificate_kind || formatDocumentType(taxDocument.document_type)}</span>
+                <span>{taxDocument.tax_notice_year || "-"}</span>
+                <span>{formatDate(taxDocument.tax_notice_issued_date)}</span>
+                <span>{[taxDocument.tax_notice_tax_number || taxDocument.certificate_tax_number, taxDocument.certificate_vat_id].filter(Boolean).join(" / ") || "-"}</span>
+                <StatusPill value={formatTaxSupportingStatus(taxDocument)} tone={taxSupportingTone(taxDocument)} />
+                <span>{safeVisibleFilename(taxDocument.normalized_filename || taxDocument.original_filename)}</span>
+                <button
+                  className="secondary-button compact-button"
+                  type="button"
+                  onClick={() => onOpenSupportingDocument?.(taxDocument.id)}
+                >
+                  Bearbeiten
+                </button>
+                {taxDocument.warnings?.length ? (
+                  <p className="inline-note">{taxDocument.warnings.join(" ")}</p>
+                ) : null}
+              </div>
+            ))}
+            {!taxNoticeDocuments.length ? (
+              <div className="data-row empty-row">
+                <span>Noch keine Steuerbescheide erkannt.</span>
               </div>
             ) : null}
           </div>
@@ -8397,6 +8465,29 @@ function compareReviewValues(left, right) {
     return (left || 0) - (right || 0);
   }
   return String(left ?? "").localeCompare(String(right ?? ""), "de", { numeric: true, sensitivity: "base" });
+}
+
+function compareTaxCertificates(left, right) {
+  return (
+    compareReviewValues(left.certificate_subject, right.certificate_subject)
+    || compareReviewValues(left.certificate_kind, right.certificate_kind)
+    || compareReviewValues(left.certificate_valid_until, right.certificate_valid_until)
+    || compareReviewValues(left.original_filename, right.original_filename)
+  );
+}
+
+function compareTaxNotices(left, right) {
+  return (
+    compareReviewValues(left.tax_notice_subject || left.certificate_subject, right.tax_notice_subject || right.certificate_subject)
+    || compareReviewValues(right.tax_notice_year, left.tax_notice_year)
+    || compareReviewValues(left.tax_notice_kind, right.tax_notice_kind)
+    || compareReviewValues(right.tax_notice_issued_date, left.tax_notice_issued_date)
+    || compareReviewValues(left.original_filename, right.original_filename)
+  );
+}
+
+function isAmbiguousTaxSubject(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("de-DE") === "fristd-bau";
 }
 
 function normalizeSearchText(value) {

@@ -3274,9 +3274,34 @@ code {
     minmax(96px, 0.48fr);
 }
 
+.tax-notice-table .data-row {
+  grid-template-columns:
+    minmax(190px, 1.25fr)
+    minmax(180px, 1.08fr)
+    minmax(66px, 0.34fr)
+    minmax(105px, 0.55fr)
+    minmax(140px, 0.72fr)
+    minmax(98px, 0.48fr)
+    minmax(190px, 1.15fr)
+    minmax(96px, 0.44fr);
+}
+
 .tax-doc-table .data-row > .inline-note,
+.tax-notice-table .data-row > .inline-note,
 .tax-doc-table .empty-row > span {
   grid-column: 1 / -1;
+}
+
+.tax-notice-table .empty-row > span {
+  grid-column: 1 / -1;
+}
+
+.field-warning {
+  display: block;
+  margin-top: 4px;
+  color: var(--warning);
+  font-size: 0.72rem;
+  font-weight: 760;
 }
 
 .capability-toolbar {
@@ -3563,6 +3588,7 @@ code {
   .supplier-table .data-row,
   .capability-table .data-row,
   .tax-doc-table .data-row,
+  .tax-notice-table .data-row,
   .bwa-table .data-row,
   .accounting-table .data-row,
   .payment-row,
