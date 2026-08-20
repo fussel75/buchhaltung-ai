@@ -84,6 +84,53 @@ class ExtractionPdfTests(TestCase):
         self.assertIsNone(result["gross_amount"])
         self.assertIn("Steuerunterlage", result["normalized_filename"])
 
+    def test_scanned_gewst_notice_filename_is_stored_for_verwaltungs_gmbh(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "1705716 GewSt Bescheid vom FA vom 25.02.2026, PDF nicht lesbar, 2026-02-25.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "gewst-bescheid.pdf",
+            "size_bytes": 433536,
+            "sha256": "gewst",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_notice")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["certificate_subject"], "FriStD-Bau Verwaltungs GmbH")
+        self.assertEqual(result["tax_notice_kind"], "Gewerbesteuerbescheid")
+        self.assertEqual(result["tax_notice_issued_date"], "2026-02-25")
+        self.assertEqual(result["assignment_type"], "supporting_document")
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("Gewerbesteuerbescheid", result["normalized_filename"])
+        self.assertIn("FriStD-Bau Verwaltungs GmbH", result["normalized_filename"])
+
+    def test_scanned_tax_notice_filename_can_target_zub_entity(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "FriStD-Bau ZuB GewSt Bescheid vom FA 2024 vom 25.02.2026, 2026-02-25.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "zub-gewst-bescheid.pdf",
+            "size_bytes": 433536,
+            "sha256": "zub-gewst",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_notice")
+        self.assertEqual(result["certificate_subject"], "FriStD-Bau ZuB GmbH & Co. KG")
+        self.assertEqual(result["tax_notice_kind"], "Gewerbesteuerbescheid")
+        self.assertEqual(result["tax_notice_year"], "2024")
+
     def test_freistellungsbescheinigung_validity_table_sets_exact_expiry(self):
         text = """
         Finanzamt Hamburg-Altona

@@ -1264,6 +1264,8 @@ def _looks_like_tax_notice(normalized_text: str) -> bool:
         "koerperschaftsteuerbescheid",
         "körperschaftsteuerbescheid",
         "gewerbesteuerbescheid",
+        "gewstbescheid",
+        "gewst",
         "umsatzsteuerbescheid",
         "gesondertefeststellung",
         "feststellung27kstg",
@@ -1290,7 +1292,10 @@ def _tax_notice_subject_name(text: str, filename: str) -> str:
         match = search(pattern, combined, IGNORECASE)
         if match:
             return sub(r"\s+", " ", match.group(1)).replace(" - ", "-").strip()
-    return "FriStD-Bau Verwaltungs GmbH" if "kst" in _compact_search_text(filename) else "FriStD-Bau"
+    filename_text = _compact_search_text(filename)
+    if "zub" in filename_text:
+        return "FriStD-Bau ZuB GmbH & Co. KG"
+    return "FriStD-Bau Verwaltungs GmbH"
 
 
 def _tax_notice_kind(normalized_text: str, filename: str) -> str:
@@ -1299,7 +1304,7 @@ def _tax_notice_kind(normalized_text: str, filename: str) -> str:
         return "KSt-Bescheid gesonderte Feststellung §27 KStG"
     if "koerperschaftsteuer" in normalized_text or "körperschaftsteuer" in normalized_text or "kstbescheid" in normalized_text:
         return "Körperschaftsteuerbescheid"
-    if "gewerbesteuer" in normalized_text:
+    if "gewerbesteuer" in normalized_text or "gewst" in normalized_text or "gewst" in filename_text:
         return "Gewerbesteuerbescheid"
     if "umsatzsteuer" in normalized_text:
         return "Umsatzsteuerbescheid"
