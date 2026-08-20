@@ -315,6 +315,10 @@ function UploadApp() {
     () => filteredDocuments.filter((document) => document.status === "extracted" && document.extraction && !document.booking_suggestions?.length),
     [filteredDocuments],
   );
+  const monthlyWorkflow = useMemo(
+    () => buildMonthlyWorkflow(documents, exportMonth),
+    [documents, exportMonth],
+  );
   const reextractableDocuments = useMemo(
     () => documents.filter((document) => ["extracted", "review_ready"].includes(document.status) && document.extraction),
     [documents],
@@ -2121,6 +2125,103 @@ function UploadApp() {
             </details>
           </div>
         </div>
+        <section className="monthly-workflow" aria-label="Monatsworkflow">
+          <div className="monthly-workflow-head">
+            <div>
+              <p className="eyebrow">Monatsarbeitsplatz</p>
+              <h3>{formatMonthLabel(exportMonth)}</h3>
+            </div>
+            <span className={`workflow-state ${monthlyWorkflow.state}`}>{monthlyWorkflow.stateLabel}</span>
+          </div>
+          <div className="workflow-steps">
+            {monthlyWorkflow.steps.map((step) => (
+              <div className={`workflow-step ${step.state}`} key={step.key}>
+                <span>{step.label}</span>
+                <strong>{step.count}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="workflow-next">
+            <div>
+              <strong>{monthlyWorkflow.nextTitle}</strong>
+              <span>{monthlyWorkflow.nextText}</span>
+            </div>
+            <div className="workflow-actions">
+              {user?.role === "admin" ? (
+                <button type="button" className="secondary-button" onClick={runEmailImport} disabled={!activeTenantId || emailImporting}>
+                  {emailImporting ? "Ruft ab..." : "Emails abrufen"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={startBulkExtraction}
+                disabled={!extractableAllDocuments.length || isBulkExtracting}
+              >
+                Offene extrahieren
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setReviewFilter("problems");
+                  setProblemReasonFilter("");
+                  setReviewSort("problem_desc");
+                  scrollReviewQueueIntoView();
+                }}
+                disabled={!problemDocuments.length}
+              >
+                Probleme bearbeiten
+              </button>
+              <button
+                type="button"
+                onClick={startBulkReviewPreparation}
+                disabled={!reviewableDocuments.length || isBulkPreparingReview}
+              >
+                Vorschläge erstellen
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setReviewFilter("review_ready");
+                  setProblemReasonFilter("");
+                  scrollReviewQueueIntoView();
+                }}
+                disabled={!queueStats.ready}
+              >
+                Freigaben prüfen
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={loadBookingPreview}
+                disabled={exporting === "booking-preview" || !queueStats.approved}
+              >
+                Buchungsvorschau
+              </button>
+            </div>
+          </div>
+          {monthlyWorkflow.blockers.length ? (
+            <div className="workflow-blockers" aria-label="Monatsblocker">
+              {monthlyWorkflow.blockers.map((blocker) => (
+                <button
+                  type="button"
+                  key={blocker.reason}
+                  onClick={() => {
+                    setReviewFilter("problems");
+                    setProblemReasonFilter(blocker.reason);
+                    setReviewSearch("");
+                    setReviewSort("problem_desc");
+                    scrollReviewQueueIntoView();
+                  }}
+                >
+                  <span>{blocker.reason}</span>
+                  <strong>{blocker.count}</strong>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
         {extractionBatch ? (
           <div className="batch-progress" aria-live="polite">
             <strong>{extractionBatch.done} / {extractionBatch.total} extrahiert</strong>
@@ -3495,6 +3596,113 @@ function assignmentMatchNeedsReview(match) {
 function isPdfDocument(document) {
   const contentType = String(document?.content_type || "").split(";", 1)[0].trim().toLowerCase();
   return contentType === "application/pdf" || String(document?.original_filename || "").toLowerCase().endsWith(".pdf");
+}
+
+function buildMonthlyWorkflow(documents, month) {
+  const monthDocuments = documents.filter((document) => documentBelongsToMonth(document, month));
+  const counts = {
+    inbox: monthDocuments.length,
+    pending: monthDocuments.filter((document) => document.status === "review_pending").length,
+    extracted: monthDocuments.filter((document) => document.status === "extracted").length,
+    ready: monthDocuments.filter((document) => document.status === "review_ready").length,
+    approved: monthDocuments.filter((document) => document.status === "review_approved").length,
+    supporting: monthDocuments.filter(isSupportingDocument).length,
+  };
+  const problemCounts = new Map();
+  monthDocuments
+    .filter(isProblemExtraction)
+    .forEach((document) => {
+      problemExtractionReasons(document).forEach((reason) => {
+        problemCounts.set(reason, (problemCounts.get(reason) || 0) + 1);
+      });
+    });
+  const blockers = Array.from(problemCounts.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
+    .slice(0, 4);
+  const problemCount = monthDocuments.filter(isProblemExtraction).length;
+
+  let state = "waiting";
+  let stateLabel = "Bereit";
+  let nextTitle = "Monat starten";
+  let nextText = "Neue Rechnungen aus Mailbox oder Upload holen und danach extrahieren.";
+
+  if (counts.pending) {
+    state = "active";
+    stateLabel = "Eingang offen";
+    nextTitle = "Offene Belege extrahieren";
+    nextText = `${counts.pending} Belege warten noch auf Extraktion.`;
+  } else if (problemCount) {
+    state = "blocked";
+    stateLabel = "Klärung nötig";
+    nextTitle = "Problembelege abarbeiten";
+    nextText = `${problemCount} Belege brauchen fachliche Prüfung, OCR/KI oder manuelle Ergänzung.`;
+  } else if (counts.extracted) {
+    state = "active";
+    stateLabel = "Vorschläge fehlen";
+    nextTitle = "Buchungsvorschläge erstellen";
+    nextText = `${counts.extracted} extrahierte Belege haben noch keinen Buchungsvorschlag.`;
+  } else if (counts.ready) {
+    state = "active";
+    stateLabel = "Freigabe offen";
+    nextTitle = "Vorschläge final prüfen";
+    nextText = `${counts.ready} Belege sind bereit für fachliche Freigabe.`;
+  } else if (counts.approved) {
+    state = "done";
+    stateLabel = "Exportbereit";
+    nextTitle = "Buchungsvorschau prüfen";
+    nextText = `${counts.approved} freigegebene Belege können als Monatsunterlagen oder Buchungsentwurf exportiert werden.`;
+  } else if (counts.supporting) {
+    state = "done";
+    stateLabel = "Unterlagen abgelegt";
+    nextTitle = "Unterlagen prüfen";
+    nextText = `${counts.supporting} steuerliche oder projektbezogene Unterlagen sind ohne Buchung abgelegt.`;
+  }
+
+  return {
+    blockers,
+    nextText,
+    nextTitle,
+    state,
+    stateLabel,
+    steps: [
+      { key: "inbox", label: "Eingang", count: counts.inbox, state: counts.inbox ? "done" : "idle" },
+      { key: "pending", label: "Offen", count: counts.pending, state: counts.pending ? "active" : "done" },
+      { key: "problems", label: "Klärung", count: problemCount, state: problemCount ? "blocked" : "done" },
+      { key: "ready", label: "Freigabe", count: counts.ready, state: counts.ready ? "active" : "idle" },
+      { key: "approved", label: "Export", count: counts.approved, state: counts.approved ? "done" : "idle" },
+    ],
+  };
+}
+
+function documentBelongsToMonth(document, month) {
+  if (!month) return true;
+  const values = [
+    document?.extraction?.invoice_date,
+    document?.extraction?.due_date,
+    document?.extraction?.raw_result?.issue_date,
+    document?.created_at,
+    document?.updated_at,
+    document?.normalized_filename,
+    document?.original_filename,
+  ];
+  return values.some((value) => stringContainsMonth(value, month));
+}
+
+function stringContainsMonth(value, month) {
+  if (!value || !month) return false;
+  const text = String(value);
+  if (text.includes(month)) return true;
+  const [year, monthNumber] = month.split("-");
+  if (!year || !monthNumber) return false;
+  return text.includes(`${monthNumber}.${year}`) || text.includes(`${year}${monthNumber}`);
+}
+
+function formatMonthLabel(month) {
+  if (!month) return "Alle Monate";
+  const [year, monthNumber] = month.split("-");
+  if (!year || !monthNumber) return month;
+  return `${monthNumber}.${year}`;
 }
 
 function DocumentPreview({ document }) {
