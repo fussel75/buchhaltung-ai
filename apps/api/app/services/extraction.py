@@ -1052,6 +1052,9 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
 def _build_tax_supporting_document_result(document: dict, text: str) -> dict | None:
     original_filename = document["original_filename"]
     normalized_text = _compact_search_text(f"{text} {original_filename}")
+    tax_notice = _build_tax_notice_result(document, text, normalized_text)
+    if tax_notice:
+        return tax_notice
     if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
@@ -1143,6 +1146,152 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
         "normalized_filename": normalized_filename,
         "source": "pdf_text_certificate_rules",
     }
+
+
+def _build_tax_notice_result(document: dict, text: str, normalized_text: str) -> dict | None:
+    if not _looks_like_tax_notice(normalized_text):
+        return None
+
+    original_filename = document["original_filename"]
+    issuer = _find_text(text, r"(Finanzamt\s+[A-Za-zÄÖÜäöüß -]+)") or "Finanzamt"
+    subject_name = _tax_notice_subject_name(text, original_filename)
+    notice_kind = _tax_notice_kind(normalized_text, original_filename)
+    notice_year = _tax_notice_year(text, original_filename)
+    issue_date = (
+        _find_date(text, r"(?:Datum|Bescheiddatum|vom)\s*:?\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})")
+        or _invoice_date_from_filename(original_filename)
+    )
+    tax_number = _find_text(text, r"Steuernummer\s*:?\s*([0-9\s/I-]{8,})")
+    normalized_filename = _normalized_tax_notice_filename(
+        notice_kind=notice_kind,
+        subject_name=subject_name,
+        notice_year=notice_year,
+        issue_date=issue_date,
+    )
+
+    return {
+        "supplier_name": issuer,
+        "invoice_number": tax_number,
+        "customer_number": None,
+        "customer_reference": None,
+        "invoice_date": issue_date,
+        "due_date": None,
+        "discount_due_date": None,
+        "service_period": notice_year,
+        "delivery_address": None,
+        "delivery_addresses": [],
+        "allocation_lines": [],
+        "assignment_code": None,
+        "assignment_label": None,
+        "assignment_kind": None,
+        "assignment_revenue_relevant": None,
+        "assignment_type": "supporting_document",
+        "cost_category": None,
+        "product_name": notice_kind,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "reverse_charge": False,
+        "reverse_charge_basis": None,
+        "document_type": "tax_notice",
+        "supporting_document": True,
+        "certificate_kind": notice_kind,
+        "certificate_subject": subject_name,
+        "certificate_issuer": issuer,
+        "certificate_valid_from": None,
+        "certificate_valid_until": None,
+        "certificate_tax_number": tax_number,
+        "certificate_vat_id": None,
+        "tax_notice_kind": notice_kind,
+        "tax_notice_subject": subject_name,
+        "tax_notice_year": notice_year,
+        "tax_notice_issued_date": issue_date,
+        "tax_notice_tax_number": tax_number,
+        "payment_terms": [],
+        "currency": "EUR",
+        "confidence": Decimal("0.90") if issue_date else Decimal("0.78"),
+        "warnings": [] if issue_date else ["Bescheiddatum nicht sicher erkannt."],
+        "normalized_filename": normalized_filename,
+        "source": "pdf_text_tax_notice_rules",
+    }
+
+
+def _looks_like_tax_notice(normalized_text: str) -> bool:
+    if "steuerbescheid" in normalized_text:
+        return True
+    tax_notice_markers = (
+        "kstbescheid",
+        "koerperschaftsteuerbescheid",
+        "körperschaftsteuerbescheid",
+        "gewerbesteuerbescheid",
+        "umsatzsteuerbescheid",
+        "gesondertefeststellung",
+        "feststellung27kstg",
+        "27kstg",
+    )
+    if any(marker in normalized_text for marker in tax_notice_markers):
+        return True
+    return "bescheid" in normalized_text and (
+        "finanzamt" in normalized_text
+        or "vonfa" in normalized_text
+        or "kstg" in normalized_text
+        or "koerperschaftsteuer" in normalized_text
+        or "körperschaftsteuer" in normalized_text
+    )
+
+
+def _tax_notice_subject_name(text: str, filename: str) -> str:
+    combined = sub(r"\s+", " ", f"{text} {filename}")
+    patterns = (
+        r"(FriStD\s*-?\s*Bau\s+Verwaltungs\s+GmbH)",
+        r"(FriStD\s*-?\s*Bau\s+ZuB\s+GmbH\s*&\s*Co\.?\s*KG)",
+    )
+    for pattern in patterns:
+        match = search(pattern, combined, IGNORECASE)
+        if match:
+            return sub(r"\s+", " ", match.group(1)).replace(" - ", "-").strip()
+    return "FriStD-Bau Verwaltungs GmbH" if "kst" in _compact_search_text(filename) else "FriStD-Bau"
+
+
+def _tax_notice_kind(normalized_text: str, filename: str) -> str:
+    filename_text = _compact_search_text(filename)
+    if "27kstg" in normalized_text or "27kstg" in filename_text or "gesondertefeststellung" in normalized_text:
+        return "KSt-Bescheid gesonderte Feststellung §27 KStG"
+    if "koerperschaftsteuer" in normalized_text or "körperschaftsteuer" in normalized_text or "kstbescheid" in normalized_text:
+        return "Körperschaftsteuerbescheid"
+    if "gewerbesteuer" in normalized_text:
+        return "Gewerbesteuerbescheid"
+    if "umsatzsteuer" in normalized_text:
+        return "Umsatzsteuerbescheid"
+    return "Steuerbescheid"
+
+
+def _tax_notice_year(text: str, filename: str) -> str | None:
+    combined = f"{text} {filename}"
+    for pattern in (
+        r"(?:für|fuer|Veranlagungszeitraum|Steuerjahr|FA)\s+(20\d{2})",
+        r"\b(20\d{2})\s+vom\s+\d{1,2}\.\d{1,2}\.\d{2,4}",
+    ):
+        match = search(pattern, combined, IGNORECASE)
+        if match:
+            return match.group(1)
+    years = [match.group(1) for match in finditer(r"\b(20\d{2})\b", combined)]
+    if not years:
+        return None
+    issue_date = _invoice_date_from_filename(filename)
+    issue_year = issue_date[:4] if issue_date else None
+    for year in years:
+        if year != issue_year:
+            return year
+    return years[0]
 
 
 def _build_project_supporting_document_result(document: dict, text: str) -> dict | None:
@@ -1378,6 +1527,19 @@ def _normalized_supporting_document_filename(
     valid_until: str | None,
 ) -> str:
     parts = ["Nachweis", certificate_kind, subject_name, f"gültig bis {valid_until or 'ungeklärt'}"]
+    return ", ".join(_filename_part(part) for part in parts) + ".pdf"
+
+
+def _normalized_tax_notice_filename(
+    notice_kind: str,
+    subject_name: str,
+    notice_year: str | None,
+    issue_date: str | None,
+) -> str:
+    parts = ["Steuerunterlage", subject_name, notice_kind]
+    if notice_year:
+        parts.append(notice_year)
+    parts.append(issue_date or "ohne Datum")
     return ", ".join(_filename_part(part) for part in parts) + ".pdf"
 
 

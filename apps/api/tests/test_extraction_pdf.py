@@ -59,6 +59,31 @@ class ExtractionPdfTests(TestCase):
         self.assertIsNone(result["gross_amount"])
         self.assertIn("Freistellungsbescheinigung", result["normalized_filename"])
 
+    def test_scanned_tax_notice_filename_is_stored_as_tax_supporting_document(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "KSt Bescheid ges.Fest.§27KStG von FA 2024 vom 25.02.2026, 2026-02-25.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "kst-bescheid.pdf",
+            "size_bytes": 100000,
+            "sha256": "kst",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=""),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "tax_notice")
+        self.assertTrue(result["supporting_document"])
+        self.assertEqual(result["certificate_subject"], "FriStD-Bau Verwaltungs GmbH")
+        self.assertEqual(result["tax_notice_year"], "2024")
+        self.assertEqual(result["tax_notice_issued_date"], "2026-02-25")
+        self.assertEqual(result["assignment_type"], "supporting_document")
+        self.assertIsNone(result["gross_amount"])
+        self.assertIn("Steuerunterlage", result["normalized_filename"])
+
     def test_freistellungsbescheinigung_validity_table_sets_exact_expiry(self):
         text = """
         Finanzamt Hamburg-Altona

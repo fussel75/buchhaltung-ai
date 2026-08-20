@@ -623,9 +623,10 @@ def list_tax_supporting_documents(tenant_id: str) -> list[dict[str, Any]]:
                 from documents d
                 join document_extractions e on e.document_id = d.id
                 where d.tenant_id = %s
-                    and e.raw_result->>'document_type' in ('tax_exemption_certificate', 'reverse_charge_certificate')
+                    and e.raw_result->>'document_type' in ('tax_exemption_certificate', 'reverse_charge_certificate', 'tax_notice')
                 order by
                     nullif(e.raw_result->>'certificate_valid_until', '')::date nulls first,
+                    nullif(e.raw_result->>'tax_notice_issued_date', '')::date desc nulls last,
                     d.created_at desc
                 limit 1000
                 """,
@@ -4374,6 +4375,7 @@ NON_BOOKING_DOCUMENT_TYPES = {
     "project_document",
     "tax_exemption_certificate",
     "reverse_charge_certificate",
+    "tax_notice",
 }
 
 FUEL_RECEIPT_DOCUMENT_TYPES = {"fuel_receipt"}
@@ -4434,6 +4436,12 @@ def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] 
     reasons: list[str] = []
     source = str(raw_result.get("source") or "").lower()
     document_type = raw_result.get("document_type")
+    if document_type == "tax_notice":
+        warnings = row.get("warnings") or []
+        if warnings:
+            reason_label = "Hinweis" if len(warnings) == 1 else "Hinweise"
+            reasons.append(f"{len(warnings)} {reason_label}")
+        return reasons
     if document_type in {"tax_exemption_certificate", "reverse_charge_certificate"}:
         if not raw_result.get("certificate_valid_until"):
             reasons.append("Ablaufdatum fehlt")
@@ -4905,6 +4913,11 @@ def _serialize_tax_supporting_document(row: dict[str, Any]) -> dict[str, Any]:
         "certificate_valid_until": valid_until,
         "certificate_tax_number": raw_result.get("certificate_tax_number") or extraction.get("invoice_number"),
         "certificate_vat_id": raw_result.get("certificate_vat_id"),
+        "tax_notice_kind": raw_result.get("tax_notice_kind"),
+        "tax_notice_year": raw_result.get("tax_notice_year"),
+        "tax_notice_issued_date": raw_result.get("tax_notice_issued_date"),
+        "tax_notice_subject": raw_result.get("tax_notice_subject"),
+        "tax_notice_tax_number": raw_result.get("tax_notice_tax_number"),
         "reverse_charge": raw_result.get("reverse_charge") is True,
         "days_until_expiry": days_until_expiry,
         "expiry_status": _certificate_expiry_status(days_until_expiry),

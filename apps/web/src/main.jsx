@@ -3119,11 +3119,12 @@ function ExtractionEditForm({
   }
 
   const isTaxSupporting = isTaxSupportingDocumentType(form.document_type);
+  const isTaxNotice = form.document_type === "tax_notice";
   const isProjectSupporting = form.document_type === "project_document";
   const isNonBookingDocument = isTaxSupporting || isProjectSupporting;
-  const detailTitle = isTaxSupporting ? "Nachweisdaten" : isProjectSupporting ? "Unterlagendaten" : "Extraktionsdaten";
+  const detailTitle = isTaxNotice ? "Steuerbescheiddaten" : isTaxSupporting ? "Nachweisdaten" : isProjectSupporting ? "Unterlagendaten" : "Extraktionsdaten";
   const detailSubtitle = isTaxSupporting
-    ? "steuerlicher Nachweis, keine Eingangsrechnung"
+    ? "steuerliche Unterlage, keine Eingangsrechnung"
     : isProjectSupporting
       ? "Projektunterlage, keine Buchung"
       : "bearbeitbar vor Buchungsvorschlag und Freigabe";
@@ -3156,13 +3157,14 @@ function ExtractionEditForm({
       {isTaxSupporting ? (
         <div className="supporting-document-panel">
           <InfoTile label="Firma" value={certificateSubject} />
-          <InfoTile label="Nachweis" value={rawResult.certificate_kind || formatDocumentType(form.document_type)} />
-          <InfoTile label="Gültig bis" value={formatDate(certificateValidUntil)} />
+          <InfoTile label={isTaxNotice ? "Unterlage" : "Nachweis"} value={rawResult.certificate_kind || formatDocumentType(form.document_type)} />
+          <InfoTile label={isTaxNotice ? "Bescheiddatum" : "Gültig bis"} value={formatDate(isTaxNotice ? rawResult.tax_notice_issued_date || form.invoice_date : certificateValidUntil)} />
+          {isTaxNotice ? <InfoTile label="Steuerjahr" value={rawResult.tax_notice_year} /> : null}
           <InfoTile
             label="Steuernr. / USt-ID"
             value={[certificateTaxNumber, certificateVatId].filter(Boolean).join(" / ")}
           />
-          <InfoTile label="Status" value={certificateValidUntil ? "Ablaufdatum erkannt" : "Ablauf unklar"} />
+          <InfoTile label="Status" value={isTaxNotice ? "abgelegt" : certificateValidUntil ? "Ablaufdatum erkannt" : "Ablauf unklar"} />
         </div>
       ) : null}
       <div className="form-grid extraction-edit-grid">
@@ -3182,12 +3184,16 @@ function ExtractionEditForm({
             <FormField label="Firma laut Nachweis">
               <input name="certificate_subject" value={certificateSubject} onChange={(event) => updateField("certificate_subject", event.target.value)} disabled={isApproved} />
             </FormField>
-            <FormField label="Gültig von">
-              <input name="certificate_valid_from" type="date" value={certificateValidFrom} onChange={(event) => updateField("certificate_valid_from", event.target.value)} disabled={isApproved} />
-            </FormField>
-            <FormField label="Gültig bis">
-              <input name="certificate_valid_until" type="date" value={certificateValidUntil} onChange={(event) => updateField("certificate_valid_until", event.target.value)} disabled={isApproved} />
-            </FormField>
+            {!isTaxNotice ? (
+              <>
+                <FormField label="Gültig von">
+                  <input name="certificate_valid_from" type="date" value={certificateValidFrom} onChange={(event) => updateField("certificate_valid_from", event.target.value)} disabled={isApproved} />
+                </FormField>
+                <FormField label="Gültig bis">
+                  <input name="certificate_valid_until" type="date" value={certificateValidUntil} onChange={(event) => updateField("certificate_valid_until", event.target.value)} disabled={isApproved} />
+                </FormField>
+              </>
+            ) : null}
             <FormField label="Steuernr.">
               <input name="certificate_tax_number" value={certificateTaxNumber} onChange={(event) => updateField("certificate_tax_number", event.target.value)} disabled={isApproved} />
             </FormField>
@@ -3209,6 +3215,7 @@ function ExtractionEditForm({
             <option value="project_document">Projektunterlage</option>
             <option value="tax_exemption_certificate">Freistellungsbescheinigung</option>
             <option value="reverse_charge_certificate">§13b-Nachweis</option>
+            <option value="tax_notice">Steuerbescheid</option>
           </select>
         </FormField>
         {!isNonBookingDocument ? (
@@ -5748,18 +5755,18 @@ function MasterdataAdmin({
           <div className="card-header">
             <div>
               <p className="eyebrow">Steuerliche Nachweise</p>
-              <h3>Freistellung und §13b</h3>
+              <h3>Steuerliche Unterlagen</h3>
             </div>
-            <StatusPill value={`${taxSupportingDocuments.length} Nachweise`} tone={taxSupportingDocuments.length ? "green" : "gray"} />
+            <StatusPill value={`${taxSupportingDocuments.length} Unterlagen`} tone={taxSupportingDocuments.length ? "green" : "gray"} />
           </div>
           <p className="form-hint">
-            Hochgeladene Freistellungsbescheinigungen und §13b-Nachweise werden hier gesammelt. Ablaufdaten dienen als Prüfhilfe und ersetzen keine fachliche Steuerprüfung.
+            Hochgeladene Freistellungsbescheinigungen, §13b-Nachweise und Steuerbescheide werden hier gesammelt. Ablaufdaten dienen als Prüfhilfe und ersetzen keine fachliche Steuerprüfung.
           </p>
           <div className="data-table tax-doc-table">
             <div className="data-row data-head">
               <span>Firma</span>
-              <span>Nachweis</span>
-              <span>Gültig bis</span>
+              <span>Unterlage</span>
+              <span>Datum / gültig bis</span>
               <span>Steuernr. / USt-ID</span>
               <span>Status</span>
               <span>Datei</span>
@@ -5769,9 +5776,9 @@ function MasterdataAdmin({
               <div className="data-row" key={taxDocument.id}>
                 <strong>{taxDocument.certificate_subject || "-"}</strong>
                 <span>{taxDocument.certificate_kind || formatDocumentType(taxDocument.document_type)}</span>
-                <span>{formatDate(taxDocument.certificate_valid_until)}</span>
+                <span>{formatTaxSupportingDate(taxDocument)}</span>
                 <span>{[taxDocument.certificate_tax_number, taxDocument.certificate_vat_id].filter(Boolean).join(" / ") || "-"}</span>
-                <StatusPill value={formatCertificateExpiryStatus(taxDocument)} tone={certificateExpiryTone(taxDocument.expiry_status)} />
+                <StatusPill value={formatTaxSupportingStatus(taxDocument)} tone={taxSupportingTone(taxDocument)} />
                 <span>{safeVisibleFilename(taxDocument.normalized_filename || taxDocument.original_filename)}</span>
                 <button
                   className="secondary-button compact-button"
@@ -5787,7 +5794,7 @@ function MasterdataAdmin({
             ))}
             {!taxSupportingDocuments.length ? (
               <div className="data-row empty-row">
-                <span>Noch keine Freistellungs- oder §13b-Nachweise erkannt.</span>
+                <span>Noch keine steuerlichen Unterlagen erkannt.</span>
               </div>
             ) : null}
           </div>
@@ -7202,6 +7209,7 @@ function formatDocumentType(value) {
     project_document: "Projektunterlage",
     reverse_charge_certificate: "§13b-Nachweis",
     tax_exemption_certificate: "Freistellungsbescheinigung",
+    tax_notice: "Steuerbescheid",
   };
   return labels[value] ?? value ?? "-";
 }
@@ -7210,6 +7218,7 @@ const SUPPORTING_DOCUMENT_TYPES = new Set([
   "project_document",
   "reverse_charge_certificate",
   "tax_exemption_certificate",
+  "tax_notice",
 ]);
 
 function isSupportingDocument(document) {
@@ -7222,7 +7231,25 @@ function isFuelReceiptDocument(document) {
 }
 
 function isTaxSupportingDocumentType(documentType) {
-  return documentType === "tax_exemption_certificate" || documentType === "reverse_charge_certificate";
+  return documentType === "tax_exemption_certificate" || documentType === "reverse_charge_certificate" || documentType === "tax_notice";
+}
+
+function formatTaxSupportingDate(document) {
+  if (document?.document_type === "tax_notice") {
+    const issuedDate = formatDate(document.tax_notice_issued_date);
+    return [document.tax_notice_year, issuedDate].filter(Boolean).join(" / ") || "-";
+  }
+  return formatDate(document?.certificate_valid_until);
+}
+
+function formatTaxSupportingStatus(document) {
+  if (document?.document_type === "tax_notice") return "abgelegt";
+  return formatCertificateExpiryStatus(document);
+}
+
+function taxSupportingTone(document) {
+  if (document?.document_type === "tax_notice") return "green";
+  return certificateExpiryTone(document?.expiry_status);
 }
 
 function formatCertificateExpiryStatus(document) {

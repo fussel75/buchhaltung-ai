@@ -2854,6 +2854,26 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(raw_result["certificate_vat_id"], "DE123456789")
         audit_event.assert_called_once()
 
+    def test_tax_notice_does_not_raise_invoice_required_problem_reasons(self):
+        row = {
+            "supplier_name": "Finanzamt",
+            "invoice_number": None,
+            "invoice_date": date(2026, 2, 25),
+            "gross_amount": None,
+            "confidence": Decimal("0.90"),
+            "warnings": [],
+        }
+        raw_result = {
+            "document_type": "tax_notice",
+            "supporting_document": True,
+            "tax_notice_kind": "KSt-Bescheid gesonderte Feststellung §27 KStG",
+            "tax_notice_year": "2024",
+        }
+
+        reasons = database_service._extraction_problem_reasons(row, raw_result)
+
+        self.assertEqual(reasons, [])
+
     def test_bulk_extraction_validation_blocks_non_pending_documents(self):
         document_id = uuid4()
         request = SimpleNamespace(state=SimpleNamespace(user={"role": "admin", "allowed_tenant_ids": ["*"]}))
