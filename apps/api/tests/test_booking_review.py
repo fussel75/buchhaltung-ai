@@ -3221,6 +3221,38 @@ class BookingSuggestionTests(TestCase):
             ]
         )
 
+    def test_bulk_reextraction_allows_ocr_for_scanned_problem_documents(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "reextract",
+            "status": "running",
+            "items": [{"document_id": str(document_id), "status": "queued"}],
+        }
+
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(document_id)}),
+            patch.object(bulk_job_service, "get_document", return_value={"id": str(document_id)}),
+            patch.object(bulk_job_service, "document_extraction_health", return_value={}),
+            patch.object(bulk_job_service, "release_document_bulk_claim"),
+            patch.object(bulk_job_service, "run_mock_extraction") as run_extraction,
+            patch.object(bulk_job_service, "mark_document_bulk_job_item"),
+            patch.object(bulk_job_service, "finish_document_bulk_job"),
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        run_extraction.assert_called_once_with(
+            document_id,
+            processing_job_id=job_id,
+            force=True,
+            actor="admin@example.com",
+            allow_ai=False,
+            allow_ocr=True,
+        )
+
     def test_bulk_job_runner_runs_ai_extraction_and_stores_summary(self):
         job_id = uuid4()
         document_id = uuid4()
