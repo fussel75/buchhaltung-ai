@@ -3875,7 +3875,7 @@ class BookingSuggestionTests(TestCase):
 
         suppliers = {capability["supplier_name"] for capability in result["capabilities"]}
         self.assertIn("Holz Junge GmbH", suppliers)
-        self.assertIn("Rolf Dammers oHG", suppliers)
+        self.assertIn("Dammers", suppliers)
         self.assertIn("Lüchau Baustoffe GmbH", suppliers)
         self.assertIn("Rieprecht GmbH", suppliers)
         self.assertIn("Rönnfeld ROLLLADEN UND MARKISEN GmbH", suppliers)

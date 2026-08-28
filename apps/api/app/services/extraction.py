@@ -60,7 +60,7 @@ EXTRACTION_CAPABILITIES = [
         "coverage": "Mehrseitige Skontodaten, Rechnungsdaten, Artikelkurztext",
     },
     {
-        "supplier_name": "Rolf Dammers oHG",
+        "supplier_name": "Dammers",
         "status": "gut",
         "recognition": "Dammers/Alles fürs Dach, Lager-/Kundennummer-Merkmale",
         "coverage": "Rechnungsdaten, Kundennummer, Bestelldaten als Projekthinweis",
@@ -440,12 +440,12 @@ def _build_cii_xml_result(
         discount_due_date = xml_payment_due_date
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
-        supplier_name = supplier_rule["supplier_name"]
+        supplier_name = _normalize_supplier_name(supplier_rule["supplier_name"]) or supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
     assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
     assignment = assignment_match["assignment"] if assignment_match else None
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
-    assignment_type = _assignment_type(delivery_address, assignment)
+    assignment_type = _assignment_type(delivery_address, assignment, customer_reference, text)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
@@ -455,6 +455,7 @@ def _build_cii_xml_result(
         supplier_name=supplier_name or _supplier_from_filename(Path(document["original_filename"]).stem),
         product_name=_filename_product_name(product_name or "Eingangsrechnung"),
         invoice_date=invoice_date,
+        assignment_hint=customer_reference,
     )
     normalized_filename = _normalized_structured_filename(normalized_filename, document)
     line_count = len(root.findall(".//ram:IncludedSupplyChainTradeLineItem", ns))
@@ -482,7 +483,7 @@ def _build_cii_xml_result(
         line_count=line_count,
     )
     warnings = []
-    if delivery_address and not assignment:
+    if _has_unresolved_assignment_hint(delivery_address, assignment, customer_reference, text):
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if visible_discount_base is not None and xml_discount_base is not None and visible_discount_base != xml_discount_base:
         warnings.append(
@@ -601,12 +602,12 @@ def _build_ubl_xml_result(
     customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
-        supplier_name = supplier_rule["supplier_name"]
+        supplier_name = _normalize_supplier_name(supplier_rule["supplier_name"]) or supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
     assignment_match = _assignment_unit_match(document["tenant_id"], delivery_address, customer_reference, text)
     assignment = assignment_match["assignment"] if assignment_match else None
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
-    assignment_type = _assignment_type(delivery_address, assignment)
+    assignment_type = _assignment_type(delivery_address, assignment, customer_reference, text)
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
@@ -616,6 +617,7 @@ def _build_ubl_xml_result(
         supplier_name=supplier_name or _supplier_from_filename(Path(document["original_filename"]).stem),
         product_name=_filename_product_name(product_name or "E-Rechnung"),
         invoice_date=invoice_date,
+        assignment_hint=customer_reference,
     )
 
     normalized_filename = _normalized_structured_filename(normalized_filename, document)
@@ -644,7 +646,7 @@ def _build_ubl_xml_result(
         line_count=line_count,
     )
     warnings = []
-    if delivery_address and not assignment:
+    if _has_unresolved_assignment_hint(delivery_address, assignment, customer_reference, text):
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
@@ -937,7 +939,7 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     supplier_name = _supplier_name(document, text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
-        supplier_name = supplier_rule["supplier_name"]
+        supplier_name = _normalize_supplier_name(supplier_rule["supplier_name"]) or supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"] or customer_number
     if _is_internal_warehouse_disposal(supplier_name, text, delivery_address):
         delivery_address = None
@@ -954,7 +956,11 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     allocation_lines_resolved = bool(allocation_lines) and all(
         allocation.get("assignment_code") for allocation in allocation_lines
     )
-    assignment_type = "assignment_split" if len(allocation_lines) > 1 else _assignment_type(delivery_address, assignment)
+    assignment_type = (
+        "assignment_split"
+        if len(allocation_lines) > 1
+        else _assignment_type(delivery_address, assignment, customer_reference, text)
+    )
     cost_category = _cost_category_for_supplier_rule(supplier_rule, supplier_name, product_name, text, assignment_type)
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
@@ -964,6 +970,7 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         supplier_name=supplier_name,
         product_name=_filename_product_name(product_name),
         invoice_date=invoice_date,
+        assignment_hint=customer_reference,
     )
 
     missing = [
@@ -983,7 +990,7 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         warnings.append(
             "Mehrere Lieferadressen/Zuordnungen erkannt: bitte Zuordnung oder Splittung prüfen."
         )
-    if delivery_address and not assignment and not allocation_lines_resolved:
+    if _has_unresolved_assignment_hint(delivery_address, assignment, customer_reference, text) and not allocation_lines_resolved:
         warnings.append("Nicht sicher erkannt: Zuordnung aus Mandanten-Stammdaten.")
     if missing:
         warnings.append(f"Nicht sicher erkannt: {', '.join(missing)}.")
@@ -1825,13 +1832,13 @@ def _build_scanned_dammers_invoice_result(document: dict) -> dict | None:
         return None
 
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
-    supplier_name = "Rolf Dammers oHG"
+    supplier_name = "Dammers"
     invoice_number = parsed["invoice_number"]
     invoice_date = parsed.get("invoice_date")
     customer_number = None
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, None, "")
     if supplier_rule:
-        supplier_name = supplier_rule["supplier_name"]
+        supplier_name = _normalize_supplier_name(supplier_rule["supplier_name"]) or supplier_rule["supplier_name"]
         customer_number = supplier_rule["customer_number"]
     normalized_filename = _normalized_invoice_filename(
         invoice_number=invoice_number,
@@ -3048,6 +3055,7 @@ PROJECT_REFERENCE_LABELS = (
     "AUFTR.TEXT",
     "Auftragstext",
     "Bauvorhaben",
+    "Baustelle",
     "Bestelldaten",
     "Betreff",
     "BV",
@@ -3105,6 +3113,9 @@ def _clean_project_reference_value(value: str | None) -> str | None:
     nested_label = search(rf"^(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?::|\.|\-)\s*(.+)$", cleaned, IGNORECASE)
     if nested_label:
         cleaned = nested_label.group(1).strip(" :-\t")
+    bare_nested_label = search(rf"^(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s+(.+)$", cleaned, IGNORECASE)
+    if bare_nested_label:
+        cleaned = bare_nested_label.group(1).strip(" :-\t")
     cleaned = sub(
         r"\s+(?:Anlieferung|Abholung|Lieferanschrift|Lieferadresse|Pos\.?|Artikel|Rechnung|Kundennummer|Kunden-Nr\.?)\b.*$",
         "",
@@ -3265,7 +3276,7 @@ def _supplier_name(document: dict, text: str) -> str:
     if "pietsch hamburg-ost damaschke" in lower_text:
         return "Pietsch Hamburg-Ost Damaschke GmbH & Co. KG"
     if "auslieferungslager" in lower_text and "barmbek" in lower_text and "0515834/086" in text:
-        return "Rolf Dammers oHG"
+        return "Dammers"
     if "roennfeld-rollladenbau.de" in lower_text or "rönnfeld" in lower_text:
         return "Rönnfeld ROLLLADEN UND MARKISEN GmbH"
     if dammers_filename and (
@@ -3276,12 +3287,12 @@ def _supplier_name(document: dict, text: str) -> str:
         or _looks_like_dammers_invoice_text(lower_text, compact_text)
         or _looks_like_dammers_invoice_by_filename(lower_text, compact_text)
     ):
-        return "Rolf Dammers oHG"
+        return "Dammers"
     if (
         ("dammers" in compact_text and ("allesf" in compact_text or "dach" in compact_text))
         or ("cobadach" in compact_text and "kundennr" in compact_text)
     ):
-        return "Rolf Dammers oHG"
+        return "Dammers"
     if ("hansa holz" in lower_text and "wilhelm kr" in lower_text) or (
         "kundennr" in lower_text and "reisender" in lower_text and "btr nl" in lower_text
     ):
@@ -3326,6 +3337,8 @@ def _supplier_name_is_filename_guess(document: dict, supplier_name: str | None, 
 def _normalize_supplier_name(value: str | None) -> str | None:
     if not value:
         return None
+    if "dammers" in value.lower():
+        return "Dammers"
     if value == "Holz-Junge GmbH":
         return "Holz Junge GmbH"
     if value in {"HaHo Holz", "Hana Holz", "Hansa Holz Wilhelm Krüger GmbH"}:
@@ -3460,12 +3473,43 @@ def _project_number(assignment: dict | None) -> str | None:
     return None
 
 
-def _assignment_type(delivery_address: str | None, assignment: dict | None) -> str:
+def _assignment_type(
+    delivery_address: str | None,
+    assignment: dict | None,
+    customer_reference: str | None = None,
+    text: str = "",
+) -> str:
     if assignment:
         return "assigned"
-    if delivery_address:
+    if delivery_address or _customer_reference_indicates_assignment(customer_reference, text):
         return "assignment_unresolved"
     return "general_cost"
+
+
+def _has_unresolved_assignment_hint(
+    delivery_address: str | None,
+    assignment: dict | None,
+    customer_reference: str | None,
+    text: str,
+) -> bool:
+    return not assignment and bool(delivery_address or _customer_reference_indicates_assignment(customer_reference, text))
+
+
+def _customer_reference_indicates_assignment(customer_reference: str | None, text: str) -> bool:
+    if not customer_reference:
+        return False
+    lower_text = text.lower()
+    if "dammers" in lower_text or "alles fürs dach" in lower_text:
+        return True
+    if "euro planen handel und service" in lower_text and search(r"^\s*Objekt\s*:\s*$", text, IGNORECASE | MULTILINE):
+        return False
+    return bool(
+        search(
+            r"(?:bauvorhaben|baustelle|bestelldaten|kommission|kommision|kommissionsangaben|auftr\.?\s*text|kundenreferenz)\s*(?::|\.|\-)?\s*(?:bv\s+)?[^\n]{0,80}",
+            text,
+            IGNORECASE,
+        )
+    )
 
 
 def _is_internal_warehouse_disposal(
@@ -3527,6 +3571,8 @@ def _cost_category(
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
     if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung", "container"]):
         return "disposal"
+    if "dammers" in haystack:
+        return "material"
     if any(term in haystack for term in ["wärmepumpen-support", "waermepumpen-support", "kundendienst"]):
         return "subcontractor"
     if any(term in haystack for term in ["böhm malereibetrieb", "boehm malereibetrieb", "maler l. böhm", "maler l. boehm"]):
@@ -3623,6 +3669,10 @@ def _find_first_position_product_name(text: str) -> str | None:
                     continue
                 if search(r"[A-Za-zÄÖÜäöüß]", candidate):
                     return _clean_af_elektro_product_name(candidate)
+    if "dammers" in text.lower() or "alles fürs dach" in text.lower():
+        product = _find_dammers_product_name(lines)
+        if product:
+            return product
     for index, line in enumerate(lines):
         if not (
             search(r"^\d{4}\s+\d{12,}\s+1(?:\s+\(\*\))?$", line)
@@ -3666,6 +3716,25 @@ def _find_first_position_product_name(text: str) -> str | None:
                 continue
             if search(r"[A-Za-zÄÖÜäöüß]", candidate):
                 return candidate
+    return None
+
+
+def _find_dammers_product_name(lines: list[str]) -> str | None:
+    for index, line in enumerate(lines):
+        if not search(r"\bART-?NR\b.*\bBEZEICHNUNG\b", line, IGNORECASE):
+            continue
+        for item_index, candidate in enumerate(lines[index + 1 : index + 12], start=index + 1):
+            if not search(r"^[A-Z0-9][A-Z0-9./-]{2,}\s+", candidate):
+                continue
+            if not search(r"\b\d+(?:,\d+)?\s+St\b", candidate, IGNORECASE):
+                continue
+            for product_candidate in lines[item_index + 1 : item_index + 5]:
+                if not product_candidate:
+                    continue
+                if product_candidate.startswith(("Summe", "+ 19", "Rechnungsbetrag", "zahlbar bis")):
+                    return None
+                if search(r"[A-Za-zÄÖÜäöüß]", product_candidate):
+                    return _clean_product_name(product_candidate)
     return None
 
 
@@ -3746,10 +3815,11 @@ def _normalized_invoice_filename(
     supplier_name: str,
     product_name: str,
     invoice_date: str | None,
+    assignment_hint: str | None = None,
 ) -> str:
     parts = [
         f"ERg {invoice_number or 'ohne Nummer'}",
-        _filename_assignment_label(assignment, assignment_type, tenant_profile),
+        _filename_assignment_label(assignment, assignment_type, tenant_profile, assignment_hint),
         supplier_name,
         product_name,
         invoice_date or "ohne Datum",
@@ -3763,7 +3833,12 @@ def _filename_part(value: str) -> str:
     return cleaned or "-"
 
 
-def _filename_assignment_label(assignment: dict | None, assignment_type: str, tenant_profile: dict) -> str:
+def _filename_assignment_label(
+    assignment: dict | None,
+    assignment_type: str,
+    tenant_profile: dict,
+    assignment_hint: str | None = None,
+) -> str:
     if assignment:
         code = _assignment_code(assignment)
         prefix = tenant_profile.get("assignment_code_prefix")
@@ -3773,8 +3848,22 @@ def _filename_assignment_label(assignment: dict | None, assignment_type: str, te
     if assignment_type == "assignment_split":
         return f"{tenant_profile['assignment_label_plural']} aufgeteilt"
     if assignment_type == "assignment_unresolved":
+        hint = _filename_assignment_hint(assignment_hint)
+        if hint:
+            prefix = tenant_profile.get("assignment_code_prefix")
+            if prefix:
+                return f"{prefix} {hint}"
+            return f"{tenant_profile['assignment_label_singular']} {hint}"
         return f"{tenant_profile['assignment_label_singular']} ungeklärt"
     return "Allgemeine Kosten"
+
+
+def _filename_assignment_hint(value: str | None) -> str | None:
+    cleaned = _clean_project_reference_value(value)
+    if not cleaned:
+        return None
+    cleaned = sub(r"\bUhlenhorster\b", "Uhlenh.", cleaned, flags=IGNORECASE)
+    return cleaned
 
 
 def _supplier_from_filename(filename_stem: str) -> str:

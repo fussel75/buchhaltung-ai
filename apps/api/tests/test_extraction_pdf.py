@@ -48,6 +48,8 @@ class ExtractionPdfTests(TestCase):
         with (
             patch.object(extraction_service, "_extract_pdf_text", return_value=text),
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
         ):
             result = _build_pdf_text_result(document)
 
@@ -151,6 +153,8 @@ class ExtractionPdfTests(TestCase):
         with (
             patch.object(extraction_service, "_extract_pdf_text", return_value=text),
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
         ):
             result = _build_pdf_text_result(document)
 
@@ -318,6 +322,8 @@ class ExtractionPdfTests(TestCase):
         with (
             patch.object(extraction_service, "_extract_pdf_text", return_value=text),
             patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
         ):
             result = _build_pdf_text_result(document)
 
@@ -623,7 +629,7 @@ class ExtractionPdfTests(TestCase):
             "sha256": "abc",
         }
         supplier_rule = {
-            "supplier_name": "Rolf Dammers oHG",
+            "supplier_name": "Dammers",
             "customer_number": "0515834/086",
         }
 
@@ -635,7 +641,7 @@ class ExtractionPdfTests(TestCase):
             result = _build_pdf_text_result(document)
 
         self.assertEqual(result["source"], "pdf_scan_filename_rules")
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "776511-606")
         self.assertEqual(result["customer_number"], "0515834/086")
         self.assertEqual(result["cost_category"], "material")
@@ -647,7 +653,7 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["confidence"], Decimal("0.50"))
         self.assertEqual(
             result["normalized_filename"],
-            "ERg 776511-606, Bauvorhaben ungeklärt, Rolf Dammers oHG, Eingangsrechnung, ohne Datum.pdf",
+            "ERg 776511-606, Bauvorhaben ungeklärt, Dammers, Eingangsrechnung, ohne Datum.pdf",
         )
 
     def test_unreadable_pdf_does_not_create_mock_amounts(self):
@@ -1690,7 +1696,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "773934-606")
         self.assertEqual(result["customer_number"], "0515834/086")
         self.assertEqual(result["invoice_date"], "2026-06-05")
@@ -1703,6 +1709,58 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["discount_amount"], Decimal("7.33"))
         self.assertEqual(result["cost_category"], "material")
         self.assertEqual(result["product_name"], "Alu-Dachtraufprofil DP 80")
+
+    def test_dammers_invoice_keeps_unknown_bv_reference_in_filename(self):
+        text = """
+        DAMMERS
+        Alles fürs Dach
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB GmbH & Co KG
+        Haldesdorfer Str. 44
+        --- Lieferanschrift ---
+        Platz
+        Nummer         :            816515-608
+        Datum          :    18.08.2026 - 15:43
+        Kundennummer   :           0515834/086
+        Bestelldaten: BV Uhlenhorster Weg 2
+        ART-NR BEZEICHNUNG                   MENGE    EINZELPREIS RAB    NETTOWERT
+        V101320                              1 St      1041,00 St -24,0       791,16
+        Velux Solar-Rollladen SST
+        SK10 0000 Alu dunkelgrau
+        Summe Warenwert                                            EUR    7912,36
+        + 19,00 % Mwst.                                            EUR    1503,35
+        Rechnungsbetrag (zahlbar bis spätestens 18.09.26 o. Abzug) EUR    9415,71
+        zahlbar bis zum 29.08.26 abzüglich EUR 282,47 Skonto
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "816515-608.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Dammers")
+        self.assertEqual(result["invoice_number"], "816515-608")
+        self.assertEqual(result["customer_number"], "0515834/086")
+        self.assertEqual(result["customer_reference"], "Uhlenhorster Weg 2")
+        self.assertEqual(result["assignment_type"], "assignment_unresolved")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Velux Solar-Rollladen SST")
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 816515-608, BV Uhlenh. Weg 2, Dammers, Velux Solar-Rollladen SST, 2026-08-18.pdf",
+        )
+        self.assertIn("Zuordnung", " ".join(result["warnings"]))
 
     def test_dammers_invoice_uses_order_reference_for_assignment(self):
         text = """
@@ -1753,7 +1811,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "776511-606")
         self.assertEqual(result["customer_number"], "0515834/086")
         self.assertEqual(result["customer_reference"], "Bucheckerweg 4")
@@ -1816,7 +1874,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "776511-606")
         self.assertEqual(result["customer_number"], "0515834/086")
         self.assertEqual(result["assignment_code"], "Buwg4")
@@ -1914,7 +1972,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "776511-606")
         self.assertEqual(result["customer_number"], "0515834/086")
         self.assertEqual(result["invoice_date"], "2026-06-12")
@@ -1958,7 +2016,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "776511-606")
         self.assertEqual(result["customer_reference"], "Bucheckerweg 4")
         self.assertEqual(result["invoice_date"], "2026-06-12")
@@ -1996,7 +2054,7 @@ class ExtractionPdfTests(TestCase):
         ):
             result = _build_pdf_text_result(document)
 
-        self.assertEqual(result["supplier_name"], "Rolf Dammers oHG")
+        self.assertEqual(result["supplier_name"], "Dammers")
         self.assertEqual(result["invoice_number"], "776511-606")
         self.assertEqual(result["invoice_date"], "2026-06-12")
         self.assertEqual(result["net_amount"], Decimal("331.88"))
@@ -2053,7 +2111,7 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["payment_terms"][1]["amount"], Decimal("8.51"))
         self.assertEqual(result["cost_category"], "material")
         self.assertEqual(result["confidence"], Decimal("0.88"))
-        self.assertEqual(result["warnings"], [])
+        self.assertIn("Zuordnung", " ".join(result["warnings"]))
 
     def test_foerch_invoice_reads_customer_number_and_interleaved_discount_table(self):
         text = """
