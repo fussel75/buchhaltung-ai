@@ -552,9 +552,51 @@ def _should_replace_value(field_name: str, current_value: Any, new_value: Any, r
         return True
     if field_name == "supplier_name" and _looks_like_filename_guess(str(current_value)):
         return True
+    if field_name == "supplier_name" and _supplier_value_is_document_number(current_value, raw_result):
+        return True
+    if field_name == "invoice_date" and _field_warned_missing_or_uncertain(raw_result, "Datum"):
+        return True
+    if field_name == "invoice_number" and _field_warned_missing_or_uncertain(raw_result, "Rechnung"):
+        return True
+    if field_name == "tax_amount" and _tax_amount_looks_like_rate(current_value, new_value, raw_result):
+        return True
     if field_name in MONEY_FIELDS and _decimal_or_none(current_value) is None:
         return True
     return False
+
+
+def _field_warned_missing_or_uncertain(raw_result: dict[str, Any], label: str) -> bool:
+    label_lower = label.casefold()
+    warnings = " ".join(str(item) for item in raw_result.get("warnings") or []).casefold()
+    return label_lower in warnings and any(marker in warnings for marker in ("fehlt", "nicht sicher", "unklar"))
+
+
+def _supplier_value_is_document_number(current_value: Any, raw_result: dict[str, Any]) -> bool:
+    current = _normalize_lookup(current_value)
+    if not current:
+        return False
+    candidates = [
+        raw_result.get("invoice_number"),
+        raw_result.get("original_filename"),
+        raw_result.get("filename"),
+        raw_result.get("normalized_filename"),
+    ]
+    if any(current and current in _normalize_lookup(candidate) for candidate in candidates if candidate):
+        return True
+    return bool(search(r"^\d{6,}$", current))
+
+
+def _tax_amount_looks_like_rate(current_value: Any, new_value: Any, raw_result: dict[str, Any]) -> bool:
+    current = _decimal_or_none(current_value)
+    new = _decimal_or_none(new_value)
+    net = _decimal_or_none(raw_result.get("net_amount"))
+    gross = _decimal_or_none(raw_result.get("gross_amount"))
+    if current not in {Decimal("7.00"), Decimal("19.00")} or new is None:
+        return False
+    if net is None or gross is None:
+        return True
+    expected = (gross - net).quantize(Decimal("0.01"))
+    return abs(expected - new) <= Decimal("0.02")
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:

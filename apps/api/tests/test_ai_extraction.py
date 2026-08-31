@@ -90,6 +90,74 @@ class AiExtractionTests(TestCase):
         self.assertEqual(result["raw_result"]["ai_extraction"]["status"], "applied")
         self.assertIn("invoice_number", result["raw_result"]["ai_extraction"]["accepted_fields"])
 
+    def test_ai_extraction_replaces_suspicious_filled_values(self):
+        extraction = {
+            "supplier_name": "4242270364",
+            "invoice_number": "231-100",
+            "invoice_date": None,
+            "customer_number": "67292272",
+            "net_amount": Decimal("68.00"),
+            "tax_amount": Decimal("19.00"),
+            "gross_amount": Decimal("80.92"),
+            "currency": "EUR",
+            "confidence": Decimal("0.72"),
+            "warnings": ["Nicht sicher erkannt: Lieferant, Datum, Rechnungsnummer."],
+            "source": "pdf_text_rules",
+            "assignment_type": "general_cost",
+            "raw_result": {
+                "supplier_name": "4242270364",
+                "invoice_number": "231-100",
+                "invoice_date": None,
+                "net_amount": Decimal("68.00"),
+                "tax_amount": Decimal("19.00"),
+                "gross_amount": Decimal("80.92"),
+                "warnings": ["Nicht sicher erkannt: Lieferant, Datum, Rechnungsnummer."],
+                "source": "pdf_text_rules",
+            },
+        }
+        ai_payload = {
+            "supplier_name": "Linde GmbH, Gases Division",
+            "invoice_number": "4242270364",
+            "invoice_date": "2026-07-23",
+            "customer_number": "67292272",
+            "document_type": "incoming_invoice",
+            "cost_category": "general_overhead",
+            "tax_amount": "12.92",
+            "item_summary": "Nutzungsvertrag 1 Jahr BA001",
+            "confidence": "0.96",
+            "evidence": ["Rechnungsnummer/Rechnungsdatum/Ihre Kundennummer", "MwSt 19,00 % (EUR) 12,92"],
+            "warnings": [],
+        }
+
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload),
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "4242270364.PDF"},
+                extraction=extraction,
+                pdf_text="Linde GmbH, Gases Division Rechnungsnummer 4242270364 Rechnungsdatum 23.07.2026",
+            )
+
+        self.assertEqual(result["supplier_name"], "Linde GmbH, Gases Division")
+        self.assertEqual(result["invoice_number"], "4242270364")
+        self.assertEqual(result["invoice_date"], "2026-07-23")
+        self.assertEqual(result["tax_amount"], Decimal("12.92"))
+        self.assertEqual(result["raw_result"]["cost_category"], "general_overhead")
+        self.assertEqual(result["raw_result"]["item_summary"], "Nutzungsvertrag 1 Jahr BA001")
+        accepted_fields = result["raw_result"]["ai_extraction"]["accepted_fields"]
+        self.assertIn("supplier_name", accepted_fields)
+        self.assertIn("invoice_number", accepted_fields)
+        self.assertIn("invoice_date", accepted_fields)
+        self.assertIn("tax_amount", accepted_fields)
+
     def test_ai_provider_failure_keeps_rule_result_with_warning(self):
         extraction = {
             "supplier_name": "Unklar",

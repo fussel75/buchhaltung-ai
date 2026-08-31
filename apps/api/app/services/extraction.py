@@ -739,7 +739,8 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     if tank_receipt:
         return _finalize_pdf_result(document, tank_receipt, text, allow_ai=allow_ai)
 
-    invoice_number = _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
+    linde_header = _find_linde_header_fields(text)
+    invoice_number = linde_header.get("invoice_number") or _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
         text,
         r"Rechnungsnummer:\s*([A-Z0-9-]+[a-z]?)",
     ) or _find_text(
@@ -788,8 +789,8 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         text,
         r"Belegnummer:\s*([0-9]{5,})",
     ) or _invoice_number_from_filename(document["original_filename"])
-    customer_number = _find_customer_number(text)
-    invoice_date = _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+    customer_number = linde_header.get("customer_number") or _find_customer_number(text)
+    invoice_date = linde_header.get("invoice_date") or _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
@@ -843,6 +844,7 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     ) or _invoice_date_from_filename(document["original_filename"])
     due_date = (
         _find_date(text, r"ohne Abzug\s*(\d{2}\.\d{2}\.\d{4})")
+        or _find_date(text, r"Bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+ohne Abzug")
         or _find_date(text, r"Zahlung ohne Abzug bis\s+(\d{2}\.\d{2}\.\d{4})")
         or _find_date(text, r"Rechnungsbetrag bis zum\s+(\d{2}\.\d{2}\.\d{4})\s+zu begleichen")
         or _find_date(text, r"sp[^\s,]*testens jedoch bis zum\s+(\d{2}\.\d{2}\.\d{4})")
@@ -2645,8 +2647,40 @@ def _find_customer_number(text: str) -> str | None:
     )
 
 
+def _find_linde_header_fields(text: str) -> dict[str, str | None]:
+    if "linde" not in text.lower():
+        return {}
+    match = search(
+        r"Rechnungsnummer\s+Rechnungsdatum\s+Ihre\s+Kundennummer[\s\S]{0,140}?"
+        r"([0-9]{6,})\s+(\d{2}\.\d{2}\.\d{4})\s+([0-9 ]{5,})\b",
+        text,
+        IGNORECASE,
+    )
+    if not match:
+        return {}
+    return {
+        "invoice_number": match.group(1).strip(),
+        "invoice_date": _date_text_to_iso(match.group(2)),
+        "customer_number": sub(r"\s+", "", match.group(3)),
+    }
+
+
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
     currency_marker = r"(?:â‚¬|€|EUR)?"
+    linde_total = search(
+        r"Nettobetrag\s*\(EUR\)\s*(-?[0-9.]+,\d{2})[\s\S]{0,160}?"
+        r"MwSt\s*19,00\s*%\s*\(EUR\)\s*(-?[0-9.]+,\d{2})[\s\S]{0,160}?"
+        r"Rechnungsbetrag\s*\(EUR\)\s*(-?[0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if linde_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal_signed(linde_total.group(1)),
+            "tax_amount": _money_to_decimal_signed(linde_total.group(2)),
+            "gross_amount": _money_to_decimal_signed(linde_total.group(3)),
+        }
     rieprecht_total = search(
         r"Nettobetrag\s*€\s*([0-9.]+,\d{2})[\s\S]*?"
         r"Mwst\.\s*gesamt\s*€\s*([0-9.]+,\d{2})[\s\S]*?"
@@ -3287,6 +3321,8 @@ def _supplier_name(document: dict, text: str) -> str:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
         return "Rieprecht GmbH"
+    if "linde gmbh, gases division" in lower_text or "linde-gas.de" in lower_text:
+        return "Linde GmbH, Gases Division"
     if "hagebau" in lower_text and ("mölders" in lower_text or "mÃ¶lders" in lower_text):
         return "Mölders Baucentrum GmbH"
     if "konzept-54.de" in lower_text or "konzept 54 gmbh" in lower_text:
@@ -3629,6 +3665,8 @@ def _cost_category(
         return "general_overhead"
     if any(term in haystack for term in ["maison gebäudeservice", "maison gebaeudeservice", "allgemeine reinigungsarbeiten"]):
         return "general_overhead"
+    if any(term in haystack for term in ["linde gmbh, gases division", "linde-gas.de", "nutzungsvertrag"]):
+        return "general_overhead"
     if any(term in haystack for term in ["euro planen", "industrieplane", "versand per paketdienst"]):
         return "material"
     if any(term in haystack for term in ["roggemann", "cape cod", "floorentino", "fasebretter", "glattkantbretter"]):
@@ -3836,6 +3874,12 @@ def _product_name(text: str) -> str:
             return "Boden/Plattemsand Container"
         if "Container Abholung" in text:
             return "Container Abholung"
+    if "linde gmbh, gases division" in lower_text or "linde-gas.de" in lower_text:
+        linde_product = _find_text(text, r"\b\d{6,}\s+(Nutzungsvertrag[^\n]*?)(?:\s+\d+\s+ST\b|$)")
+        if linde_product:
+            return _clean_product_name(linde_product) or linde_product
+        if "nutzungsvertrag" in lower_text:
+            return "Nutzungsvertrag"
     first_position = _find_first_position_product_name(text)
     if first_position:
         return _clean_product_name(first_position) or first_position

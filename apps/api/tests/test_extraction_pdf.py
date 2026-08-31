@@ -3187,3 +3187,58 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["discounted_payable_amount"], Decimal("28.34"))
         self.assertEqual(result["payment_terms"][0]["due_date"], "2026-06-15")
         self.assertEqual(result["payment_terms"][1]["due_date"], "2026-06-08")
+
+    def test_linde_invoice_reads_header_totals_due_date_and_product(self):
+        text = """
+        Making our world more productive
+        Linde GmbH, Gases Division
+        Linde GmbH, Gases Division
+        Seitnerstraße 70 82049 Pullach
+        Rechnung
+        Rechnungsnummer Rechnungsdatum Ihre Kundennummer
+        4242270364 23.07.2026 672 922 72
+        Bei Zahlungen und Schriftverkehr bitte angeben
+        Verlängerung zu Vertrag 363329338
+        Material-Nr. Bezeichnung Füllinhalt Behälter/Menge Einzelpreis Gesamtpreis
+        7450000 Nutzungsvertrag 1 Jahr BA001 1 ST 68,00 68,00
+        Vertragsnummer: 30591641
+        Abrechnungszeitraum: 01.08.2026 bis 31.07.2027
+        Nettobetrag (EUR) 68,00
+        MwSt 19,00 % (EUR) 12,92
+        Rechnungsbetrag (EUR) 80,92
+        Zahlungsbedingungen
+        Bis zum 07.08.2026 ohne Abzug
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "4242270364.PDF",
+            "content_type": "application/pdf",
+            "storage_path": "linde.pdf",
+            "size_bytes": 54321,
+            "sha256": "linde",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["supplier_name"], "Linde GmbH, Gases Division")
+        self.assertEqual(result["invoice_number"], "4242270364")
+        self.assertEqual(result["customer_number"], "67292272")
+        self.assertEqual(result["invoice_date"], "2026-07-23")
+        self.assertEqual(result["due_date"], "2026-08-07")
+        self.assertEqual(result["assignment_type"], "general_cost")
+        self.assertEqual(result["cost_category"], "general_overhead")
+        self.assertEqual(result["product_name"], "Nutzungsvertrag 1 Jahr BA001")
+        self.assertEqual(result["net_amount"], Decimal("68.00"))
+        self.assertEqual(result["tax_amount"], Decimal("12.92"))
+        self.assertEqual(result["gross_amount"], Decimal("80.92"))
+        self.assertNotIn("Nicht sicher erkannt: Lieferant, Datum.", result["warnings"])
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 4242270364, Allgemeine Kosten, Linde GmbH, Gases Division, Nutzungsvertrag 1 Jahr BA001, 2026-07-23.pdf",
+        )
