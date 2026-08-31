@@ -4431,6 +4431,14 @@ def _filter_problem_reasons_for_document_type(
     return [reason for reason in reasons if _problem_reason_key(reason) not in ignored]
 
 
+def _is_blocking_problem_reason(reason: str) -> bool:
+    return _problem_reason_key(reason) not in {"Sicherheit", "Hinweise", "Zuordnung prüfen"}
+
+
+def _blocking_problem_reasons(reasons: list[str]) -> list[str]:
+    return [reason for reason in reasons if _is_blocking_problem_reason(reason)]
+
+
 def _extraction_problem_reasons(row: dict[str, Any], raw_result: dict[str, Any] | None = None) -> list[str]:
     raw_result = raw_result or {}
     reasons: list[str] = []
@@ -4553,6 +4561,7 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
         list(extraction.get("problem_reasons") or []),
         raw_result,
     )
+    blocking_problem_reasons = _blocking_problem_reasons(problem_reasons)
     assignment_type = raw_result.get("assignment_type")
     allocation_lines = raw_result.get("allocation_lines") or []
     assignment_code = raw_result.get("assignment_code") or raw_result.get("project_code")
@@ -4570,7 +4579,7 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
     if is_non_booking:
         unresolved = False
         general_cost = False
-    problem_count = len(problem_reasons)
+    problem_count = len(blocking_problem_reasons)
     severity_score = (
         (5 if unresolved else 0)
         + (4 if general_cost else 0)
@@ -4598,6 +4607,7 @@ def document_extraction_health(document: dict[str, Any] | None) -> dict[str, Any
         "needs_assignment_review": review_required,
         "is_supplier_unresolved": supplier_unresolved,
         "problem_reasons": problem_reasons,
+        "blocking_problem_reasons": blocking_problem_reasons,
         "problem_count": problem_count,
         "severity_score": severity_score,
     }

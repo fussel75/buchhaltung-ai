@@ -3612,7 +3612,7 @@ function buildMonthlyWorkflow(documents, month) {
   monthDocuments
     .filter(isProblemExtraction)
     .forEach((document) => {
-      problemExtractionReasons(document).forEach((reason) => {
+      blockingProblemExtractionReasons(document).forEach((reason) => {
         problemCounts.set(reason, (problemCounts.get(reason) || 0) + 1);
       });
     });
@@ -7984,12 +7984,21 @@ function filterProblemReasonsForDocumentType(document, reasons) {
   return reasons.filter((reason) => !ignoredReasons.has(problemExtractionSummaryKey(reason)));
 }
 
+function isBlockingProblemReason(reason) {
+  const normalized = problemExtractionSummaryKey(reason);
+  return !["Niedrige Sicherheit", "Offene Hinweise", "Zuordnung prüfen"].includes(normalized);
+}
+
+function blockingProblemExtractionReasons(document) {
+  return problemExtractionReasons(document).filter(isBlockingProblemReason);
+}
+
 function isProblemExtraction(document) {
-  return problemExtractionReasons(document).length > 0;
+  return blockingProblemExtractionReasons(document).length > 0;
 }
 
 function documentMatchesProblemSummary(document, summaryReason) {
-  const reasons = problemExtractionReasons(document);
+  const reasons = summaryReason ? problemExtractionReasons(document) : blockingProblemExtractionReasons(document);
   if (!summaryReason) return reasons.length > 0;
   return reasons.some((reason) => problemExtractionSummaryKey(reason) === summaryReason);
 }
@@ -7997,7 +8006,7 @@ function documentMatchesProblemSummary(document, summaryReason) {
 function summarizeProblemExtractionReasons(documents) {
   const counts = new Map();
   documents.forEach((document) => {
-    problemExtractionReasons(document).forEach((reason) => {
+    blockingProblemExtractionReasons(document).forEach((reason) => {
       const summaryKey = problemExtractionSummaryKey(reason);
       counts.set(summaryKey, (counts.get(summaryKey) || 0) + 1);
     });
@@ -8010,7 +8019,7 @@ function summarizeProblemExtractionReasons(documents) {
 function buildProblemWorkItems(documents) {
   const groups = new Map();
   documents.forEach((document) => {
-    problemExtractionReasons(document).forEach((reason) => {
+    blockingProblemExtractionReasons(document).forEach((reason) => {
       const key = problemExtractionSummaryKey(reason);
       const existing = groups.get(key) || {
         reason: key,
@@ -8648,7 +8657,7 @@ function reviewSortValue(document, key) {
 }
 
 function problemPriorityScore(document) {
-  return problemExtractionReasons(document).reduce((score, reason) => Math.max(score, problemReasonPriority(reason)), 0);
+  return blockingProblemExtractionReasons(document).reduce((score, reason) => Math.max(score, problemReasonPriority(reason)), 0);
 }
 
 function problemReasonPriority(reason) {

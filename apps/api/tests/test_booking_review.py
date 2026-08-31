@@ -2490,6 +2490,34 @@ class BookingSuggestionTests(TestCase):
         self.assertFalse(health["has_assignment"])
         self.assertGreater(health["severity_score"], 0)
 
+    def test_document_extraction_health_keeps_review_hints_non_blocking(self):
+        health = database_service.document_extraction_health(
+            {
+                "id": str(uuid4()),
+                "original_filename": "rechnung.pdf",
+                "normalized_filename": "ERg R-1, BV Wewe20, Lieferant GmbH, Material, 2026-06-12.pdf",
+                "extraction": {
+                    "supplier_name": "Lieferant GmbH",
+                    "invoice_number": "R-1",
+                    "invoice_date": "2026-06-12",
+                    "gross_amount": "119.00",
+                    "problem_reasons": ["Sicherheit 72 %", "1 Hinweis", "Zuordnung prüfen"],
+                    "raw_result": {
+                        "source": "pdf_text",
+                        "assignment_type": "assigned",
+                        "assignment_code": "Wewe20",
+                        "project_number": "25-00008",
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(health["problem_count"], 0)
+        self.assertEqual(health["blocking_problem_reasons"], [])
+        self.assertIn("Sicherheit 72 %", health["problem_reasons"])
+        self.assertIn("1 Hinweis", health["problem_reasons"])
+        self.assertIn("Zuordnung prüfen", health["problem_reasons"])
+
     def test_document_extraction_health_ignores_invoice_required_fields_for_project_documents(self):
         health = database_service.document_extraction_health(
             {
