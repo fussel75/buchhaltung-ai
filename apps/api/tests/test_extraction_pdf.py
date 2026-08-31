@@ -554,6 +554,18 @@ class ExtractionPdfTests(TestCase):
             with self.subTest(text=text):
                 self.assertEqual(extraction_service._find_customer_reference(text), expected)
 
+    def test_customer_reference_reads_inline_project_labels_from_ocr_lines(self):
+        examples = {
+            "Beleg: Lieferschein 123 Bearbeiter Max Bestelldaten: BV Uhlenhorster Weg 2 ART-NR BEZEICHNUNG": "Uhlenhorster Weg 2",
+            "Betr. Lieferung vom 9.06.26 Online-Shop-Nr.: BV: Neusurenland Bangkirai Anlieferung:": "Neusurenland Bangkirai",
+            "Text davor Objekt: Weseler Weg 20 Pos. Artikel Menge": "Weseler Weg 20",
+            "Auftragsdaten KOM: Bucheckerweg 4 Kundennummer 12345": "Bucheckerweg 4",
+        }
+
+        for text, expected in examples.items():
+            with self.subTest(text=text):
+                self.assertEqual(extraction_service._find_customer_reference(text), expected)
+
     def test_assignment_hint_from_filename_reads_common_project_labels(self):
         self.assertEqual(
             extraction_service._find_assignment_hint_from_filename(
@@ -3283,6 +3295,29 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["discounted_payable_amount"], Decimal("28.34"))
         self.assertEqual(result["payment_terms"][0]["due_date"], "2026-06-15")
         self.assertEqual(result["payment_terms"][1]["due_date"], "2026-06-08")
+
+    def test_moelders_hagebau_invoice_reads_wrapped_summary_totals(self):
+        text = """
+        Mölders hagebau
+        Rechnung
+        Belegnummer: 52595092
+        Belegdatum: 01.06.2026
+        Kundennummer: 224039
+        Lieferadresse: FriStD Bau, Weseler Weg 20, D - 20001 Hamburg,
+        Artikelbeschreibung Einzelpreis Gesamtpreis
+        1,0 30006483 1 St Rigips Rigidur Nature Line Estrichkleber 23,86 23,86
+        EKZ 1,79%       Gesamt Netto       MwSt. Betrag 19,00 %
+        Gesamt Brutto
+        0,43            24,29              4,62
+        28,91
+        Skontierfähiger Betrag: 28,39 EUR
+        """
+
+        totals = extraction_service._find_invoice_totals(text)
+
+        self.assertEqual(totals["net_amount"], Decimal("24.29"))
+        self.assertEqual(totals["tax_amount"], Decimal("4.62"))
+        self.assertEqual(totals["gross_amount"], Decimal("28.91"))
 
     def test_linde_invoice_reads_header_totals_due_date_and_product(self):
         text = """

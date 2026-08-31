@@ -2797,11 +2797,18 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
             "gross_amount": _money_to_decimal(europlanen_total.group(3)),
         }
     hagebau_total = search(
-        r"Gesamt\s+Netto\s+MwSt\.?\s+Betrag\s+19,00%\s+Gesamt\s+Brutto\s*\n\s*"
+        r"Gesamt\s+Netto\s+MwSt\.?\s+Betrag\s+19,00\s*%\s+Gesamt\s+Brutto[\s\r\n]+"
         r"(?:-?[0-9.]+,\d{2}\s+)?(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})",
         text,
         IGNORECASE,
     )
+    if not hagebau_total:
+        hagebau_total = search(
+            r"EKZ\s+[0-9]+,[0-9]{1,2}\s*%[\s\S]{0,80}?Gesamt\s+Netto[\s\S]{0,80}?Gesamt\s+Brutto[\s\r\n]+"
+            r"(?:-?[0-9.]+,\d{2}\s+)?(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})",
+            text,
+            IGNORECASE,
+        )
     if hagebau_total and ("hagebau" in text.lower() or "mölders" in text.lower() or "mÃ¶lders" in text.lower()):
         return {
             "discount_base": _find_visible_discount_base(text),
@@ -3190,7 +3197,40 @@ def _find_labeled_project_reference(text: str) -> str | None:
         cleaned = _clean_project_reference_value(value)
         if cleaned:
             return cleaned
+    inline_reference = _find_inline_project_reference(text)
+    if inline_reference:
+        return inline_reference
     return None
+
+
+def _find_inline_project_reference(text: str) -> str | None:
+    for raw_line in text.splitlines():
+        line = sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+        for match in finditer(
+            rf"(?:[•○●oO*\-–—|]+\s*)?(?:{PROJECT_REFERENCE_LABEL_PATTERN})"
+            rf"\s*(?::|\.|\-)?\s*(.*?)"
+            rf"(?=\s+(?:{PROJECT_REFERENCE_LABEL_PATTERN}|Anlieferung|Abholung|Lieferanschrift|Lieferadresse|"
+            rf"Lieferhinweis|Pos\.?|ART[-\s]*NR|Artikel|Menge|Einzelpreis|Nettowert|Gesamtpreis|"
+            rf"Rechnung|Kundennummer|Kunden-Nr\.?|Sachbearbeiter|Lieferschein|Steuernr\.?|"
+            rf"\d{{1,2}}\.\d{{1,2}}\.\d{{2,4}})\b|$)",
+            line,
+            IGNORECASE,
+        ):
+            cleaned = _clean_project_reference_value(match.group(1))
+            if cleaned and not _inline_reference_is_noise(cleaned):
+                return cleaned
+    return None
+
+
+def _inline_reference_is_noise(value: str) -> bool:
+    normalized = value.strip().lower()
+    if not normalized:
+        return True
+    if normalized in {"firma", "rechnung", "blatt", "seite", "platz", "lager"}:
+        return True
+    return bool(search(r"^(?:[0-9.,]+\s*)?(?:eur|st|stk|kg|m|qm|m2|m3)$", normalized))
 
 
 def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
@@ -3528,7 +3568,7 @@ def _assignment_context_snippets(text: str) -> list[str]:
 
 def _has_assignment_context_marker(line: str) -> bool:
     normalized_line = line.lower()
-    if search(rf"^\s*(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?::|\.|\-|$)", line, IGNORECASE):
+    if search(rf"(?:^|\b)(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?::|\.|\-|$|\s+)", line, IGNORECASE):
         return True
     direct_markers = ["lieferanschrift", "lieferadresse", "auftraggeber", "bauherr"]
     if any(marker in normalized_line for marker in direct_markers):
@@ -3620,7 +3660,7 @@ def _customer_reference_indicates_assignment(customer_reference: str | None, tex
         return False
     return bool(
         search(
-            r"(?:bauvorhaben|baustelle|bestelldaten|kommission|kommision|kommissionsangaben|auftr\.?\s*text|kundenreferenz)\s*(?::|\.|\-)?\s*(?:bv\s+)?[^\n]{0,80}",
+            r"(?:bauvorhaben|bv|baustelle|bestelldaten|betreff|objekt|kom|kommission|kommision|kommissionsangaben|auftr\.?\s*text|kundenreferenz)\s*(?::|\.|\-)?\s*(?:bv\s+)?[^\n]{0,80}",
             text,
             IGNORECASE,
         )
