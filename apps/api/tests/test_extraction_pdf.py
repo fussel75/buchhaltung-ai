@@ -332,6 +332,39 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["invoice_number"], "2600148")
         self.assertEqual(result["supplier_name"], "Böhm Malereibetrieb GmbH")
 
+    def test_invoice_with_strong_tax_exemption_footer_stays_invoice(self):
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Rechnung_2600148.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "boehm-rechnung.pdf",
+            "size_bytes": 240000,
+            "sha256": "boehm",
+        }
+        text = """
+        Böhm Malereibetrieb GmbH
+        Rechnung 2600148
+        Kunden Nummer: 12988
+        BV Weseler Weg 20 : Spachtelarbeiten im Dachausbau
+        Nettosumme 3.124,40 EUR
+        USt. 19 % 575,48 EUR
+        Rechnungsbetrag 3.603,25 EUR
+        Unsere Freistellungsbescheinigung nach § 48b EStG liegt vor.
+        """
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["document_type"], "incoming_invoice")
+        self.assertFalse(result.get("supporting_document", False))
+        self.assertEqual(result["invoice_number"], "2600148")
+        self.assertEqual(result["supplier_name"], "Böhm Malereibetrieb GmbH")
+
     def test_aufmass_without_invoice_marker_is_project_document(self):
         assignment = {
             "code": "Wewe20",

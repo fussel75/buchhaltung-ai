@@ -1064,13 +1064,7 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
         return tax_notice
     if _looks_like_regular_invoice_before_tax_supporting_document(normalized_text, original_filename):
         return None
-    if "freistellungsbescheinigung" in normalized_text and "48b" in normalized_text:
-        document_type = "tax_exemption_certificate"
-        certificate_kind = "Freistellungsbescheinigung Bauleistungen"
-    elif "freistellungsauftrag" in normalized_text or "freistellungsbescheinigung" in normalized_text or "freistellung" in normalized_text:
-        document_type = "tax_exemption_certificate"
-        certificate_kind = "Freistellungsbescheinigung Bauleistungen"
-    elif "bescheinigungbauleistungen" in normalized_text or "bvfabescheinigungbauleistungen" in normalized_text:
+    if _looks_like_tax_exemption_certificate(normalized_text, original_filename):
         document_type = "tax_exemption_certificate"
         certificate_kind = "Freistellungsbescheinigung Bauleistungen"
     elif "nachweiszursteuerschuldnerschaft" in normalized_text and "13b" in normalized_text:
@@ -1157,6 +1151,46 @@ def _build_tax_supporting_document_result(document: dict, text: str) -> dict | N
     }
 
 
+def _looks_like_tax_exemption_certificate(normalized_text: str, original_filename: str) -> bool:
+    filename_text = _compact_search_text(original_filename)
+    strong_filename_markers = (
+        "freistellungsbescheinigung",
+        "freistellungsauftrag",
+        "freistellung",
+        "bescheinigungbauleistungen",
+        "bvfabescheinigungbauleistungen",
+    )
+    if any(marker in filename_text for marker in strong_filename_markers):
+        return True
+    if "bescheinigungbauleistungen" in normalized_text or "bvfabescheinigungbauleistungen" in normalized_text:
+        return True
+    if "freistellungsauftrag" in normalized_text and "bauleistungen" in normalized_text:
+        return True
+    if "freistellungsbescheinigung" not in normalized_text:
+        return False
+    certificate_context_markers = (
+        "steuerabzugbeibauleistungen",
+        "48b",
+        "estg",
+        "einkommensteuergesetz",
+        "gultigkeit",
+        "gültigkeit",
+        "giltvom",
+        "giltbis",
+        "bescheinigt",
+    )
+    if not any(marker in normalized_text for marker in certificate_context_markers):
+        return False
+    negative_invoice_note_markers = (
+        "freistellungsbescheinigungliegtvor",
+        "freistellungsbescheinigungliegtunsvor",
+        "freistellungsbescheinigungvorhanden",
+    )
+    if any(marker in normalized_text for marker in negative_invoice_note_markers):
+        return False
+    return True
+
+
 def _looks_like_regular_invoice_before_tax_supporting_document(normalized_text: str, original_filename: str) -> bool:
     filename_text = _compact_search_text(original_filename)
     supporting_filename_markers = (
@@ -1182,8 +1216,12 @@ def _looks_like_regular_invoice_before_tax_supporting_document(normalized_text: 
         "gesamtbrutto",
         "nettosumme",
         "nettowert",
+        "nettobetrag",
+        "rechnungsbetrag",
         "mehrwertsteuer",
+        "umsatzsteuer",
         "mwst",
+        "ust",
     )
     return any(marker in normalized_text for marker in invoice_core_markers)
 
