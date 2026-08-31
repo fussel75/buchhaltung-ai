@@ -1795,6 +1795,62 @@ class ExtractionPdfTests(TestCase):
         )
         self.assertIn("Zuordnung", " ".join(result["warnings"]))
 
+    def test_dammers_invoice_keeps_unknown_bestelldaten_address_as_bv_reference(self):
+        text = """
+        DAMMERS
+        Alles fürs Dach
+        Firma                            RECHNUNG
+        FriStD-Bau ZuB GmbH & Co KG
+        Haldesdorfer Str. 44
+        Auslieferungslager : Barmbek
+        Nummer         :            813467-608
+        Datum          :    12.08.2026 - 15:54
+        Kundennummer   :           0515834/086
+        Bestelldaten: Eckerkoppel 149 Hr. Drita
+        ART-NR BEZEICHNUNG                   MENGE    EINZELPREIS RAB    NETTOWERT
+        88537
+        Zink-Blech vorbev. VM Anthra
+        0,7 mm 1 x 2 m 10,08 kg
+        26704
+        OSB 3 Verlegeplatte DIN EN 300
+        2500/675/22 mm Nut + Feder 1,6875 qm
+        Summe Warenwert                                            EUR     307,66
+        + 19,00 % Mwst.                                            EUR      58,46
+        Rechnungsbetrag (zahlbar bis spätestens 12.09.26 o. Abzug) EUR     366,12
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "813467-608.pdf",
+            "content_type": "application/octet-stream",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 236119,
+            "sha256": "abc",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document)
+
+        self.assertEqual(result["supplier_name"], "Dammers")
+        self.assertEqual(result["invoice_number"], "813467-608")
+        self.assertEqual(result["customer_number"], "0515834/086")
+        self.assertEqual(result["customer_reference"], "Eckerkoppel 149")
+        self.assertEqual(result["assignment_type"], "assignment_unresolved")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Zink-Blech vorbev. VM Anthra")
+        self.assertEqual(result["invoice_date"], "2026-08-12")
+        self.assertEqual(result["net_amount"], Decimal("307.66"))
+        self.assertEqual(result["tax_amount"], Decimal("58.46"))
+        self.assertEqual(result["gross_amount"], Decimal("366.12"))
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 813467-608, BV Eckerkoppel 149, Dammers, Zink-Blech vorbev. VM Anthra, 2026-08-12.pdf",
+        )
+
     def test_dammers_invoice_uses_order_reference_for_assignment(self):
         text = """
         DAMMERS

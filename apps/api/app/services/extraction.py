@@ -3194,6 +3194,12 @@ def _clean_project_reference_value(value: str | None) -> str | None:
         cleaned,
         flags=IGNORECASE,
     ).strip(" :-\t")
+    cleaned = sub(
+        r"\s+\b(?:Hr\.?|Herr|Frau)\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*)?\s*$",
+        "",
+        cleaned,
+        flags=IGNORECASE,
+    ).strip(" :-\t")
     if not cleaned or cleaned.lower() in {"keine", "ohne", "nicht angegeben"}:
         return None
     return cleaned
@@ -3800,11 +3806,15 @@ def _find_dammers_product_name(lines: list[str]) -> str | None:
         if not search(r"\bART-?NR\b.*\bBEZEICHNUNG\b", line, IGNORECASE):
             continue
         for item_index, candidate in enumerate(lines[index + 1 : index + 12], start=index + 1):
-            if not search(r"^[A-Z0-9][A-Z0-9./-]{2,}\s+", candidate):
+            if not search(r"^[A-Z0-9][A-Z0-9./-]{2,}(?:\s+|$)", candidate):
                 continue
-            if not search(r"\b\d+(?:,\d+)?\s+St\b", candidate, IGNORECASE):
+            if search(r"\b\d+(?:,\d+)?\s+St\b", candidate, IGNORECASE):
+                product_candidates = lines[item_index + 1 : item_index + 5]
+            elif search(r"^[0-9A-Z][0-9A-Z./-]{2,}$", candidate):
+                product_candidates = lines[item_index + 1 : item_index + 4]
+            else:
                 continue
-            for product_candidate in lines[item_index + 1 : item_index + 5]:
+            for product_candidate in product_candidates:
                 if not product_candidate:
                     continue
                 if product_candidate.startswith(("Summe", "+ 19", "Rechnungsbetrag", "zahlbar bis")):
