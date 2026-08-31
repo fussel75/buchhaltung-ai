@@ -3310,6 +3310,30 @@ class BookingSuggestionTests(TestCase):
             allow_ocr=True,
         )
 
+    def test_bulk_job_runner_marks_cancelled_job_failed_instead_of_hanging(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "reextract",
+            "status": "running",
+            "items": [{"document_id": str(document_id), "status": "queued"}],
+        }
+
+        bulk_job_service.request_bulk_job_stop(job_id)
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "run_mock_extraction") as run_extraction,
+            patch.object(bulk_job_service, "finish_document_bulk_job") as finish_job,
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        run_extraction.assert_not_called()
+        finish_job.assert_called_once()
+        self.assertEqual(finish_job.call_args.args[:2], (job_id, "failed"))
+        self.assertEqual(finish_job.call_args.args[2], "Manuell abgebrochen.")
+
     def test_bulk_job_runner_runs_ai_extraction_and_stores_summary(self):
         job_id = uuid4()
         document_id = uuid4()

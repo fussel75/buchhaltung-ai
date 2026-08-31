@@ -2057,6 +2057,8 @@ def _should_force_ocr_for_ai(extraction: dict) -> bool:
     raw_result = extraction.get("raw_result") or extraction
     if raw_result.get("document_type") == "fuel_receipt":
         return True
+    if raw_result.get("source") in {"unreadable_pdf", "pdf_unreadable"}:
+        return True
     for field_name in ("net_amount", "tax_amount", "gross_amount"):
         if not extraction.get(field_name) and not raw_result.get(field_name):
             return True
@@ -2067,6 +2069,8 @@ def _should_use_vision_for_ai(extraction: dict, text: str) -> bool:
     raw_result = extraction.get("raw_result") or extraction
     if raw_result.get("document_type") == "fuel_receipt":
         return True
+    if _ai_fields_need_visual_review(extraction):
+        return True
     text_source = getattr(text, "source", "")
     if text_source in {"pymupdf_ocr", "pypdf_short", "pypdf_short_no_ocr"}:
         return True
@@ -2075,6 +2079,21 @@ def _should_use_vision_for_ai(extraction: dict, text: str) -> bool:
     for field_name in ("net_amount", "tax_amount", "gross_amount"):
         if not extraction.get(field_name) and not raw_result.get(field_name):
             return True
+    return False
+
+
+def _ai_fields_need_visual_review(extraction: dict) -> bool:
+    raw_result = extraction.get("raw_result") or extraction
+    warnings = " ".join(str(item) for item in (extraction.get("warnings") or raw_result.get("warnings") or [])).casefold()
+    if any(marker in warnings for marker in ("lieferant", "datum", "rechnung", "gesamtbetrag", "brutto", "zuordnung")):
+        return True
+    if raw_result.get("assignment_type") in {"assignment_unresolved", "general_cost"}:
+        return True
+    supplier = str(extraction.get("supplier_name") or raw_result.get("supplier_name") or "").strip()
+    if supplier and not search(r"[a-zäöüß]{3,}", supplier.casefold()):
+        return True
+    if supplier and search(r"\d", supplier) and not search(r"(gmbh|ohg|kg|ag|linde|dammers|holz|baustoff|elektro)", supplier.casefold()):
+        return True
     return False
 
 
@@ -2142,7 +2161,15 @@ def _finalize_pdf_result(document: dict, result: dict, text: str, *, allow_ai: b
     result = _with_pdf_text_diagnostics(result, text)
     if not allow_ai:
         return result
-    return maybe_enhance_extraction_with_ai(document=document, extraction=result, pdf_text=str(text))
+    pdf_images: list[str] = []
+    settings = get_settings()
+    if settings.ai_extraction_vision_enabled and _should_use_vision_for_ai(result, text):
+        pdf_images = _extract_pdf_page_images(
+            document["storage_path"],
+            max_pages=settings.ai_extraction_vision_max_pages,
+            dpi=settings.ai_extraction_vision_dpi,
+        )
+    return maybe_enhance_extraction_with_ai(document=document, extraction=result, pdf_text=str(text), pdf_images=pdf_images)
 
 
 def _extract_pdf_text_pypdf(storage_path: str) -> str:

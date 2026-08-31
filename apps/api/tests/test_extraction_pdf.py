@@ -482,6 +482,20 @@ class ExtractionPdfTests(TestCase):
         self.assertTrue(extraction_service._should_use_vision_for_ai(fuel_extraction, "Tank OCR"))
         self.assertTrue(extraction_service._should_use_vision_for_ai(amount_extraction, "Rechnung mit OCR Text"))
 
+    def test_ai_extraction_uses_vision_for_suspicious_supplier_date_or_assignment(self):
+        extraction = {
+            "supplier_name": "4242270364",
+            "invoice_date": None,
+            "net_amount": Decimal("68.00"),
+            "tax_amount": Decimal("12.92"),
+            "gross_amount": Decimal("80.92"),
+            "warnings": ["Nicht sicher erkannt: Lieferant, Datum."],
+            "raw_result": {"document_type": "incoming_invoice", "assignment_type": "general_cost"},
+        }
+        text = extraction_service.ExtractedPdfText("Rechnung " * 120, "pypdf")
+
+        self.assertTrue(extraction_service._should_use_vision_for_ai(extraction, text))
+
     def test_ai_extraction_skips_vision_for_complete_text_invoice(self):
         extraction = {
             "net_amount": Decimal("10.00"),

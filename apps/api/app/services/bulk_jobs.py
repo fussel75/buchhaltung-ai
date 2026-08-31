@@ -29,10 +29,12 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
         return
 
     health_entries: list[dict] = []
+    cancelled = False
     try:
         for item in job["items"]:
             if job_id in _CANCELLED_BULK_JOBS:
-                return
+                cancelled = True
+                break
             document_id = UUID(item["document_id"])
             mark_document_bulk_job_item(job_id, document_id, "running")
             claim = claim_document_for_bulk_job(document_id, job_id, _expected_status(job["action"]))
@@ -74,7 +76,10 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
                     )
             finally:
                 release_document_bulk_claim(document_id, job_id)
-        _finish_bulk_job(job_id, "completed", job["action"], health_entries)
+        if cancelled:
+            _finish_bulk_job(job_id, "failed", job["action"], health_entries, "Manuell abgebrochen.")
+        else:
+            _finish_bulk_job(job_id, "completed", job["action"], health_entries)
     except Exception as error:  # noqa: BLE001 - persist fatal job errors for the UI
         _finish_bulk_job(job_id, "failed", job["action"], health_entries, _error_message(error))
     finally:

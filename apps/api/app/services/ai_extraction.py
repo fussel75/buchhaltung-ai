@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import json
 import os
-from re import findall, search, sub
+from re import IGNORECASE, findall, search, sub
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -209,8 +209,12 @@ def _system_prompt() -> str:
         "Du bist ein sehr genauer deutscher Buchhaltungs-Extraktor. "
         "Lies Rechnungen, Gutschriften, Tankbelege, Freistellungsbescheinigungen und steuerliche Nachweise. "
         "Erfinde keine Werte. Wenn ein Wert nicht im Text steht, nutze null. "
-        "Nutze Projektstammdaten nur, wenn Text, Kommission, Kundenreferenz, Betreff, Adresse, Projektnummer, Projektname, Bauherr oder Alias plausibel passt. "
+        "Der Lieferant ist die ausstellende Firma im Briefkopf, nicht Dateiname, Kundennummer oder Rechnungsnummer. "
+        "Das Rechnungsdatum kann als Rechnungsdatum, Belegdatum oder Datum neben der Rechnungsnummer stehen. "
+        "Beträge stammen aus der Summenzeile: Gesamt Netto, MwSt/USt-Betrag und Gesamt Brutto/Rechnungsbetrag. "
+        "Nutze Projektstammdaten nur, wenn Text, Bestelldaten, BV, Bauvorhaben, Kommission, Kommision, KOM, Kundenreferenz, Betreff, Objekt, Baustelle, AUFTR.TEXT, Adresse, Projektnummer, Projektname, Bauherr oder Alias plausibel passt. "
         "Wenn nur ein Teil der Projektadresse oder des Projektnamens genannt wird, gleiche ihn mit der Projektliste ab und liefere Code plus Projektnummer. "
+        "Wenn ein klarer Projekt-/Objekt-Hinweis im Beleg steht, aber kein Eintrag in der Projektliste passt, liefere den lesbaren Hinweis als assignment_code und project_number null. "
         "Auch abgeschlossene Projekte dürfen zugeordnet werden, wenn der Beleg klar dazu passt. "
         "Tankbelege sind Fahrzeug/Tanken und werden keinem Bauvorhaben zugeordnet, außer der Beleg nennt ausdrücklich ein Projekt. "
         "Freistellungsbescheinigungen und §13b-Nachweise sind keine normalen Eingangsrechnungen. "
@@ -249,7 +253,7 @@ def _user_prompt(
         for unit in selected_assignment_units
     ]
     schema = {
-        "document_type": "incoming_invoice|credit_note|fuel_receipt|tax_exemption_certificate|reverse_charge_certificate|other|null",
+        "document_type": "incoming_invoice|credit_note|fuel_receipt|project_document|tax_exemption_certificate|reverse_charge_certificate|other|null",
         "supplier_name": "string|null",
         "invoice_number": "string|null",
         "customer_number": "string|null",
@@ -388,6 +392,7 @@ def _merge_ai_payload(
     if accepted.get("assignment_code"):
         raw_result.pop("project_code", None)
         raw_result["assignment_type"] = "assigned"
+        raw_result["project_number"] = normalized_ai.get("project_number")
     if "document_type" in accepted and accepted["document_type"] == "credit_note":
         raw_result["document_type"] = "credit_note"
 
@@ -417,6 +422,8 @@ def _merge_ai_payload(
 
 def _normalize_ai_payload(ai_payload: dict[str, Any], assignment_units: list[dict[str, Any]]) -> dict[str, Any]:
     payload = {key: ai_payload.get(key) for key in AI_MERGE_FIELDS | {"confidence", "evidence", "warnings", "normalized_filename"}}
+    original_assignment_code = payload.get("assignment_code")
+    original_assignment_kind = payload.get("assignment_kind")
     document_type = payload.get("document_type")
     if document_type not in AI_EXTRACTABLE_DOCUMENT_TYPES:
         payload["document_type"] = None
@@ -435,9 +442,9 @@ def _normalize_ai_payload(ai_payload: dict[str, Any], assignment_units: list[dic
         payload["assignment_kind"] = assignment.get("kind")
         payload["project_number"] = assignment.get("project_number")
     else:
-        payload["assignment_code"] = None
+        payload["assignment_code"] = _plausible_unmatched_assignment_code(original_assignment_code)
         payload["project_number"] = None
-        payload["assignment_kind"] = None
+        payload["assignment_kind"] = original_assignment_kind if payload["assignment_code"] and original_assignment_kind in VALID_AI_ASSIGNMENT_KINDS else None
     payload["evidence"] = [str(item)[:300] for item in payload.get("evidence") or [] if item][:8]
     payload["warnings"] = [str(item)[:300] for item in payload.get("warnings") or [] if item][:8]
     for field_name in ("supplier_name", "invoice_number", "customer_number", "item_summary"):
@@ -545,7 +552,12 @@ def _assignment_address(unit: dict[str, Any]) -> str | None:
 
 def _should_replace_value(field_name: str, current_value: Any, new_value: Any, raw_result: dict[str, Any]) -> bool:
     if field_name in {"assignment_code", "project_number", "assignment_kind"}:
-        return bool(new_value) and (not current_value or raw_result.get("assignment_type") == "assignment_unresolved")
+        return bool(new_value) and (
+            not current_value
+            or raw_result.get("assignment_type") in {"assignment_unresolved", "general_cost"}
+            or _field_warned_missing_or_uncertain(raw_result, "Zuordnung")
+            or _assignment_value_is_generic(current_value)
+        )
     if current_value in (None, "", "-", "MOCK"):
         return True
     if field_name == "invoice_number" and str(current_value).startswith("MOCK-"):
@@ -563,6 +575,37 @@ def _should_replace_value(field_name: str, current_value: Any, new_value: Any, r
     if field_name in MONEY_FIELDS and _decimal_or_none(current_value) is None:
         return True
     return False
+
+
+VALID_AI_ASSIGNMENT_KINDS = {
+    "construction_project",
+    "construction_or_dropoff_site",
+    "location",
+    "general_cost",
+    "cost_object",
+    "vehicle",
+    "subscription",
+    "department",
+}
+
+
+def _plausible_unmatched_assignment_code(value: Any) -> str | None:
+    text = sub(r"\s+", " ", str(value or "").strip())
+    if len(text) < 4 or len(text) > 120:
+        return None
+    normalized = _normalize_lookup(text)
+    if normalized in {"allgemeinekosten", "allgemeinkosten", "unbekannt", "ungeklaert", "ungeklärt"}:
+        return None
+    if search(r"(weg|strasse|straße|stieg|kamp|koppel|allee|platz|damm|chaussee|landstr|eck|bv|bauvorhaben)", text, IGNORECASE):
+        return text
+    if search(r"\d", text) and search(r"[A-Za-zÄÖÜäöüß]{3,}", text):
+        return text
+    return None
+
+
+def _assignment_value_is_generic(value: Any) -> bool:
+    normalized = _normalize_lookup(value)
+    return normalized in {"allgemeinekosten", "allgemeinkosten", "bauvorhabenungeklaert", "bauvorhabenungeklärt", "ungeklaert", "ungeklärt"}
 
 
 def _field_warned_missing_or_uncertain(raw_result: dict[str, Any], label: str) -> bool:

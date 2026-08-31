@@ -158,6 +158,69 @@ class AiExtractionTests(TestCase):
         self.assertIn("invoice_date", accepted_fields)
         self.assertIn("tax_amount", accepted_fields)
 
+    def test_ai_extraction_replaces_generic_assignment_with_unmatched_project_hint(self):
+        extraction = {
+            "supplier_name": "Dammers",
+            "invoice_number": "813467-608",
+            "invoice_date": "2026-08-12",
+            "net_amount": Decimal("307.66"),
+            "tax_amount": Decimal("58.46"),
+            "gross_amount": Decimal("366.12"),
+            "currency": "EUR",
+            "confidence": Decimal("0.72"),
+            "warnings": ["Zuordnung unklar"],
+            "source": "pdf_text_rules",
+            "assignment_type": "general_cost",
+            "raw_result": {
+                "supplier_name": "Dammers",
+                "invoice_number": "813467-608",
+                "invoice_date": "2026-08-12",
+                "assignment_code": "Allgemeine Kosten",
+                "assignment_type": "general_cost",
+                "warnings": ["Zuordnung unklar"],
+                "source": "pdf_text_rules",
+            },
+        }
+        ai_payload = {
+            "supplier_name": "Dammers",
+            "invoice_number": "813467-608",
+            "invoice_date": "2026-08-12",
+            "document_type": "incoming_invoice",
+            "cost_category": "material",
+            "assignment_code": "Eckerkoppel 149",
+            "assignment_kind": "construction_project",
+            "project_number": None,
+            "item_summary": "Zink-Blech vorbew. VM Anthra",
+            "confidence": "0.95",
+            "evidence": ["Bestelldaten: Eckerkoppel 149 Hr. Drita"],
+            "warnings": ["Projekt nicht in Stammdaten gefunden."],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload),
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "813467-608.pdf"},
+                extraction=extraction,
+                pdf_text="Bestelldaten: Eckerkoppel 149 Hr. Drita",
+            )
+
+        self.assertEqual(result["raw_result"]["assignment_code"], "Eckerkoppel 149")
+        self.assertIsNone(result["raw_result"]["project_number"])
+        self.assertEqual(result["raw_result"]["assignment_kind"], "construction_project")
+        self.assertEqual(result["raw_result"]["item_summary"], "Zink-Blech vorbew. VM Anthra")
+        accepted_fields = result["raw_result"]["ai_extraction"]["accepted_fields"]
+        self.assertIn("assignment_code", accepted_fields)
+        self.assertIn("assignment_kind", accepted_fields)
+
     def test_ai_provider_failure_keeps_rule_result_with_warning(self):
         extraction = {
             "supplier_name": "Unklar",
