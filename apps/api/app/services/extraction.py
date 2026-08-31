@@ -425,7 +425,7 @@ def _build_cii_xml_result(
     # Some supplier XML files do not carry construction-site delivery text,
     # so the project assignment is enriched from the human-readable PDF.
     delivery_address = _xml_delivery_address(root, ns) or _find_delivery_address(text)
-    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
+    customer_reference = _best_customer_reference(text, document["original_filename"])
     discount_due_date = None
     due_date = (
         visible_discount.get("due_date")
@@ -599,7 +599,7 @@ def _build_ubl_xml_result(
     discount_amount = _signed_discount_amount(discount_amount, gross_amount)
 
     delivery_address = _ubl_delivery_address(root, ns) or _find_delivery_address(text)
-    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
+    customer_reference = _best_customer_reference(text, document["original_filename"])
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
         supplier_name = _normalize_supplier_name(supplier_rule["supplier_name"]) or supplier_rule["supplier_name"]
@@ -937,7 +937,7 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         if delivery_addresses
         else (_find_delivery_address(text) or _find_reference_delivery_address(text))
     )
-    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(document["original_filename"])
+    customer_reference = _best_customer_reference(text, document["original_filename"])
     supplier_name = _supplier_name(document, text)
     supplier_rule = find_supplier_rule(document["tenant_id"], supplier_name, customer_number, text[:4000])
     if supplier_rule:
@@ -1440,7 +1440,7 @@ def _build_project_supporting_document_result(document: dict, text: str) -> dict
         return None
 
     tenant_profile = ensure_tenant_profile(document["tenant_id"])
-    customer_reference = _find_customer_reference(text) or _find_assignment_hint_from_filename(original_filename)
+    customer_reference = _best_customer_reference(text, original_filename)
     delivery_addresses = _find_delivery_addresses(text)
     delivery_address = (
         delivery_addresses[0]
@@ -2657,7 +2657,23 @@ def _find_linde_header_fields(text: str) -> dict[str, str | None]:
         IGNORECASE,
     )
     if not match:
-        return {}
+        match = search(
+            r"Rechnungsnummer\s*\n\s*Rechnungsdatum\s*\n\s*Ihre\s+Kundennummer[\s\S]{0,180}?"
+            r"([0-9]{6,})\s*\n\s*(\d{2}\.\d{2}\.\d{4})\s*\n\s*([0-9 ]{5,})\b",
+            text,
+            IGNORECASE,
+        )
+    if not match:
+        invoice_number = _find_text(text, r"Rechnungsnummer\s*:?\s*\n?\s*([0-9]{6,})")
+        invoice_date = _find_date(text, r"Rechnungsdatum\s*:?\s*\n?\s*(\d{2}\.\d{2}\.\d{4})")
+        customer_number = _find_text(text, r"Ihre\s+Kundennummer\s*:?\s*\n?\s*([0-9 ]{5,})")
+        if not any((invoice_number, invoice_date, customer_number)):
+            return {}
+        return {
+            "invoice_number": invoice_number,
+            "invoice_date": invoice_date,
+            "customer_number": sub(r"\s+", "", customer_number) if customer_number else None,
+        }
     return {
         "invoice_number": match.group(1).strip(),
         "invoice_date": _date_text_to_iso(match.group(2)),
@@ -3155,10 +3171,17 @@ def _find_labeled_project_reference(text: str) -> str | None:
     lines = text.splitlines()
     for index, line in enumerate(lines):
         match = search(
-            rf"^\s*(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s*(?:(?::|\.|\-)\s*(.*?)\s*)?$",
+            rf"^\s*(?:[•○●oO*\-–—|]+\s*)?(?:{PROJECT_REFERENCE_LABEL_PATTERN})"
+            rf"\s*(?:(?::|\.|\-)\s*(.*?)\s*)?$",
             line,
             IGNORECASE,
         )
+        if not match:
+            match = search(
+                rf"^\s*(?:[•○●oO*\-–—|]+\s*)?(?:{PROJECT_REFERENCE_LABEL_PATTERN})\s+(.*?)\s*$",
+                line,
+                IGNORECASE,
+            )
         if not match:
             continue
         value = (match.group(1) or "").strip()
@@ -3178,6 +3201,10 @@ def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
     return None
 
 
+def _is_imported_from_sorted_filename(text: str) -> bool:
+    return "bereitssortiertendateinamenimportiert" in _compact_search_text(text)
+
+
 def _clean_project_reference_value(value: str | None) -> str | None:
     if not value:
         return None
@@ -3194,6 +3221,7 @@ def _clean_project_reference_value(value: str | None) -> str | None:
         cleaned,
         flags=IGNORECASE,
     ).strip(" :-\t")
+    cleaned = sub(r"\s+:\s*.*$", "", cleaned).strip(" :-\t")
     cleaned = sub(
         r"\s+\b(?:Hr\.?|Herr|Frau)\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*)?\s*$",
         "",
@@ -3232,8 +3260,15 @@ def _find_customer_reference(text: str) -> str | None:
     )
     if not match:
         return None
-    value = match.group(1).strip(" :-\t")
-    return value or None
+    return _clean_project_reference_value(match.group(1))
+
+
+def _best_customer_reference(text: str, original_filename: str) -> str | None:
+    filename_assignment_hint = _find_assignment_hint_from_filename(original_filename)
+    text_customer_reference = _find_customer_reference(text)
+    if filename_assignment_hint and _is_imported_from_sorted_filename(text):
+        return filename_assignment_hint
+    return text_customer_reference or filename_assignment_hint
 
 
 def _find_reference_delivery_address(text: str) -> str | None:
