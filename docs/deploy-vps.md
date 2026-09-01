@@ -72,3 +72,34 @@ git pull
 docker compose up --build -d
 docker compose ps
 ```
+
+## OpenRouter / echte KI aktivieren
+
+Der Key wird nur auf dem Server in `.env` gesetzt, nicht im Browser. Beispiel:
+
+```bash
+cd /docker/buchhaltung-ai
+nano .env
+```
+
+Diese Werte setzen oder anpassen:
+
+```env
+AI_EXTRACTION_ENABLED=true
+AI_EXTRACTION_API_KEY=sk-or-v1-...
+AI_EXTRACTION_BASE_URL=https://openrouter.ai/api/v1
+AI_EXTRACTION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_VISION_ENABLED=true
+AI_EXTRACTION_VISION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_TIMEOUT_SECONDS=60
+AI_EXTRACTION_HTTP_REFERER=https://buha.fristd-bau.net
+AI_EXTRACTION_APP_TITLE=buchhaltung-ai
+```
+
+Danach neu starten:
+
+```bash
+cd /docker/buchhaltung-ai
+docker compose up -d --build
+docker compose logs -f api
+```

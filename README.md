@@ -94,6 +94,35 @@ Die Extraktionsreihenfolge ist:
 4. Wenn keine strukturierten Daten vorhanden sind, PDF-Textregeln verwenden.
 5. OCR erst als spaeterer Fallback fuer nicht textlesbare Scans.
 
+## Echte KI-Extraktion
+
+Die App kann eine OpenAI-kompatible KI-Schnittstelle nutzen, z.B. OpenRouter. Ohne Key laeuft sie bewusst
+weiter mit Regeln, ZUGFeRD/XML, PDF-Text und OCR. Mit Key wird die KI bei Problembelegen oder per
+`KI pruefen` als fachlicher Buchhaltungs-/Steuerberater-Agent eingesetzt: Sie bekommt PDF-Text,
+optional gerenderte Bildseiten und die passenden Projektstammdaten, klassifiziert zuerst die Dokumentart
+und liefert danach belegbare JSON-Felder mit Evidenz.
+
+Wichtige Produktiv-Variablen in `.env`:
+
+```env
+AI_EXTRACTION_ENABLED=true
+AI_EXTRACTION_API_KEY=sk-or-v1-...
+AI_EXTRACTION_BASE_URL=https://openrouter.ai/api/v1
+AI_EXTRACTION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_VISION_ENABLED=true
+AI_EXTRACTION_VISION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_VISION_MAX_PAGES=2
+AI_EXTRACTION_VISION_DPI=150
+AI_EXTRACTION_TIMEOUT_SECONDS=60
+AI_EXTRACTION_MIN_CONFIDENCE=0.90
+AI_EXTRACTION_MAX_TEXT_CHARS=18000
+AI_EXTRACTION_HTTP_REFERER=https://buha.fristd-bau.net
+AI_EXTRACTION_APP_TITLE=buchhaltung-ai
+```
+
+Fuer bessere Erkennungsqualitaet kann bei OpenRouter ein staerkeres text- und bildfaehiges Modell
+eingetragen werden. Der API-Key bleibt serverseitig in `.env` und wird nicht an das Frontend ausgeliefert.
+
 Strukturierte XML-Belege durchlaufen zusaetzlich ein erstes Validator-Gate. Das MVP prueft
 Pflichtfelder, ISO-Datum, mindestens eine Position und die Summenlogik Netto + USt = Brutto.
 Fehler werden als `structured_validation` und `structured_validation_errors` gespeichert, in den

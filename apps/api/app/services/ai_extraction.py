@@ -185,6 +185,7 @@ def _call_ai_extractor(
             "Authorization": f"Bearer {settings.ai_extraction_api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": os.environ.get("AI_EXTRACTION_HTTP_REFERER", "https://buha.fristd-bau.net"),
+            "X-OpenRouter-Title": os.environ.get("AI_EXTRACTION_APP_TITLE", "buchhaltung-ai"),
             "X-Title": "buchhaltung-ai",
         },
         method="POST",
@@ -206,9 +207,15 @@ def _call_ai_extractor(
 
 def _system_prompt() -> str:
     return (
-        "Du bist ein sehr genauer deutscher Buchhaltungs-Extraktor. "
-        "Lies Rechnungen, Gutschriften, Tankbelege, Freistellungsbescheinigungen und steuerliche Nachweise. "
-        "Erfinde keine Werte. Wenn ein Wert nicht im Text steht, nutze null. "
+        "Du bist ein sehr genauer deutscher Buchhaltungs- und Steuerberater-Agent fuer eine Bauunternehmung. "
+        "Arbeite wie eine fachliche Vorpruefung: zuerst Dokumentart bestimmen, dann relevante Felder extrahieren, "
+        "danach Zuordnung und Buchungsrelevanz begruenden. "
+        "Lies Rechnungen, Gutschriften, Tankbelege, Freistellungsbescheinigungen, §13b-Nachweise, Steuerbescheide "
+        "und sonstige steuerliche Unterlagen. "
+        "Erfinde keine Werte. Wenn ein Wert nicht im Text oder Bild belegbar ist, nutze null und erklaere die Unsicherheit. "
+        "Wenn der Beleg eine Rechnung ist, muessen Lieferant, Rechnungsnummer, Rechnungsdatum, Netto, USt, Brutto, "
+        "Kostenart und Zuordnung aus dem Dokument oder den Stammdaten abgeleitet werden. "
+        "Wenn der Beleg keine Rechnung ist, setze document_type passend und verlange keine Rechnungsnummer oder Bruttosumme. "
         "Der Lieferant ist die ausstellende Firma im Briefkopf, nicht Dateiname, Kundennummer oder Rechnungsnummer. "
         "Das Rechnungsdatum kann als Rechnungsdatum, Belegdatum oder Datum neben der Rechnungsnummer stehen. "
         "Beträge stammen aus der Summenzeile: Gesamt Netto, MwSt/USt-Betrag und Gesamt Brutto/Rechnungsbetrag. "
@@ -216,6 +223,9 @@ def _system_prompt() -> str:
         "Wenn nur ein Teil der Projektadresse oder des Projektnamens genannt wird, gleiche ihn mit der Projektliste ab und liefere Code plus Projektnummer. "
         "Wenn ein klarer Projekt-/Objekt-Hinweis im Beleg steht, aber kein Eintrag in der Projektliste passt, liefere den lesbaren Hinweis als assignment_code und project_number null. "
         "Auch abgeschlossene Projekte dürfen zugeordnet werden, wenn der Beleg klar dazu passt. "
+        "Typische Projekt-Hinweise koennen auch Bestelldaten, Kommissionsangaben, Objekt, AUFTR.TEXT, Baustelle "
+        "oder Freitext neben der Lieferadresse sein. Strassennamen sind starke Hinweise. "
+        "Wenn ein Projekt nicht als Kuerzel vorhanden ist, verwende den klar lesbaren Strassennamen als assignment_code. "
         "Tankbelege sind Fahrzeug/Tanken und werden keinem Bauvorhaben zugeordnet, außer der Beleg nennt ausdrücklich ein Projekt. "
         "Freistellungsbescheinigungen und §13b-Nachweise sind keine normalen Eingangsrechnungen. "
         "Antworte ausschließlich als JSON-Objekt."
