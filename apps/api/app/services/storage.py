@@ -216,6 +216,59 @@ def rename_stored_document(storage_path: str, normalized_filename: str) -> Path:
     return target.relative_to(settings.storage_root)
 
 
+def resolve_existing_stored_document_path(
+    storage_path: str,
+    *,
+    tenant_id: str | None = None,
+    sha256_value: str | None = None,
+    original_filename: str | None = None,
+) -> Path:
+    target = resolve_stored_document_path(storage_path)
+    if target.is_file():
+        return target
+
+    settings = get_settings()
+    root = settings.storage_root.resolve()
+    search_root = root
+    if tenant_id:
+        tenant_root = root / _safe_tenant_segment(tenant_id)
+        originals_root = tenant_root / "originals"
+        if originals_root.exists():
+            search_root = originals_root
+        elif tenant_root.exists():
+            search_root = tenant_root
+
+    candidates: list[Path] = []
+    if sha256_value and len(sha256_value) >= 16:
+        candidates.extend(path for path in search_root.rglob(f"{sha256_value[:16]}-*") if path.is_file())
+
+    candidates.extend(path for path in search_root.rglob(target.name) if path.is_file())
+
+    if original_filename:
+        safe_original = _safe_filename(original_filename, target.suffix).casefold()
+        candidates.extend(path for path in search_root.rglob("*") if path.is_file() and path.name.casefold() == safe_original)
+        compact_original = _compact_filename_key(safe_original)
+        candidates.extend(
+            path
+            for path in search_root.rglob("*")
+            if path.is_file() and _compact_filename_key(path.name) == compact_original
+        )
+
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_relative_to(root) and resolved.is_file():
+            return resolved
+
+    if sha256_value:
+        for candidate in search_root.rglob("*"):
+            resolved = candidate.resolve()
+            if not resolved.is_relative_to(root) or not resolved.is_file():
+                continue
+            if _file_sha256(resolved) == sha256_value:
+                return resolved
+    return target
+
+
 def resolve_stored_document_path(storage_path: str) -> Path:
     settings = get_settings()
     root = settings.storage_root.resolve()
@@ -233,4 +286,19 @@ def _safe_filename(filename: str, fallback_suffix: str) -> str:
     if not stem:
         stem = "rechnung"
     return f"{stem[:180]}{suffix.lower()}"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _compact_filename_key(value: str) -> str:
+    return sub(r"[^a-z0-9]+", "", value.casefold())
 

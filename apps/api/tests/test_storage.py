@@ -10,7 +10,12 @@ from unittest.mock import patch
 from starlette.datastructures import Headers, UploadFile
 
 from app.services import storage as storage_service
-from app.services.storage import UploadRejectedError, effective_content_type, store_original_document
+from app.services.storage import (
+    UploadRejectedError,
+    effective_content_type,
+    resolve_existing_stored_document_path,
+    store_original_document,
+)
 
 
 def upload_file(filename: str, content_type: str, content: bytes) -> UploadFile:
@@ -47,6 +52,62 @@ class StorageTests(TestCase):
                 )
 
             self.assertEqual(stored.content_type, "application/pdf")
+
+    def test_resolve_existing_stored_document_path_recovers_by_hash_prefix(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(storage_root=root)
+            existing = root / "demo-mandant" / "originals" / "2026" / "06" / "abcdef1234567890-upload.pdf"
+            existing.parent.mkdir(parents=True)
+            existing.write_bytes(b"%PDF")
+
+            with patch.object(storage_service, "get_settings", return_value=settings):
+                resolved = resolve_existing_stored_document_path(
+                    "demo-mandant/originals/2026/06/ERg alt.pdf",
+                    tenant_id="demo-mandant",
+                    sha256_value="abcdef1234567890fedcba",
+                    original_filename="Invoice.pdf",
+                )
+
+            self.assertEqual(resolved, existing)
+
+    def test_resolve_existing_stored_document_path_recovers_by_safe_filename(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(storage_root=root)
+            existing = root / "demo-mandant" / "originals" / "2026" / "08" / "Mahnung Arens Stitz KG 2327409.pdf"
+            existing.parent.mkdir(parents=True)
+            existing.write_bytes(b"%PDF")
+
+            with patch.object(storage_service, "get_settings", return_value=settings):
+                resolved = resolve_existing_stored_document_path(
+                    "demo-mandant/originals/2026/08/ERg ohne Nummer.pdf",
+                    tenant_id="demo-mandant",
+                    sha256_value=None,
+                    original_filename="Mahnung Arens & Stitz KG 2327409.pdf",
+                )
+
+            self.assertEqual(resolved, existing)
+
+    def test_resolve_existing_stored_document_path_recovers_by_full_hash_after_rename(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(storage_root=root)
+            content = b"%PDF renamed content"
+            digest = sha256(content).hexdigest()
+            existing = root / "demo-mandant" / "originals" / "2026" / "06" / "ERg neu benannt.pdf"
+            existing.parent.mkdir(parents=True)
+            existing.write_bytes(content)
+
+            with patch.object(storage_service, "get_settings", return_value=settings):
+                resolved = resolve_existing_stored_document_path(
+                    "demo-mandant/originals/2026/06/ERg alter Name.pdf",
+                    tenant_id="demo-mandant",
+                    sha256_value=digest,
+                    original_filename="Invoice E24-13525-RE.pdf",
+                )
+
+            self.assertEqual(resolved, existing)
 
     def test_effective_content_type_preserves_specific_content_type(self):
         self.assertEqual(effective_content_type("rechnung.pdf", "application/xml"), "application/xml")

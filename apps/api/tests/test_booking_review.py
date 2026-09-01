@@ -2805,6 +2805,90 @@ class BookingSuggestionTests(TestCase):
         audit_event.assert_called_once()
         self.assertEqual(audit_event.call_args.kwargs["event_type"], "document.extraction_updated")
 
+    def test_save_document_extraction_persists_recovered_storage_path(self):
+        document_id = uuid4()
+        tenant_id = "demo-mandant"
+        now = datetime(2026, 8, 20, tzinfo=UTC)
+        current_document = {
+            "id": document_id,
+            "tenant_id": tenant_id,
+            "original_filename": "Invoice E24-13525-RE.pdf",
+            "normalized_filename": None,
+            "content_type": "application/pdf",
+            "sha256": "abcdef1234567890",
+            "size_bytes": 123,
+            "storage_path": "demo-mandant/originals/2026/06/missing.pdf",
+            "status": "extracted",
+            "processing_job_id": None,
+            "processing_started_at": None,
+            "duplicate_of": None,
+            "created_at": now,
+            "updated_at": now,
+            "extraction": None,
+            "booking_suggestions": [],
+            "payment_decision": None,
+        }
+        updated_document = {
+            **current_document,
+            "normalized_filename": "ERg E24-13525-RE.pdf",
+            "storage_path": "demo-mandant/originals/2026/06/ERg E24-13525-RE.pdf",
+            "updated_at": now,
+        }
+        extraction_row = {
+            "id": uuid4(),
+            "document_id": document_id,
+            "tenant_id": tenant_id,
+            "supplier_name": "Eindruck24",
+            "invoice_number": "E24-13525-RE",
+            "invoice_date": date(2026, 4, 22),
+            "service_period": "2026-04",
+            "net_amount": Decimal("10.00"),
+            "tax_amount": Decimal("1.90"),
+            "gross_amount": Decimal("11.90"),
+            "currency": "EUR",
+            "confidence": Decimal("0.88"),
+            "warnings": [],
+            "raw_result": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        cursor = SequenceCursor(fetchone_results=[extraction_row, updated_document])
+
+        with (
+            patch.object(database_service, "get_document", return_value=current_document),
+            patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)),
+            patch.object(database_service, "Jsonb", side_effect=lambda value: value),
+            patch.object(database_service, "rename_stored_document", return_value=Path(updated_document["storage_path"])) as rename_file,
+            patch.object(database_service, "insert_audit_event"),
+        ):
+            result = database_service.save_document_extraction(
+                document_id,
+                tenant_id,
+                {
+                    "supplier_name": "Eindruck24",
+                    "invoice_number": "E24-13525-RE",
+                    "invoice_date": date(2026, 4, 22),
+                    "service_period": "2026-04",
+                    "net_amount": Decimal("10.00"),
+                    "tax_amount": Decimal("1.90"),
+                    "gross_amount": Decimal("11.90"),
+                    "currency": "EUR",
+                    "confidence": Decimal("0.88"),
+                    "warnings": [],
+                    "normalized_filename": "ERg E24-13525-RE.pdf",
+                    "storage_path": "demo-mandant/originals/2026/06/hash-upload.pdf",
+                },
+            )
+
+        rename_file.assert_called_once_with(
+            storage_path="demo-mandant/originals/2026/06/hash-upload.pdf",
+            normalized_filename="ERg E24-13525-RE.pdf",
+        )
+        document_update_params = next(params for statement, params in cursor.statements if "update documents" in statement)
+        self.assertEqual(Path(document_update_params[1]).as_posix(), updated_document["storage_path"])
+        self.assertEqual(document_update_params[2], "demo-mandant/originals/2026/06/hash-upload.pdf")
+        self.assertEqual(result["storage_path"], updated_document["storage_path"])
+
     def test_update_document_extraction_saves_certificate_dates(self):
         document_id = uuid4()
         tenant_id = "demo-mandant"

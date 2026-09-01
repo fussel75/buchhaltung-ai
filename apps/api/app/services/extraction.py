@@ -24,6 +24,7 @@ from app.services.database import (
     insert_audit_event,
     save_document_extraction,
 )
+from app.services.storage import resolve_existing_stored_document_path
 
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
 REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready"}
@@ -272,18 +273,57 @@ def run_ai_extraction(
 
 
 def _build_extraction_result(document: dict, *, allow_ai: bool = True, allow_ocr: bool = True) -> dict:
+    document = _with_recovered_storage_path(document)
     if _is_standalone_xml_document(document):
         structured = _build_standalone_xml_result(document)
-        return structured or _build_mock_result(document)
+        return _with_storage_path_recovery_result(document, structured or _build_mock_result(document))
 
     if _is_pdf_document(document):
         structured = _build_embedded_xml_result(document, allow_ocr=allow_ocr)
         if structured:
-            return structured
+            return _with_storage_path_recovery_result(document, structured)
 
-        return _build_pdf_text_result(document, allow_ai=allow_ai, allow_ocr=allow_ocr)
+        return _with_storage_path_recovery_result(
+            document,
+            _build_pdf_text_result(document, allow_ai=allow_ai, allow_ocr=allow_ocr),
+        )
 
-    return _build_mock_result(document)
+    return _with_storage_path_recovery_result(document, _build_mock_result(document))
+
+
+def _with_recovered_storage_path(document: dict) -> dict:
+    storage_path = document.get("storage_path")
+    if not storage_path:
+        return document
+    try:
+        resolved = resolve_existing_stored_document_path(
+            storage_path,
+            tenant_id=document.get("tenant_id"),
+            sha256_value=document.get("sha256"),
+            original_filename=document.get("original_filename"),
+        )
+    except (OSError, ValueError):
+        return document
+    settings = get_settings()
+    try:
+        recovered_path = resolved.relative_to(settings.storage_root.resolve()).as_posix()
+    except ValueError:
+        return document
+    if recovered_path == storage_path:
+        return document
+    recovered_document = dict(document)
+    recovered_document["storage_path"] = recovered_path
+    recovered_document["recovered_storage_path"] = storage_path
+    return recovered_document
+
+
+def _with_storage_path_recovery_result(document: dict, result: dict) -> dict:
+    if not document.get("recovered_storage_path"):
+        return result
+    result = dict(result)
+    result["storage_path"] = document["storage_path"]
+    result["recovered_storage_path"] = document["recovered_storage_path"]
+    return result
 
 
 def _is_standalone_xml_document(document: dict) -> bool:

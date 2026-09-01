@@ -1199,12 +1199,13 @@ def save_document_extraction(
     extraction_id = uuid4()
     warnings = extraction.get("warnings", [])
     normalized_filename = extraction.get("normalized_filename")
+    recovered_storage_path = extraction.get("storage_path")
     normalized_storage_path = None
     if normalized_filename:
         current_document = get_document(document_id)
         if current_document:
             normalized_storage_path = rename_stored_document(
-                storage_path=current_document["storage_path"],
+                storage_path=recovered_storage_path or current_document["storage_path"],
                 normalized_filename=normalized_filename,
             )
 
@@ -1274,7 +1275,7 @@ def save_document_extraction(
                 set
                     status = 'extracted',
                     normalized_filename = coalesce(%s, normalized_filename),
-                    storage_path = coalesce(%s, storage_path),
+                    storage_path = coalesce(%s, %s, storage_path),
                     updated_at = %s
                 where id = %s
                 returning *
@@ -1282,6 +1283,7 @@ def save_document_extraction(
                 (
                     normalized_filename,
                     str(normalized_storage_path) if normalized_storage_path else None,
+                    recovered_storage_path,
                     now,
                     document_id,
                 ),
