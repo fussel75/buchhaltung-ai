@@ -4,10 +4,17 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
+from app.config import Settings
 from app.services import ai_extraction
 
 
 class AiExtractionTests(TestCase):
+    def test_default_ai_models_use_kimi_k3(self):
+        settings = Settings()
+
+        self.assertEqual(settings.ai_extraction_model, "moonshotai/kimi-k3")
+        self.assertEqual(settings.ai_extraction_vision_model, "moonshotai/kimi-k3")
+
     def test_disabled_ai_extraction_returns_original_result(self):
         extraction = {"supplier_name": "Unklar", "confidence": Decimal("0.42"), "warnings": []}
 

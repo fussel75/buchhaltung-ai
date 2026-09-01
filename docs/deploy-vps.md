@@ -88,9 +88,9 @@ Diese Werte setzen oder anpassen:
 AI_EXTRACTION_ENABLED=true
 AI_EXTRACTION_API_KEY=sk-or-v1-...
 AI_EXTRACTION_BASE_URL=https://openrouter.ai/api/v1
-AI_EXTRACTION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_MODEL=moonshotai/kimi-k3
 AI_EXTRACTION_VISION_ENABLED=true
-AI_EXTRACTION_VISION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_VISION_MODEL=moonshotai/kimi-k3
 AI_EXTRACTION_TIMEOUT_SECONDS=60
 AI_EXTRACTION_HTTP_REFERER=https://buha.fristd-bau.net
 AI_EXTRACTION_APP_TITLE=buchhaltung-ai

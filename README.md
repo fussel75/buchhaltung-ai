@@ -108,9 +108,9 @@ Wichtige Produktiv-Variablen in `.env`:
 AI_EXTRACTION_ENABLED=true
 AI_EXTRACTION_API_KEY=sk-or-v1-...
 AI_EXTRACTION_BASE_URL=https://openrouter.ai/api/v1
-AI_EXTRACTION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_MODEL=moonshotai/kimi-k3
 AI_EXTRACTION_VISION_ENABLED=true
-AI_EXTRACTION_VISION_MODEL=openai/gpt-4o-mini
+AI_EXTRACTION_VISION_MODEL=moonshotai/kimi-k3
 AI_EXTRACTION_VISION_MAX_PAGES=2
 AI_EXTRACTION_VISION_DPI=150
 AI_EXTRACTION_TIMEOUT_SECONDS=60
@@ -120,8 +120,9 @@ AI_EXTRACTION_HTTP_REFERER=https://buha.fristd-bau.net
 AI_EXTRACTION_APP_TITLE=buchhaltung-ai
 ```
 
-Fuer bessere Erkennungsqualitaet kann bei OpenRouter ein staerkeres text- und bildfaehiges Modell
-eingetragen werden. Der API-Key bleibt serverseitig in `.env` und wird nicht an das Frontend ausgeliefert.
+Kimi K3 ist hier bewusst der Default fuer die echte KI-Schicht, weil Belegerkennung eher ein
+Agenten-/Langkontextproblem als ein billiger Kurztext-Call ist. Der API-Key bleibt serverseitig in `.env`
+und wird nicht an das Frontend ausgeliefert.
 
 Strukturierte XML-Belege durchlaufen zusaetzlich ein erstes Validator-Gate. Das MVP prueft
 Pflichtfelder, ISO-Datum, mindestens eine Position und die Summenlogik Netto + USt = Brutto.
