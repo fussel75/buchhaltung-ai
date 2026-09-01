@@ -2205,11 +2205,24 @@ def _extract_pdf_text_pymupdf_ocr(storage_path: str) -> str:
     try:
         with fitz.open(pdf_path) as pdf:
             for page in pdf:
-                textpage = page.get_textpage_ocr(full=True, dpi=200, language="deu+eng")
+                textpage = _pymupdf_ocr_textpage(page)
+                if textpage is None:
+                    continue
                 page_texts.append((page.get_text("text", textpage=textpage) or "").strip())
     except (RuntimeError, ValueError, OSError):
         return ""
     return "\n".join(page_texts)
+
+
+def _pymupdf_ocr_textpage(page):
+    for language in ("deu+eng", "eng", None):
+        try:
+            if language:
+                return page.get_textpage_ocr(full=True, dpi=200, language=language)
+            return page.get_textpage_ocr(full=True, dpi=200)
+        except (RuntimeError, ValueError, OSError):
+            continue
+    return None
 
 
 def _find_embedded_invoice_xml(storage_path: str) -> tuple[str, bytes] | None:
@@ -2695,7 +2708,14 @@ def _find_linde_header_fields(text: str) -> dict[str, str | None]:
         invoice_date = _find_date(text, r"Rechnungsdatum\s*:?\s*\n?\s*(\d{2}\.\d{2}\.\d{4})")
         customer_number = _find_text(text, r"Ihre\s+Kundennummer\s*:?\s*\n?\s*([0-9 ]{5,})")
         if not any((invoice_number, invoice_date, customer_number)):
-            return {}
+            window = _linde_header_window(text)
+            if not window:
+                return {}
+            invoice_number = _find_text(window, r"\b([0-9]{8,})\b")
+            invoice_date = _find_date(window, r"(\d{2}\.\d{2}\.\d{4})")
+            customer_number = _linde_customer_number_from_window(window, invoice_number, invoice_date)
+            if not any((invoice_number, invoice_date, customer_number)):
+                return {}
         return {
             "invoice_number": invoice_number,
             "invoice_date": invoice_date,
@@ -2706,6 +2726,36 @@ def _find_linde_header_fields(text: str) -> dict[str, str | None]:
         "invoice_date": _date_text_to_iso(match.group(2)),
         "customer_number": sub(r"\s+", "", match.group(3)),
     }
+
+
+def _linde_header_window(text: str) -> str | None:
+    match = search(r"Rechnungsnummer[\s\S]{0,650}", text, IGNORECASE)
+    return match.group(0) if match else None
+
+
+def _linde_customer_number_from_window(
+    window: str,
+    invoice_number: str | None,
+    invoice_date: str | None,
+) -> str | None:
+    start_index = 0
+    if invoice_date:
+        date_match = search(escape(_iso_date_to_german(invoice_date)), window)
+        if date_match:
+            start_index = date_match.end()
+    candidate_area = window[start_index:]
+    for match in finditer(r"\b([0-9](?:\s*[0-9]){4,})\b", candidate_area):
+        candidate = sub(r"\s+", "", match.group(1))
+        if invoice_number and candidate == invoice_number:
+            continue
+        if len(candidate) >= 5:
+            return candidate
+    return None
+
+
+def _iso_date_to_german(value: str) -> str:
+    year, month, day = value.split("-")
+    return f"{day}.{month}.{year}"
 
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
@@ -3301,6 +3351,9 @@ def _clean_project_reference_value(value: str | None) -> str | None:
 
 
 def _find_customer_reference(text: str) -> str | None:
+    direct_labeled_reference = _find_direct_labeled_customer_reference(text)
+    if direct_labeled_reference:
+        return direct_labeled_reference
     column_match = search(
         r"Kundennummer\s*\n\s*Kundenreferenz\s*\n\s*[0-9][0-9/.-]*\s*\n\s*([^\n]+)",
         text,
@@ -3328,6 +3381,23 @@ def _find_customer_reference(text: str) -> str | None:
     if not match:
         return None
     return _clean_project_reference_value(match.group(1))
+
+
+def _find_direct_labeled_customer_reference(text: str) -> str | None:
+    if not text:
+        return None
+    for label in ("Bestelldaten", "Objekt", "Bauvorhaben", "Baustelle", "Kommissionsangaben", "AUFTR.TEXT"):
+        label_pattern = escape(label).replace(r"\.", r"\.?\s*")
+        match = search(
+            rf"(?im)^\s*(?:[•○●oO*\-–—|]+\s*)?{label_pattern}\s*(?::|\.|\-)?\s*(.+?)\s*$",
+            text,
+        )
+        if not match:
+            continue
+        cleaned = _clean_project_reference_value(match.group(1))
+        if cleaned and not _inline_reference_is_noise(cleaned):
+            return cleaned
+    return None
 
 
 def _best_customer_reference(text: str, original_filename: str) -> str | None:

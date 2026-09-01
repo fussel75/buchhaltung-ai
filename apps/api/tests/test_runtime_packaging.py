@@ -9,6 +9,7 @@ def test_api_image_installs_tesseract_for_pdf_ocr():
 
     assert "tesseract-ocr" in dockerfile
     assert "tesseract-ocr-deu" in dockerfile
+    assert "TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata" in dockerfile
 
 
 def test_parse_tesseract_languages_skips_header():

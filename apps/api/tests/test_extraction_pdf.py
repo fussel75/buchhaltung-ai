@@ -658,6 +658,34 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(text, "Rechnung mit Umlauten äöü")
         page.get_textpage_ocr.assert_called_once_with(full=True, dpi=200, language="deu+eng")
 
+    def test_pymupdf_ocr_falls_back_when_german_tessdata_is_missing(self):
+        class FakePdf:
+            def __init__(self, pages):
+                self.pages = pages
+
+            def __enter__(self):
+                return self.pages
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        with TemporaryDirectory() as tmp_dir:
+            Path(tmp_dir, "scan.pdf").write_bytes(b"%PDF")
+            page = Mock()
+            page.get_textpage_ocr.side_effect = [RuntimeError("No OCR support"), "ocr-page"]
+            page.get_text.return_value = "OCR fallback text"
+            fake_fitz = SimpleNamespace(open=Mock(return_value=FakePdf([page])))
+
+            with (
+                patch.dict("sys.modules", {"fitz": fake_fitz}),
+                patch.object(extraction_service, "get_settings", return_value=SimpleNamespace(storage_root=Path(tmp_dir))),
+            ):
+                text = extraction_service._extract_pdf_text_pymupdf_ocr("scan.pdf")
+
+        self.assertEqual(text, "OCR fallback text")
+        self.assertEqual(page.get_textpage_ocr.call_args_list[0].kwargs["language"], "deu+eng")
+        self.assertEqual(page.get_textpage_ocr.call_args_list[1].kwargs["language"], "eng")
+
     def test_pdf_filename_with_octet_stream_uses_pdf_extraction(self):
         document = {
             "tenant_id": "demo-mandant",
@@ -3430,3 +3458,105 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["customer_number"], "67292272")
         self.assertEqual(result["gross_amount"], Decimal("80.92"))
         self.assertNotIn("Nicht sicher erkannt: Lieferant, Datum.", result["warnings"])
+
+    def test_linde_invoice_reads_ocr_noisy_header_fields(self):
+        text = """
+        Making our world more productive
+        Linde GmbH, Gases Division
+        Linde GmbH, Gases Division
+        Seitnerstraße 70 82049 Pullach
+        Rechnung
+        Rechnungsnummer Rechnungsdatum Ihre Kunden nummer
+        Bei Zahlungen und Schriftverkehr bitte angeben
+        4242270364
+        23.07.2026
+        672 922 72
+        Verlängerung zu Vertrag 363329338
+        Material-Nr. Bezeichnung Füllinhalt Behälter/Menge Einzelpreis Gesamtpreis
+        7450000 Nutzungsvertrag 1 Jahr BA001 1 ST 68,00 68,00
+        Nettobetrag (EUR) 68,00
+        MwSt 19,00 % (EUR) 12,92
+        Rechnungsbetrag (EUR) 80,92
+        Zahlungsbedingungen
+        Bis zum 07.08.2026 ohne Abzug
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "4242270364.PDF",
+            "content_type": "application/pdf",
+            "storage_path": "linde.pdf",
+            "size_bytes": 54321,
+            "sha256": "linde",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["supplier_name"], "Linde GmbH, Gases Division")
+        self.assertEqual(result["invoice_number"], "4242270364")
+        self.assertEqual(result["invoice_date"], "2026-07-23")
+        self.assertEqual(result["customer_number"], "67292272")
+        self.assertEqual(result["gross_amount"], Decimal("80.92"))
+        self.assertEqual(result["confidence"], Decimal("0.88"))
+        self.assertNotIn("Nicht sicher erkannt: Lieferant, Datum.", result["warnings"])
+
+    def test_dammers_bestelldaten_without_masterdata_stays_project_hint(self):
+        text = """
+        DAMMERS
+        Alles fürs Dach
+        Rolf Dammers oHG
+        Firma
+        FriStD-Bau ZuB GmbH & Co KG
+        RECHNUNG Blatt 1
+        Nummer : 813467-608
+        Datum : 12.08.2026 - 15:54
+        Kundennummer : 0515834/086
+        Lieferschein : 854590/12.08.2026
+        Steuernr. : 4365500814
+        - Bestelldaten: Eckerkoppel 149 Hr. Drita
+        ART-NR BEZEICHNUNG MENGE EINZELPREIS RAB NETTOWERT
+        88537
+        Zink-Blech vorbew. VM Anthra
+        0,7 mm 1 x 2 m 10,08 kg
+        Summe Warenwert EUR 307,66
+        + 19,00 % Mwst. EUR 58,46
+        Rechnungsbetrag (zahlbar bis spätestens 12.09.26 o. Abzug) EUR 366,12
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "813467-608.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "dammers.pdf",
+            "size_bytes": 54321,
+            "sha256": "dammers",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["supplier_name"], "Dammers")
+        self.assertEqual(result["invoice_number"], "813467-608")
+        self.assertEqual(result["invoice_date"], "2026-08-12")
+        self.assertEqual(result["customer_reference"], "Eckerkoppel 149")
+        self.assertEqual(result["assignment_type"], "assignment_unresolved")
+        self.assertEqual(result["cost_category"], "material")
+        self.assertEqual(result["product_name"], "Zink-Blech vorbew. VM Anthra")
+        self.assertEqual(result["net_amount"], Decimal("307.66"))
+        self.assertEqual(result["tax_amount"], Decimal("58.46"))
+        self.assertEqual(result["gross_amount"], Decimal("366.12"))
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 813467-608, BV Eckerkoppel 149, Dammers, Zink-Blech vorbew. VM Anthra, 2026-08-12.pdf",
+        )
