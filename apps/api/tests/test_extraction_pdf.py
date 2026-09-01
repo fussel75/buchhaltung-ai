@@ -3188,8 +3188,8 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(result["cost_category"], "subcontractor")
         self.assertEqual(result["product_name"], "Spachtelarbeiten im Dachausbau")
         self.assertEqual(result["net_amount"], Decimal("3124.40"))
-        self.assertIsNone(result["tax_amount"])
-        self.assertIsNone(result["gross_amount"])
+        self.assertEqual(result["tax_amount"], Decimal("0.00"))
+        self.assertEqual(result["gross_amount"], Decimal("3124.40"))
 
     def test_europlanen_invoice_reads_object_material_totals_and_due_date(self):
         text = """
@@ -3559,4 +3559,135 @@ class ExtractionPdfTests(TestCase):
         self.assertEqual(
             result["normalized_filename"],
             "ERg 813467-608, BV Eckerkoppel 149, Dammers, Zink-Blech vorbew. VM Anthra, 2026-08-12.pdf",
+        )
+
+    def test_stripe_online_invoice_reads_english_fields_and_dot_amounts(self):
+        text = """
+        Page 1 of 1 Invoice
+        Invoice number HR5ZNW6F\0-0001
+        Date of issue March 12, 2026
+        OpenAI OpCo, LLC
+        ar@openai.com
+        Bill to Ronny Friedrich Eckerkoppel 149 22047 Hamburg Germany
+        Description Qty Unit price Tax Amount
+        OpenAI API usage credit 1 $20.00 0% $20.00
+        Subtotal $20.00
+        Total $20.00
+        Amount due $20.00 USD
+        Tax to be paid on reverse charge basis
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Invoice-HR5ZNW6F-0001.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "openai.pdf",
+            "size_bytes": 54321,
+            "sha256": "openai",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["supplier_name"], "OpenAI OpCo, LLC")
+        self.assertEqual(result["invoice_number"], "HR5ZNW6F-0001")
+        self.assertEqual(result["invoice_date"], "2026-03-12")
+        self.assertEqual(result["gross_amount"], Decimal("20.00"))
+        self.assertEqual(result["tax_amount"], Decimal("0.00"))
+        self.assertNotIn("Nicht sicher erkannt", " ".join(result["warnings"]))
+
+    def test_replit_receipt_reads_date_paid(self):
+        text = """
+        Receipt
+        Invoice number VEHPKBJI\0-0005
+        Receipt number 2935-5038
+        Date paid January 30, 2026
+        Replit 1001 E Hillsdale Blvd support@replit.com
+        Replit Core Jan 30 - Feb 28, 2026 1 $25.00 19% $25.00
+        VAT - Germany (19% on $25.00) $4.75
+        Total $29.75
+        Amount paid $29.75
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "Receipt-2935-5038.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "replit.pdf",
+            "size_bytes": 54321,
+            "sha256": "replit",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+            patch.object(extraction_service, "find_supplier_rule", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_match_by_text", return_value=None),
+            patch.object(extraction_service, "find_assignment_unit_by_text", return_value=None),
+        ):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["supplier_name"], "Replit Inc")
+        self.assertEqual(result["invoice_number"], "VEHPKBJI-0005")
+        self.assertEqual(result["invoice_date"], "2026-01-30")
+        self.assertEqual(result["net_amount"], Decimal("25.00"))
+        self.assertEqual(result["tax_amount"], Decimal("4.75"))
+        self.assertEqual(result["gross_amount"], Decimal("29.75"))
+
+    def test_payment_reminder_is_not_treated_as_invoice(self):
+        text = """
+        Mahnung
+        Zur Rechnung 83318349 vom 10.02.2026 besteht eine Nachzahlung.
+        Gesamtforderung 546,05 EUR
+        """
+        document = {
+            "tenant_id": "demo-mandant",
+            "original_filename": "ERg 83318349, Volkswagen AG, Audi A3, Nachzahlung 546,05, 2026-03-16.pdf",
+            "content_type": "application/pdf",
+            "storage_path": "vw-mahnung.pdf",
+            "size_bytes": 54321,
+            "sha256": "vw-mahnung",
+        }
+
+        with (
+            patch.object(extraction_service, "_extract_pdf_text", return_value=text),
+            patch.object(extraction_service, "ensure_tenant_profile", return_value=TENANT_PROFILE),
+        ):
+            result = _build_pdf_text_result(document, allow_ai=False)
+
+        self.assertEqual(result["document_type"], "project_document")
+        self.assertEqual(result["product_name"], "Mahnung")
+        self.assertIsNone(result["invoice_number"])
+        self.assertIsNone(result["gross_amount"])
+
+    def test_structured_validation_tolerates_minor_or_reverse_charge_total_differences(self):
+        self.assertEqual(
+            extraction_service._structured_xml_validation_errors(
+                invoice_number="8239879",
+                invoice_date="2026-07-28",
+                supplier_name="Arens & Stitz KG",
+                currency="EUR",
+                net_amount=Decimal("36.58"),
+                tax_amount=Decimal("7.05"),
+                gross_amount=Decimal("44.18"),
+                line_count=1,
+            ),
+            [],
+        )
+        self.assertEqual(
+            extraction_service._structured_xml_validation_errors(
+                invoice_number="R-2026-90",
+                invoice_date="2026-07-22",
+                supplier_name="AF-Elektro GmbH",
+                currency="EUR",
+                net_amount=Decimal("4619.41"),
+                tax_amount=Decimal("0.00"),
+                gross_amount=Decimal("1536.90"),
+                line_count=1,
+            ),
+            [],
         )

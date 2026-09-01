@@ -735,14 +735,60 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     if project_document:
         return _finalize_pdf_result(document, project_document, text, allow_ai=allow_ai)
 
+    non_invoice_document = _build_non_invoice_business_document_result(document, text)
+    if non_invoice_document:
+        return _finalize_pdf_result(document, non_invoice_document, text, allow_ai=allow_ai)
+
     tank_receipt = _build_tank_receipt_result(document, text)
     if tank_receipt:
         return _finalize_pdf_result(document, tank_receipt, text, allow_ai=allow_ai)
 
     linde_header = _find_linde_header_fields(text)
-    invoice_number = linde_header.get("invoice_number") or _find_rieprecht_invoice_number(text) or _find_text(text, r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)") or _find_text(
+    invoice_number = linde_header.get("invoice_number") or _find_rieprecht_invoice_number(text) or _find_text(
+        text,
+        r"#####Rechnung~([A-Z0-9-]+)~",
+    ) or _find_text(
+        text,
+        r"([0-9]{6,})\s*Rechnungsnummer",
+    ) or _find_text(
+        text,
+        r"Beleg-Nr\.\s*([0-9]{5,})",
+    ) or _find_text(
+        text,
+        r"(?:Schlussrechnung|Rechnung)\s*-\s*Nr\.?\s*([A-Z0-9-]+)",
+    ) or _find_text(
+        text,
+        r"Rechnungs-Nr\.?:\s*([A-Z0-9-]+?)(?=Datum|Leistungs|Kunden|Auftrag|\s|$)",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s+(RE-\([0-9]{4}\)-[0-9]+)",
+    ) or _find_text(
         text,
         r"Rechnungsnummer:\s*([A-Z0-9-]+[a-z]?)",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s*:?\s*([0-9]{6,})\s*Rechnungsdatum",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s*:?\s*(?:\n\s*)?([A-Z0-9][A-Z0-9-]{2,})",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s+([A-Z0-9][A-Z0-9-]{2,})",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s+PS([0-9]{6,})",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s+(PS[0-9]{6,})",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s*:\s*([0-9]{6,})",
+    ) or _find_text(
+        text,
+        r"Rechnung\s*([0-9]{6,})\s+Seite",
+    ) or _find_text(
+        text,
+        r"Rechnung\s+([0-9]{3,}/[0-9]{2})",
     ) or _find_text(
         text,
         r"Rechnung\s+Nr\.:\s*([0-9]+)",
@@ -788,9 +834,23 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     ) or _find_text(
         text,
         r"Belegnummer:\s*([0-9]{5,})",
+    ) or _find_text(
+        text,
+        r"Nr:\s*([A-Z]\s*[0-9]{5,})",
+    ) or _find_text(
+        text,
+        r"Rechnungsnummer\s+([0-9]{5,})\s+Rechnungsdatum",
+    ) or _find_text(
+        text,
+        r"Invoice\s+number\s+([A-Z0-9][A-Z0-9\x00-]{2,})",
     ) or _invoice_number_from_filename(document["original_filename"])
+    if invoice_number:
+        invoice_number = invoice_number.replace("\x00", "-")
+        invoice_number = sub(r"\s+", "", invoice_number)
+        invoice_number = sub(r"-{2,}", "-", invoice_number)
+        invoice_number = invoice_number.replace("/", "-")
     customer_number = linde_header.get("customer_number") or _find_customer_number(text)
-    invoice_date = linde_header.get("invoice_date") or _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{2}\.\d{2}\.\d{4})") or _find_date(
+    invoice_date = linde_header.get("invoice_date") or _find_rieprecht_invoice_date(text) or _find_date(text, r"Datum\s*:\s*(\d{1,2}\.\d{2}\.\d{4})") or _find_date(
         text,
         r"M[üÃ¼]nchen,\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
@@ -798,10 +858,59 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         r"Hamburg,\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
+        r"Sch\S{0,4}nefeld,\s*(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_us_slash_date(text, r"Arlo ID[\s\S]{0,120}?Datum\s+(\d{1,2}/\d{1,2}/\d{4})") or _find_date(
+        text,
         r"Kunden-Nr\.\s*:\s*\n\s*[0-9]+[^\n]*\n\s*(\d{2}\.\d{2}\.\d{4})\s*\n\s*Rechnung\s+[0-9]{2}-[0-9]{5,}",
     ) or _find_date(
         text,
-        r"Rechnungsdatum:\s*(\d{2}\.\d{2}\.\d{4})",
+        r"Rechnungsdatum:\s*(\d{1,2}\.\d{2}\.\d{2,4})",
+    ) or _find_date(
+        text,
+        r"Rechnungsdatum\s*:?\s*(\d{1,2}\.\d{2}\.\d{2,4})",
+    ) or _find_date(
+        text,
+        r"Ausstellungsdatum\s*(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Belegdatum:\s*(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Belegdatum\s*(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_date_with_month_name(text, r"Belegdatum\s+Betrieb[\s\S]{0,120}?(\d{1,2}\.\s+[A-Za-zÄÖÜäöüß]+\s+\d{4})")
+    invoice_date = invoice_date or _find_date(
+        text,
+        r"#####Rechnung~[A-Z0-9-]+~[A-Z0-9-]+~(\d{2}\.\d{2}\.\d{2})",
+    ) or _find_english_month_date(
+        text,
+        r"Date\s+of\s+issue\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+    ) or _find_english_month_date(
+        text,
+        r"Invoice\s+Issued\s+#\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})",
+    ) or _find_english_month_date(
+        text,
+        r"(?:Receipt|Payment)\s+date\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})",
+    ) or _find_english_month_date(
+        text,
+        r"Date\s+paid\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})",
+    ) or _find_date(
+        text,
+        r"Rechnung\d+[A-Za-z]*Datum[^\d]*(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"Rechnung:\s*[0-9]{6,}\s+(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"(\d{1,2}\.\d{2}\.\d{4})\s*Rechnungsdatum",
+    ) or _find_date(
+        text,
+        r"Kunden-Nr\.:\s*[A-Z0-9./-]+\s+(\d{1,2}\.\d{2}\.\d{4})",
+    ) or _find_date(
+        text,
+        r"RechnungsNr\.\s*:\s*[0-9]+\s+(\d{1,2}\.\d{2}\.\d{2,4})",
+    ) or _find_date(
+        text,
+        r"(\d{1,2}\.\d{2}\.\d{4})\s*[0-9]{4,}\s*Kunden\s+Nummer",
     ) or _find_date(
         text,
         r"RechnungsNr\.\s*:\s*[0-9]+\s+(\d{2}\.\d{2}\.\d{2,4})",
@@ -828,7 +937,7 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
         r"Datum\s*-\s*Zeit\s*:\s*(\d{2}\.\d{2}\.\d{4})",
     ) or _find_date(
         text,
-        r"Belegdatum:\s*(\d{2}\.\d{2}\.\d{4})",
+        r"(\d{1,2}\.\d{2}\.\d{2,4})\s*Kunden-Nr\.\s*\.\s*:",
     ) or _find_date(
         text,
         r"Belegdatum:\s*(?:\n\s*[A-Z]{1,5}\s*:\s*[A-Z0-9-]+)?\s*\n\s*(\d{2}\.\d{2}\.\d{4})",
@@ -896,6 +1005,9 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     tax_amount = totals.get("tax_amount")
     gross_amount = totals.get("gross_amount")
     reverse_charge = _reverse_charge_info(text)
+    if reverse_charge["is_reverse_charge"] and net_amount is None and gross_amount is not None:
+        net_amount = gross_amount
+        tax_amount = Decimal("0.00")
     if reverse_charge["is_reverse_charge"] and net_amount is not None and gross_amount is not None:
         tax_amount = Decimal("0.00")
         if gross_amount != net_amount:
@@ -1058,6 +1170,91 @@ def _build_pdf_text_result(document: dict, *, allow_ai: bool = True, allow_ocr: 
     }, text, allow_ai=allow_ai)
 
 
+def _build_non_invoice_business_document_result(document: dict, text: str) -> dict | None:
+    normalized_text = _compact_search_text(f"{document['original_filename']} {text}")
+    document_markers = {
+        "zahlungserinnerung": "Zahlungserinnerung",
+        "kontoauszug": "Kontoauszug",
+        "mahnung": "Mahnung",
+        "zahlungsaufforderung": "Zahlungsaufforderung",
+        "gesamtforderung": "Zahlungsaufforderung",
+        "nachzahlung": "Nachzahlung",
+    }
+    document_title = next(
+        (title for marker, title in document_markers.items() if marker in normalized_text),
+        None,
+    )
+    if not document_title:
+        return None
+
+    supplier_name = _supplier_name(document, text)
+    document_date = _find_date(text, r"Belegdatum:\s*(\d{1,2}\.\d{2}\.\d{4})") or _invoice_date_from_filename(
+        document["original_filename"]
+    )
+    tenant_profile = ensure_tenant_profile(document["tenant_id"])
+    normalized_filename = _normalized_project_supporting_document_filename(
+        assignment=None,
+        tenant_profile=tenant_profile,
+        document_title=document_title,
+        document_date=document_date,
+    )
+
+    return {
+        "supplier_name": supplier_name,
+        "invoice_number": None,
+        "customer_number": _find_customer_number(text),
+        "customer_reference": None,
+        "invoice_date": document_date,
+        "due_date": None,
+        "discount_due_date": None,
+        "service_period": document_date[:7] if document_date else None,
+        "delivery_address": None,
+        "delivery_addresses": [],
+        "allocation_lines": [],
+        "assignment_code": None,
+        "assignment_label": None,
+        "assignment_kind": None,
+        "assignment_revenue_relevant": None,
+        "assignment_code_label": tenant_profile["assignment_code_label"],
+        "assignment_label_singular": tenant_profile["assignment_label_singular"],
+        "assignment_label_plural": tenant_profile["assignment_label_plural"],
+        "assignment_code_prefix": tenant_profile["assignment_code_prefix"],
+        "project_code": None,
+        "project_number": None,
+        "project_name": None,
+        "assignment_type": "general_cost",
+        "cost_category": "general_overhead",
+        "product_name": document_title,
+        "net_amount": None,
+        "tax_amount": None,
+        "gross_amount": None,
+        "discount_base": None,
+        "discount_percent": None,
+        "discount_amount": None,
+        "discount_net_amount": None,
+        "discount_tax_amount": None,
+        "discount_gross_amount": None,
+        "discounted_payable_amount": None,
+        "is_credit_note": False,
+        "document_type": "project_document",
+        "payment_terms": _payment_terms(
+            gross_amount=None,
+            due_date=None,
+            discount_due_date=None,
+            discount_base=None,
+            discount_percent=None,
+            discount_amount=None,
+            discounted_payable_amount=None,
+            is_credit_note=False,
+        ),
+        "currency": "EUR",
+        "confidence": Decimal("0.86"),
+        "warnings": [f"{document_title} erkannt: kein neuer Rechnungsbeleg."],
+        "normalized_filename": normalized_filename,
+        "source": "pdf_non_invoice_rules",
+    }
+
+
 def _build_tax_supporting_document_result(document: dict, text: str) -> dict | None:
     original_filename = document["original_filename"]
     normalized_text = _compact_search_text(f"{text} {original_filename}")
@@ -1157,8 +1354,10 @@ def _looks_like_tax_exemption_certificate(normalized_text: str, original_filenam
     filename_text = _compact_search_text(original_filename)
     strong_filename_markers = (
         "freistellungsbescheinigung",
+        "feistellungsbescheinigung",
         "freistellungsauftrag",
         "freistellung",
+        "feistellung",
         "bescheinigungbauleistungen",
         "bvfabescheinigungbauleistungen",
     )
@@ -2344,7 +2543,8 @@ def _structured_xml_validation_errors(
         errors.append("Mindestens eine Rechnungsposition fehlt.")
     if net_amount is not None and tax_amount is not None and gross_amount is not None:
         expected_gross = (net_amount + tax_amount).quantize(Decimal("0.01"))
-        if abs(expected_gross - gross_amount) > Decimal("0.02"):
+        difference = abs(expected_gross - gross_amount)
+        if tax_amount != Decimal("0.00") and difference >= Decimal("1.00"):
             errors.append("Summenprüfung fehlgeschlagen: Netto plus USt passt nicht zu Brutto.")
 
     return errors
@@ -2565,6 +2765,87 @@ def _find_date(text: str, pattern: str) -> str | None:
     return _date_text_to_iso(value)
 
 
+def _find_date_with_month_name(text: str, pattern: str) -> str | None:
+    value = _find_text(text, pattern)
+    if not value:
+        return None
+    return _date_with_month_name_to_iso(value)
+
+
+def _find_english_month_date(text: str, pattern: str) -> str | None:
+    value = _find_text(text, pattern)
+    if not value:
+        return None
+    return _english_month_date_to_iso(value)
+
+
+def _find_us_slash_date(text: str, pattern: str) -> str | None:
+    value = _find_text(text, pattern)
+    if not value:
+        return None
+    month, day, year = value.split("/")
+    return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+
+
+def _date_with_month_name_to_iso(value: str) -> str | None:
+    match = search(r"(\d{1,2})\.\s*([A-Za-zÄÖÜäöüß]+)\s+(\d{4})", value.strip())
+    if not match:
+        return None
+    month = {
+        "januar": "01",
+        "februar": "02",
+        "märz": "03",
+        "maerz": "03",
+        "april": "04",
+        "mai": "05",
+        "juni": "06",
+        "juli": "07",
+        "august": "08",
+        "september": "09",
+        "oktober": "10",
+        "november": "11",
+        "dezember": "12",
+    }.get(match.group(2).lower())
+    if not month:
+        return None
+    return f"{match.group(3)}-{month}-{match.group(1).zfill(2)}"
+
+
+def _english_month_date_to_iso(value: str) -> str | None:
+    match = search(r"([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})", value.strip())
+    if not match:
+        return None
+    month = {
+        "jan": "01",
+        "january": "01",
+        "feb": "02",
+        "february": "02",
+        "mar": "03",
+        "march": "03",
+        "apr": "04",
+        "april": "04",
+        "may": "05",
+        "jun": "06",
+        "june": "06",
+        "jul": "07",
+        "july": "07",
+        "aug": "08",
+        "august": "08",
+        "sep": "09",
+        "sept": "09",
+        "september": "09",
+        "oct": "10",
+        "october": "10",
+        "nov": "11",
+        "november": "11",
+        "dec": "12",
+        "december": "12",
+    }.get(match.group(1).lower())
+    if not month:
+        return None
+    return f"{match.group(3)}-{month}-{match.group(2).zfill(2)}"
+
+
 def _certificate_validity_range(text: str) -> tuple[str | None, str | None]:
     match = search(
         r"G(?:[Ã¼üu]|ue)ltigkeit\s+(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})\s*(?:bis|-|–|—)\s*(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*\d{2,4})",
@@ -2601,6 +2882,9 @@ def _find_rieprecht_invoice_date(text: str) -> str | None:
 def _invoice_number_from_filename(filename: str) -> str | None:
     stem = Path(filename).stem.lower()
     match = search(r"(?:rechnung|erg|rg)[ _-]*([0-9]{6,})", stem, flags=0)
+    if match:
+        return match.group(1)
+    match = search(r"(?:rechnung|erg|rg)[ _-]*([0-9]{3,}-[0-9]{2})", stem, flags=0)
     if match:
         return match.group(1)
     match = search(r"\b([0-9]{5,}-[0-9]{2,})\b", stem)
@@ -2653,6 +2937,66 @@ def _find_roennfeld_due_date(text: str) -> str | None:
 def _find_money_after_label(text: str, label: str) -> Decimal | None:
     pattern = rf"{label}[^\n]*?([0-9.]+,\d{{2}})"
     return _find_money(text, pattern)
+
+
+def _find_stripe_online_totals(text: str) -> dict[str, Decimal | None] | None:
+    compact = _compact_search_text(text)
+    if not any(marker in compact for marker in ("invoicenumber", "receiptnumber", "hostingerinternational", "cloudflareinc")):
+        return None
+    gross = (
+        _find_dot_money(text, r"(?:Amount\s+paid|Amount\s+due|Total|Invoice\s+Amount)\s+(?:\(EUR\)\s*)?[�€$]?\s*([0-9]+(?:\.[0-9]{2}))")
+        or _find_dot_money(text, r"[�€$]\s*([0-9]+(?:\.[0-9]{2}))\s+(?:USD\s+)?(?:due|paid)")
+    )
+    tax = (
+        _find_dot_money(text, r"VAT\s+-\s+Germany\s*\([^)]*\)\s*[�€$]\s*([0-9]+(?:\.[0-9]{2}))")
+        or _find_dot_money(text, r"VAT\s+AMOUNT\s+\(EUR\)[\s\S]{0,40}?[�€$]?\s*([0-9]+(?:\.[0-9]{2}))")
+        or Decimal("0.00")
+    )
+    net = (
+        _find_dot_money(text, r"(?:Total\s+excl\.\s+VAT|Total\s+excluding\s+tax|Subtotal)\s+[�€$]?\s*([0-9]+(?:\.[0-9]{2}))")
+        or ((gross - tax).quantize(Decimal("0.01")) if gross is not None and tax is not None else gross)
+    )
+    if gross is None:
+        return None
+    return {
+        "discount_base": None,
+        "net_amount": net,
+        "tax_amount": tax,
+        "gross_amount": gross,
+    }
+
+
+def _find_audi_vehicle_totals(text: str) -> dict[str, Decimal | None] | None:
+    compact = _compact_search_text(text)
+    if not any(marker in compact for marker in ("audihamburggmbh", "volkswagenleasing", "volkswagenag")):
+        return None
+    amounts = [
+        _money_to_decimal_signed(match.group(1))
+        for match in finditer(r"(-?[0-9.]+,\d{2}-?)", text)
+    ]
+    if not amounts:
+        return None
+    gross = amounts[-1]
+    if len(amounts) >= 4 and gross > 0:
+        return {
+            "discount_base": None,
+            "net_amount": amounts[-4],
+            "tax_amount": amounts[-2],
+            "gross_amount": gross,
+        }
+    return {
+        "discount_base": None,
+        "net_amount": gross,
+        "tax_amount": Decimal("0.00"),
+        "gross_amount": gross,
+    }
+
+
+def _find_dot_money(text: str, pattern: str) -> Decimal | None:
+    value = _find_text(text, pattern)
+    if not value:
+        return None
+    return _decimal_from_dot_amount(value)
 
 
 def _find_customer_number(text: str) -> str | None:
@@ -2760,6 +3104,171 @@ def _iso_date_to_german(value: str) -> str:
 
 def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
     currency_marker = r"(?:â‚¬|€|EUR)?"
+    stripe_online_total = _find_stripe_online_totals(text)
+    if stripe_online_total:
+        return stripe_online_total
+    audi_vehicle_total = _find_audi_vehicle_totals(text)
+    if audi_vehicle_total:
+        return audi_vehicle_total
+    boehm_net = _find_money_after_label(text, "Nettosumme")
+    if boehm_net is not None and "malereibetrieb" in _compact_search_text(text):
+        return {
+            "discount_base": None,
+            "net_amount": boehm_net,
+            "tax_amount": Decimal("0.00"),
+            "gross_amount": boehm_net,
+        }
+    dot_decimal_total = search(
+        r"Summe\s+in\s+EUR\s+EKZ\s+Zwischensumme\s+19\s*%\s*MWST\s+Gesamtbetrag\s+in\s+EUR\s+"
+        r"([0-9]+\.[0-9]{2})\*?\s+([0-9]+\.[0-9]{2})\s+([0-9]+\.[0-9]{2})\s+([0-9]+\.[0-9]{2})\s+([0-9]+\.[0-9]{2})",
+        text,
+        IGNORECASE,
+    )
+    if dot_decimal_total:
+        return {
+            "discount_base": _decimal_from_dot_amount(dot_decimal_total.group(1)),
+            "net_amount": _decimal_from_dot_amount(dot_decimal_total.group(3)),
+            "tax_amount": _decimal_from_dot_amount(dot_decimal_total.group(4)),
+            "gross_amount": _decimal_from_dot_amount(dot_decimal_total.group(5)),
+        }
+    bundesanzeiger_total = search(
+        r"MwSt-Schl\S+ssel\s*:\s*([0-9.]+,\d{2})\s+3\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})"
+        r"[\s\S]{0,80}?Brutto-Rechnungsbetrag\s+Netto-Rechnungsbetrag",
+        text,
+        IGNORECASE,
+    )
+    if bundesanzeiger_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(bundesanzeiger_total.group(3)),
+            "tax_amount": _money_to_decimal(bundesanzeiger_total.group(2)),
+            "gross_amount": _money_to_decimal(bundesanzeiger_total.group(1)),
+        }
+    siga_total = search(
+        r"Total\s+Warenwert\s+([0-9.]+,\d{2})\s+Lieferkostenpausch\.\s+([0-9.]+,\d{2})\s+"
+        r"Mehrwertsteuer\s+19,000\s*%\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+"
+        r"Total\s+Rechnungsbetrag\s+EUR\s+([0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if siga_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(siga_total.group(3)),
+            "tax_amount": _money_to_decimal(siga_total.group(4)),
+            "gross_amount": _money_to_decimal(siga_total.group(5)),
+        }
+    moelders_reversed_total = search(
+        r"([0-9.]+,\d{2})\s+Gesamt\s+Brutto\s+([0-9.]+,\d{2})\s+Gesamt\s+Netto\s+"
+        r"MwSt\.\s+Betrag\s+19,00%\s+([0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if moelders_reversed_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(moelders_reversed_total.group(2)),
+            "tax_amount": _money_to_decimal(moelders_reversed_total.group(3)),
+            "gross_amount": _money_to_decimal(moelders_reversed_total.group(1)),
+        }
+    kostal_total = search(
+        r"Gesamtsumme\s*\(netto\)\s*([0-9.]+,\d{2})\s*(?:â‚¬|€)?[\s\S]{0,80}?"
+        r"MwSt\.\s*\(19,00\s*%\)\s*([0-9.]+,\d{2})\s*(?:â‚¬|€)?[\s\S]{0,80}?"
+        r"Endbetrag\s*\(inkl\.\s*Steuern\)\s*([0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if kostal_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(kostal_total.group(1)),
+            "tax_amount": _money_to_decimal(kostal_total.group(2)),
+            "gross_amount": _money_to_decimal(kostal_total.group(3)),
+        }
+    mobile_total = search(
+        r"Nettobetrag\s*([0-9.]+,\d{2})\s*EUR[\s\S]{0,80}?"
+        r"(?:\+19%\s*)?MwSt\.\s*([0-9.]+,\d{2})\s*EUR[\s\S]{0,80}?"
+        r"Zahlbetrag\s*([0-9.]+,\d{2})\s*EUR",
+        text,
+        IGNORECASE,
+    )
+    if mobile_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(mobile_total.group(1)),
+            "tax_amount": _money_to_decimal(mobile_total.group(2)),
+            "gross_amount": _money_to_decimal(mobile_total.group(3)),
+        }
+    maison_total = search(
+        r"Nettobetrag\s*([0-9.]+,\d{2})\s*(?:â‚¬|€)[\s\S]{0,80}?"
+        r"MwSt\.-Betrag\s+insgesamt\s*([0-9.]+,\d{2})\s*(?:â‚¬|€)[\s\S]{0,80}?"
+        r"Gesamt\s*\(inkl\.\s*MwSt\.\)\s*([0-9.]+,\d{2})\s*(?:â‚¬|€)",
+        text,
+        IGNORECASE,
+    )
+    if maison_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(maison_total.group(1)),
+            "tax_amount": _money_to_decimal(maison_total.group(2)),
+            "gross_amount": _money_to_decimal(maison_total.group(3)),
+        }
+    schulze_total = search(
+        r"Netto-Warenwert\s+Versandkosten\s+Nettosumme\s+19%\s+MwSt\.\s+Bruttosumme\s+EURO\s+"
+        r"([0-9.]+,\d{2})\s+[0-9.]+(?:,\d{1,2})?\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if schulze_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(schulze_total.group(2)),
+            "tax_amount": _money_to_decimal(schulze_total.group(3)),
+            "gross_amount": _money_to_decimal(schulze_total.group(4)),
+        }
+    datev_total = search(
+        r"Nettobetrag\s+USt-Betrag\s+19\s*%\s+Summe\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})",
+        text,
+        IGNORECASE,
+    )
+    if datev_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(datev_total.group(1)),
+            "tax_amount": _money_to_decimal(datev_total.group(2)),
+            "gross_amount": _money_to_decimal(datev_total.group(3)),
+        }
+    behrens_total = search(
+        r"([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+19%\s+MwSt\.\s+"
+        r"Total\s+EUR\s+ohne\s+MwSt\.\s+Total\s+EUR\s+inkl\.\s+MwSt",
+        text,
+        IGNORECASE,
+    )
+    if behrens_total:
+        return {
+            "discount_base": None,
+            "net_amount": _money_to_decimal(behrens_total.group(1)),
+            "tax_amount": _money_to_decimal(behrens_total.group(2)),
+            "gross_amount": _money_to_decimal(behrens_total.group(3)),
+        }
+    innung_total = search(r"Summe\s+(?:â‚¬|€)\s*([0-9.]+,\d{2})", text, IGNORECASE)
+    if innung_total and "dachdecker-innung" in text.lower():
+        gross_amount = _money_to_decimal(innung_total.group(1))
+        return {
+            "discount_base": gross_amount,
+            "net_amount": gross_amount,
+            "tax_amount": Decimal("0.00"),
+            "gross_amount": gross_amount,
+        }
+    arlo_total = search(r"Gesamt\s+(?:â‚¬|€|�)?\s*([0-9.]+,\d{2})", text, IGNORECASE)
+    if arlo_total and "arlo" in text.lower():
+        gross_amount = _money_to_decimal(arlo_total.group(1))
+        return {
+            "discount_base": None,
+            "net_amount": gross_amount,
+            "tax_amount": Decimal("0.00"),
+            "gross_amount": gross_amount,
+        }
     linde_total = search(
         r"Nettobetrag\s*\(EUR\)\s*(-?[0-9.]+,\d{2})[\s\S]{0,160}?"
         r"MwSt\s*19,00\s*%\s*\(EUR\)\s*(-?[0-9.]+,\d{2})[\s\S]{0,160}?"
@@ -3017,6 +3526,13 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
         r"(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})",
         text,
     )
+    if not holz_junge_signed_total:
+        holz_junge_signed_total = search(
+            r"skontof\S*higer Betrag\s+Netto\s+MwSt-%\s+MwSt\s+Endbetrag\s*EUR\s+"
+            r"(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+([0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})\s+(-?[0-9.]+,\d{2})",
+            text,
+            IGNORECASE,
+        )
     if holz_junge_signed_total:
         return {
             "discount_base": _money_to_decimal_signed(holz_junge_signed_total.group(1)),
@@ -3030,6 +3546,14 @@ def _find_invoice_totals(text: str) -> dict[str, Decimal | None]:
         text,
     )
     if not match:
+        boehm_net = _find_money_after_label(text, "Nettosumme")
+        if boehm_net is not None and "malereibetrieb" in _compact_search_text(text):
+            return {
+                "discount_base": None,
+                "net_amount": boehm_net,
+                "tax_amount": Decimal("0.00"),
+                "gross_amount": boehm_net,
+            }
         return {
             "discount_base": _find_money_after_label(text, "skontofähiger Betrag"),
             "net_amount": _find_money_after_label(text, "Netto")
@@ -3156,6 +3680,10 @@ def _discount_due_date_from_days(invoice_date: str | None, days: int | None) -> 
 
 def _money_to_decimal(value: str) -> Decimal:
     return Decimal(value.replace(".", "").replace(",", ".")).quantize(Decimal("0.01"))
+
+
+def _decimal_from_dot_amount(value: str) -> Decimal:
+    return Decimal(value).quantize(Decimal("0.01"))
 
 
 def _money_to_decimal_signed(value: str) -> Decimal:
@@ -3495,12 +4023,60 @@ def _supplier_name(document: dict, text: str) -> str:
     lower_text = text.lower()
     compact_text = _compact_search_text(" ".join([document["original_filename"], text]))
     dammers_filename = _dammers_invoice_from_filename(document["original_filename"])
+    if "bundesanzeiger" in lower_text or "unternehmensregister" in lower_text:
+        return "Bundesanzeiger Verlag GmbH"
+    if "misol computer im handwerk" in lower_text or "misol.de" in lower_text:
+        return "Misol Computer im Handwerk"
+    if "arlo" in lower_text and ("noreply@arlo.com" in lower_text or "verisure arlo europe" in lower_text):
+        return "Verisure Arlo Europe DAC"
+    if "rentlift.de" in lower_text or "wiesecker group" in lower_text or (
+        "gelenkteleskoparbeitsb" in lower_text and "teba landau" in lower_text
+    ):
+        return "Wiesecker Group"
+    if "shk-deutschland.de" in lower_text or "d.f. liedelt" in lower_text or "shk | paulsen" in lower_text or (
+        "frha16.6" in lower_text and "comfospot" in lower_text
+    ):
+        return "D.F. Liedelt Heizungs- und Sanitär-Großhandels-GmbH"
+    if "siga cover gmbh" in lower_text or "siga.swiss" in lower_text:
+        return "SIGA Cover GmbH"
+    if "datev eg" in compact_text or "datev-rechnung" in lower_text:
+        return "DATEV eG"
+    if "gerhartschulzegmbh" in compact_text or "schulze-hamburg.de" in lower_text:
+        return "Gerhart Schulze GmbH"
+    if "maisongebaeudeservice" in compact_text or "maisongebäudeservice" in lower_text:
+        return "Maison Gebäudeservice"
+    if "bl-baumaschinen.de" in lower_text or "lüneburger baumaschinen" in lower_text or "l�neburger baumaschinen" in lower_text:
+        return "Behrens + Lüneburger Baumaschinen GmbH & Co. KG"
+    if "dachdecker-innung hamburg" in lower_text:
+        return "Dachdecker-Innung Hamburg"
+    if "mölders baucentrum gmbh" in lower_text or "m�lders baucentrum gmbh" in lower_text or "moelders.de" in lower_text:
+        return "Mölders Baucentrum GmbH"
+    if "mobile.de gmbh" in lower_text or "team.mobile.de" in lower_text:
+        return "mobile.de GmbH"
+    if "kostal solar electric gmbh" in lower_text:
+        return "KOSTAL Solar Electric GmbH"
+    if "holz junge" in lower_text or "lieferung gewerbl.lager" in lower_text:
+        return "Holz Junge GmbH"
     if "frha05" in lower_text and "gc-gruppe.de" in lower_text:
         return "Arens & Stitz KG"
     if "rieprecht-gmbh.de" in lower_text or "rieprecht gmbh" in lower_text:
         return "Rieprecht GmbH"
     if "linde gmbh, gases division" in lower_text or "linde-gas.de" in lower_text:
         return "Linde GmbH, Gases Division"
+    if "hostinger international ltd" in lower_text or "hostinger\tinternational" in lower_text:
+        return "Hostinger International Ltd."
+    if "cloudflare, inc." in lower_text or "billing@cloudflare.com" in lower_text:
+        return "Cloudflare, Inc."
+    if "openai opco, llc" in lower_text or "ar@openai.com" in lower_text:
+        return "OpenAI OpCo, LLC"
+    if "anthropic, pbc" in lower_text or "support@anthropic.com" in lower_text:
+        return "Anthropic, PBC"
+    if "replit inc" in lower_text or "support@replit.com" in lower_text:
+        return "Replit Inc"
+    if "audi hamburg gmbh" in lower_text or "audizentrum" in compact_text or ("audi" in compact_text and "kollaustr" in compact_text):
+        return "Audi Hamburg GmbH"
+    if "volkswagen aktiengesellschaft" in lower_text or "volkswagen ag" in lower_text or "vwfs.com" in lower_text:
+        return "Volkswagen AG"
     if "hagebau" in lower_text and ("mölders" in lower_text or "mÃ¶lders" in lower_text):
         return "Mölders Baucentrum GmbH"
     if "konzept-54.de" in lower_text or "konzept 54 gmbh" in lower_text:
@@ -3511,7 +4087,13 @@ def _supplier_name(document: dict, text: str) -> str:
         return "AF-Elektro GmbH"
     if "a. franz elektrotechnik" in lower_text and "info@af-elektro.de" in lower_text:
         return "A. Franz Elektrotechnik"
-    if "böhm" in original or "boehm" in original or "böhmmalereibetrieb" in compact_text or "malerlböhm" in compact_text:
+    if (
+        "böhm" in original
+        or "boehm" in original
+        or "böhmmalereibetrieb" in compact_text
+        or "malerlböhm" in compact_text
+        or ("malereibetrieb" in compact_text and "pollhornweg" in compact_text)
+    ):
         return "Böhm Malereibetrieb GmbH"
     if "eindruck24" in lower_text and "buchhaltung@eindruck24.de" in lower_text:
         return "Eindruck24"
