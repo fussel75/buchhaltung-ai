@@ -3488,24 +3488,27 @@ function AssignmentKindOptions() {
 
 function AiExtractionNote({ rawResult }) {
   const ai = rawResult?.ai_extraction;
-  if (!ai) return null;
+  const agent = rawResult?.tax_advisor_agent;
+  if (!ai && !agent) return null;
 
-  const acceptedFields = Array.isArray(ai.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
-  const evidence = Array.isArray(ai.evidence) ? ai.evidence.filter(Boolean) : [];
-  const warnings = Array.isArray(ai.warnings) ? ai.warnings.filter(Boolean) : [];
-  const confidence = Number(ai.confidence);
+  const acceptedFields = Array.isArray(ai?.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
+  const evidence = Array.isArray(ai?.evidence) ? ai.evidence.filter(Boolean) : [];
+  const warnings = Array.isArray(ai?.warnings) ? ai.warnings.filter(Boolean) : [];
+  const confidence = Number(ai?.confidence);
   const statusLabel = {
     applied: "KI angewendet",
     no_changes: "KI geprüft",
     failed: "KI fehlgeschlagen",
-  }[ai.status] || "KI geprüft";
-  const tone = ai.status === "failed" ? "warning" : ai.status === "applied" ? "blue" : "neutral";
+  }[ai?.status] || "KI geprüft";
+  const tone = ai?.status === "failed" ? "warning" : ai?.status === "applied" ? "blue" : "neutral";
 
   return (
     <div className={`ai-extraction-note ${tone}`}>
       <div>
         <strong>{statusLabel}</strong>
-        {ai.model ? <span>{ai.model}</span> : null}
+        {ai?.model ? <span>{ai.model}</span> : null}
+        {agent?.version ? <span>Steuerberater-Agent</span> : null}
+        {agent?.used_vision ? <span>Bildprüfung</span> : null}
         {!Number.isNaN(confidence) ? <span>{Math.round(confidence * 100)} %</span> : null}
       </div>
       {acceptedFields.length ? <p>Übernommen: {acceptedFields.map(formatAiFieldLabel).join(", ")}</p> : null}
@@ -3523,21 +3526,23 @@ function AiExtractionNote({ rawResult }) {
 
 function AiSummaryPill({ rawResult }) {
   const ai = rawResult?.ai_extraction;
-  if (!ai) return null;
+  const agent = rawResult?.tax_advisor_agent;
+  if (!ai && !agent) return null;
 
-  const acceptedFields = Array.isArray(ai.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
+  const acceptedFields = Array.isArray(ai?.accepted_fields) ? ai.accepted_fields.filter(Boolean) : [];
   const statusText = {
     applied: acceptedFields.length
       ? `KI übernommen: ${acceptedFields.slice(0, 3).map(formatAiFieldLabel).join(", ")}`
       : "KI übernommen",
     no_changes: "KI geprüft: keine Änderung",
-    failed: `KI Fehler${ai.error ? `: ${String(ai.error).slice(0, 80)}` : ""}`,
-  }[ai.status] || "KI geprüft";
-  const visionText = ai.used_vision ? "Bildprüfung" : null;
+    failed: `KI Fehler${ai?.error ? `: ${String(ai.error).slice(0, 80)}` : ""}`,
+  }[ai?.status] || "KI geprüft";
+  const visionText = ai?.used_vision || agent?.used_vision ? "Bildprüfung" : null;
 
   return (
     <div className="ai-summary-pills" aria-label="KI-Prüfung Ergebnis">
-      <span className={`ai-summary-pill ${ai.status || "checked"}`}>{statusText}</span>
+      <span className={`ai-summary-pill ${ai?.status || "checked"}`}>{statusText}</span>
+      {agent ? <span className="ai-summary-pill vision">Steuerberater-Agent</span> : null}
       {visionText ? <span className="ai-summary-pill vision">{visionText}</span> : null}
     </div>
   );

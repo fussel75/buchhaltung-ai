@@ -519,11 +519,11 @@ class ExtractionPdfTests(TestCase):
         with (
             patch.object(extraction_service, "_extract_pdf_text", return_value=extraction_service.ExtractedPdfText("x", "pypdf_short_no_ocr")),
             patch.object(extraction_service, "_build_unreadable_pdf_result", return_value={"source": "unreadable_pdf"}),
-            patch.object(extraction_service, "maybe_enhance_extraction_with_ai") as enhance_ai,
+            patch.object(extraction_service, "run_tax_advisor_agent") as run_agent,
         ):
             result = extraction_service._build_pdf_text_result(document, allow_ai=False, allow_ocr=False)
 
-        enhance_ai.assert_not_called()
+        run_agent.assert_not_called()
         self.assertEqual(result["pdf_text_source"], "pypdf_short_no_ocr")
 
     def test_assignment_match_uses_project_context_beyond_first_text_chunk(self):

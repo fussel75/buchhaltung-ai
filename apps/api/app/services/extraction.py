@@ -13,7 +13,6 @@ from pypdf import PdfReader
 
 from app.config import get_settings
 from app.services.cost_categories import VALID_COST_CATEGORIES, split_cost_category_values
-from app.services.ai_extraction import maybe_enhance_extraction_with_ai
 from app.services.database import (
     find_assignment_unit_match_by_text,
     find_assignment_unit_by_text,
@@ -25,6 +24,7 @@ from app.services.database import (
     save_document_extraction,
 )
 from app.services.storage import resolve_existing_stored_document_path
+from app.services.tax_advisor_agent import run_tax_advisor_agent
 
 EXTRACTABLE_DOCUMENT_STATUSES = {"review_pending"}
 REEXTRACTABLE_DOCUMENT_STATUSES = {"extracted", "review_ready"}
@@ -245,10 +245,10 @@ def run_ai_extraction(
             max_pages=settings.ai_extraction_vision_max_pages,
             dpi=settings.ai_extraction_vision_dpi,
         )
-    extraction = maybe_enhance_extraction_with_ai(
+    extraction = run_tax_advisor_agent(
         document=document,
         extraction=existing_extraction,
-        pdf_text=str(text),
+        pdf_text=text,
         pdf_images=pdf_images,
         force=True,
     )
@@ -2408,7 +2408,7 @@ def _finalize_pdf_result(document: dict, result: dict, text: str, *, allow_ai: b
             max_pages=settings.ai_extraction_vision_max_pages,
             dpi=settings.ai_extraction_vision_dpi,
         )
-    return maybe_enhance_extraction_with_ai(document=document, extraction=result, pdf_text=str(text), pdf_images=pdf_images)
+    return run_tax_advisor_agent(document=document, extraction=result, pdf_text=text, pdf_images=pdf_images)
 
 
 def _extract_pdf_text_pypdf(storage_path: str) -> str:
