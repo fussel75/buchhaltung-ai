@@ -92,12 +92,12 @@ def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id
         run_mock_extraction(
             document_id,
             processing_job_id=job_id,
-            allow_ai=False,
+            allow_ai=True,
             allow_ocr=_should_allow_initial_ocr(document),
         )
         return
     if action == "reextract":
-        run_mock_extraction(document_id, processing_job_id=job_id, force=True, actor=actor, allow_ai=False, allow_ocr=True)
+        run_mock_extraction(document_id, processing_job_id=job_id, force=True, actor=actor, allow_ai=True, allow_ocr=True)
         return
     if action == "ai_extract":
         run_ai_extraction(document_id, actor=actor)

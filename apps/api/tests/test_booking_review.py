@@ -3345,8 +3345,8 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(release_claim.call_count, 2)
         run_extraction.assert_has_calls(
             [
-                call(first_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
-                call(second_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
+                call(first_document_id, processing_job_id=job_id, allow_ai=True, allow_ocr=False),
+                call(second_document_id, processing_job_id=job_id, allow_ai=True, allow_ocr=False),
             ]
         )
 
@@ -3376,7 +3376,7 @@ class BookingSuggestionTests(TestCase):
         ):
             bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
 
-        run_extraction.assert_called_once_with(document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=True)
+        run_extraction.assert_called_once_with(document_id, processing_job_id=job_id, allow_ai=True, allow_ocr=True)
 
     def test_bulk_reextraction_allows_ocr_for_scanned_problem_documents(self):
         job_id = uuid4()
@@ -3406,7 +3406,7 @@ class BookingSuggestionTests(TestCase):
             processing_job_id=job_id,
             force=True,
             actor="admin@example.com",
-            allow_ai=False,
+            allow_ai=True,
             allow_ocr=True,
         )
 
