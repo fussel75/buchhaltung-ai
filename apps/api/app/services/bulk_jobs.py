@@ -198,7 +198,7 @@ def _bulk_job_max_workers(item_count: int) -> int:
         worker_count = int(configured)
     except (TypeError, ValueError):
         worker_count = 4
-    return max(1, min(worker_count, max(1, item_count), 8))
+    return max(1, min(worker_count, max(1, item_count), 16))
 
 
 def _expected_status(action: str) -> str | list[str]:

@@ -3468,7 +3468,7 @@ class BookingSuggestionTests(TestCase):
             self.assertEqual(bulk_job_service._bulk_job_max_workers(20), 6)
 
         with patch.object(bulk_job_service, "get_settings", return_value=SimpleNamespace(bulk_job_max_workers=20)):
-            self.assertEqual(bulk_job_service._bulk_job_max_workers(20), 8)
+            self.assertEqual(bulk_job_service._bulk_job_max_workers(20), 16)
 
         with patch.object(bulk_job_service, "get_settings", return_value=SimpleNamespace(bulk_job_max_workers=4)):
             self.assertEqual(bulk_job_service._bulk_job_max_workers(2), 2)
