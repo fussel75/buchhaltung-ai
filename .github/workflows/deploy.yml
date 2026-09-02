@@ -17,13 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: SSH deploy trigger
         shell: bash
         env:
           SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-          GH_REPOSITORY: ${{ github.repository }}
         run: |
           set -eo pipefail
           if [ -z "$SSH_HOST" ]; then
@@ -80,14 +82,31 @@ jobs:
             -o ServerAliveCountMax=3
             -o StrictHostKeyChecking="$strict_host_key_checking"
           )
+          scp_options=(
+            -i ~/.ssh/id_ed25519
+            -P "$SSH_PORT"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=30
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+            -o StrictHostKeyChecking="$strict_host_key_checking"
+          )
 
           deploy_log="$(mktemp)"
-          git_remote_url="https://github.com/${GH_REPOSITORY}.git"
+          deploy_archive="/tmp/buchhaltung-ai-${GITHUB_SHA}.tar.gz"
+          tar \
+            --exclude='.git' \
+            --exclude='storage' \
+            --exclude='.env' \
+            -czf "$deploy_archive" \
+            .
 
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             set +e
-            ssh "${ssh_options[@]}" "root@$SSH_HOST" \
-              "cd /docker/buchhaltung-ai && GIT_TERMINAL_PROMPT=0 git fetch --quiet '${git_remote_url}' main && git merge --ff-only FETCH_HEAD && docker compose up -d --build" \
+            scp "${scp_options[@]}" "$deploy_archive" "root@$SSH_HOST:/tmp/buchhaltung-ai.tar.gz" \
+              && ssh "${ssh_options[@]}" "root@$SSH_HOST" \
+                "mkdir -p /docker/buchhaltung-ai && cd /docker/buchhaltung-ai && tar -xzf /tmp/buchhaltung-ai.tar.gz && docker compose up -d --build" \
               2>&1 | tee "$deploy_log"
             status="${PIPESTATUS[0]}"
             set -e
