@@ -1082,8 +1082,20 @@ def mark_document_bulk_job_item(
     error: str | None = None,
 ) -> None:
     now = datetime.now(UTC)
+    final_statuses = {"succeeded", "failed", "skipped"}
     with _connect() as connection:
         with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select status
+                from document_bulk_job_items
+                where job_id = %s and document_id = %s
+                for update
+                """,
+                (job_id, document_id),
+            )
+            row = cursor.fetchone()
+            previous_status = row["status"] if row else None
             cursor.execute(
                 """
                 update document_bulk_job_items
@@ -1092,26 +1104,20 @@ def mark_document_bulk_job_item(
                 """,
                 (status, error, now, job_id, document_id),
             )
+            processed_delta = int(status in final_statuses) - int(previous_status in final_statuses)
+            succeeded_delta = int(status == "succeeded") - int(previous_status == "succeeded")
+            failed_delta = int(status in {"failed", "skipped"}) - int(previous_status in {"failed", "skipped"})
             cursor.execute(
                 """
                 update document_bulk_jobs
                 set
-                    processed_count = (
-                        select count(*) from document_bulk_job_items
-                        where job_id = %s and status in ('succeeded', 'failed', 'skipped')
-                    ),
-                    succeeded_count = (
-                        select count(*) from document_bulk_job_items
-                        where job_id = %s and status = 'succeeded'
-                    ),
-                    failed_count = (
-                        select count(*) from document_bulk_job_items
-                        where job_id = %s and status in ('failed', 'skipped')
-                    ),
+                    processed_count = greatest(0, processed_count + %s),
+                    succeeded_count = greatest(0, succeeded_count + %s),
+                    failed_count = greatest(0, failed_count + %s),
                     updated_at = %s
                 where id = %s
                 """,
-                (job_id, job_id, job_id, now, job_id),
+                (processed_delta, succeeded_delta, failed_delta, now, job_id),
             )
 
 

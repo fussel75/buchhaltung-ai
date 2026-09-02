@@ -3303,6 +3303,20 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(jobs[0]["requested_total"], 2)
         self.assertNotIn("items", jobs[0])
 
+    def test_mark_document_bulk_job_item_updates_counts_incrementally(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        cursor = RecordingCursor(fetchone_result={"status": "running"})
+
+        with patch.object(database_service, "_connect", return_value=RecordingConnection(cursor)):
+            database_service.mark_document_bulk_job_item(job_id, document_id, "succeeded")
+
+        statements = [statement for statement, _params in cursor.statements]
+        self.assertIn("select status from document_bulk_job_items", statements[0])
+        self.assertIn("processed_count = greatest(0, processed_count + %s)", statements[2])
+        self.assertNotIn("select count(*) from document_bulk_job_items", " ".join(statements))
+        self.assertEqual(cursor.statements[2][1], (1, 1, 0, ANY, job_id))
+
     def test_bulk_job_runner_records_item_failure_and_continues(self):
         job_id = uuid4()
         first_document_id = uuid4()
