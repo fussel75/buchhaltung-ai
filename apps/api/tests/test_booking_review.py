@@ -3347,7 +3347,8 @@ class BookingSuggestionTests(TestCase):
             [
                 call(first_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
                 call(second_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
-            ]
+            ],
+            any_order=True,
         )
 
     def test_bulk_initial_extraction_allows_ocr_for_scanned_supporting_documents(self):
@@ -3461,6 +3462,16 @@ class BookingSuggestionTests(TestCase):
             allow_ai=False,
             allow_ocr=True,
         )
+
+    def test_bulk_job_worker_count_is_limited_and_configurable(self):
+        with patch.object(bulk_job_service, "get_settings", return_value=SimpleNamespace(bulk_job_max_workers=6)):
+            self.assertEqual(bulk_job_service._bulk_job_max_workers(20), 6)
+
+        with patch.object(bulk_job_service, "get_settings", return_value=SimpleNamespace(bulk_job_max_workers=20)):
+            self.assertEqual(bulk_job_service._bulk_job_max_workers(20), 8)
+
+        with patch.object(bulk_job_service, "get_settings", return_value=SimpleNamespace(bulk_job_max_workers=4)):
+            self.assertEqual(bulk_job_service._bulk_job_max_workers(2), 2)
 
     def test_bulk_job_runner_marks_cancelled_job_failed_instead_of_hanging(self):
         job_id = uuid4()

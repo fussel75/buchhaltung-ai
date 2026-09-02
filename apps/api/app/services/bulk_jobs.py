@@ -1,7 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID
 
 from fastapi import HTTPException
 
+from app.config import get_settings
 from app.services.database import (
     claim_document_for_bulk_job,
     document_extraction_health,
@@ -31,51 +33,24 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
     health_entries: list[dict] = []
     cancelled = False
     try:
-        for item in job["items"]:
-            if job_id in _CANCELLED_BULK_JOBS:
-                cancelled = True
-                break
-            document_id = UUID(item["document_id"])
-            mark_document_bulk_job_item(job_id, document_id, "running")
-            claim = claim_document_for_bulk_job(document_id, job_id, _expected_status(job["action"]))
-            if claim is None:
-                mark_document_bulk_job_item(job_id, document_id, "skipped", "Beleg ist nicht mehr im passenden Status.")
-                if job["action"] in {"reextract", "ai_extract"}:
-                    health_entries.append(
-                        {
-                            "document_id": str(document_id),
-                            "status": "skipped",
-                            "error": "Beleg ist nicht mehr im passenden Status.",
-                        }
-                    )
-                continue
-            before_health = document_extraction_health(get_document(document_id)) if job["action"] in {"reextract", "ai_extract"} else None
-            try:
-                _run_document_bulk_action(job["action"], document_id, actor, job_id, before_health=before_health)
-            except Exception as error:  # noqa: BLE001 - keep one bad document from stopping the batch
-                mark_document_bulk_job_item(job_id, document_id, "failed", _error_message(error))
-                if job["action"] in {"reextract", "ai_extract"}:
-                    health_entries.append(
-                        {
-                            "document_id": str(document_id),
-                            "status": "failed",
-                            "before": before_health,
-                            "error": _error_message(error),
-                        }
-                    )
-            else:
-                mark_document_bulk_job_item(job_id, document_id, "succeeded")
-                if job["action"] in {"reextract", "ai_extract"}:
-                    health_entries.append(
-                        {
-                            "document_id": str(document_id),
-                            "status": "succeeded",
-                            "before": before_health,
-                            "after": document_extraction_health(get_document(document_id)),
-                        }
-                    )
-            finally:
-                release_document_bulk_claim(document_id, job_id)
+        items = list(job["items"])
+        executor = ThreadPoolExecutor(max_workers=_bulk_job_max_workers(len(items)))
+        try:
+            futures = [
+                executor.submit(_run_document_bulk_item, job_id, job["action"], item, actor)
+                for item in items
+            ]
+            for future in as_completed(futures):
+                health_entry = future.result()
+                if health_entry:
+                    health_entries.append(health_entry)
+                if job_id in _CANCELLED_BULK_JOBS:
+                    cancelled = True
+                    for pending_future in futures:
+                        pending_future.cancel()
+                    break
+        finally:
+            executor.shutdown(wait=True, cancel_futures=cancelled)
         if cancelled:
             _finish_bulk_job(job_id, "failed", job["action"], health_entries, "Manuell abgebrochen.")
         else:
@@ -84,6 +59,48 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
         _finish_bulk_job(job_id, "failed", job["action"], health_entries, _error_message(error))
     finally:
         _CANCELLED_BULK_JOBS.discard(job_id)
+
+
+def _run_document_bulk_item(job_id: UUID, action: str, item: dict, actor: str) -> dict | None:
+    if job_id in _CANCELLED_BULK_JOBS:
+        return None
+    document_id = UUID(item["document_id"])
+    mark_document_bulk_job_item(job_id, document_id, "running")
+    claim = claim_document_for_bulk_job(document_id, job_id, _expected_status(action))
+    if claim is None:
+        mark_document_bulk_job_item(job_id, document_id, "skipped", "Beleg ist nicht mehr im passenden Status.")
+        if action in {"reextract", "ai_extract"}:
+            return {
+                "document_id": str(document_id),
+                "status": "skipped",
+                "error": "Beleg ist nicht mehr im passenden Status.",
+            }
+        return None
+    before_health = document_extraction_health(get_document(document_id)) if action in {"reextract", "ai_extract"} else None
+    try:
+        _run_document_bulk_action(action, document_id, actor, job_id, before_health=before_health)
+    except Exception as error:  # noqa: BLE001 - keep one bad document from stopping the batch
+        mark_document_bulk_job_item(job_id, document_id, "failed", _error_message(error))
+        if action in {"reextract", "ai_extract"}:
+            return {
+                "document_id": str(document_id),
+                "status": "failed",
+                "before": before_health,
+                "error": _error_message(error),
+            }
+        return None
+    finally:
+        release_document_bulk_claim(document_id, job_id)
+
+    mark_document_bulk_job_item(job_id, document_id, "succeeded")
+    if action in {"reextract", "ai_extract"}:
+        return {
+            "document_id": str(document_id),
+            "status": "succeeded",
+            "before": before_health,
+            "after": document_extraction_health(get_document(document_id)),
+        }
+    return None
 
 
 def _run_document_bulk_action(
@@ -173,6 +190,15 @@ def _should_allow_bulk_ai(document: dict | None, before_health: dict | None) -> 
     if raw_result.get("assignment_type") in {"assignment_unresolved", "general_cost"}:
         return True
     return _should_allow_initial_ocr(document)
+
+
+def _bulk_job_max_workers(item_count: int) -> int:
+    configured = get_settings().bulk_job_max_workers
+    try:
+        worker_count = int(configured)
+    except (TypeError, ValueError):
+        worker_count = 4
+    return max(1, min(worker_count, max(1, item_count), 8))
 
 
 def _expected_status(action: str) -> str | list[str]:
