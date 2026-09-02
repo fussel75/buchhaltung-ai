@@ -51,7 +51,7 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
                 continue
             before_health = document_extraction_health(get_document(document_id)) if job["action"] in {"reextract", "ai_extract"} else None
             try:
-                _run_document_bulk_action(job["action"], document_id, actor, job_id)
+                _run_document_bulk_action(job["action"], document_id, actor, job_id, before_health=before_health)
             except Exception as error:  # noqa: BLE001 - keep one bad document from stopping the batch
                 mark_document_bulk_job_item(job_id, document_id, "failed", _error_message(error))
                 if job["action"] in {"reextract", "ai_extract"}:
@@ -86,18 +86,33 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
         _CANCELLED_BULK_JOBS.discard(job_id)
 
 
-def _run_document_bulk_action(action: str, document_id: UUID, actor: str, job_id: UUID) -> None:
+def _run_document_bulk_action(
+    action: str,
+    document_id: UUID,
+    actor: str,
+    job_id: UUID,
+    *,
+    before_health: dict | None = None,
+) -> None:
     if action == "extract":
         document = get_document(document_id)
         run_mock_extraction(
             document_id,
             processing_job_id=job_id,
-            allow_ai=True,
+            allow_ai=_should_allow_bulk_ai(document, before_health),
             allow_ocr=_should_allow_initial_ocr(document),
         )
         return
     if action == "reextract":
-        run_mock_extraction(document_id, processing_job_id=job_id, force=True, actor=actor, allow_ai=True, allow_ocr=True)
+        document = get_document(document_id)
+        run_mock_extraction(
+            document_id,
+            processing_job_id=job_id,
+            force=True,
+            actor=actor,
+            allow_ai=_should_allow_bulk_ai(document, before_health),
+            allow_ocr=True,
+        )
         return
     if action == "ai_extract":
         run_ai_extraction(document_id, actor=actor)
@@ -130,6 +145,34 @@ def _should_allow_initial_ocr(document: dict | None) -> bool:
         "bareinlage",
     )
     return any(marker in filename for marker in markers)
+
+
+def _should_allow_bulk_ai(document: dict | None, before_health: dict | None) -> bool:
+    if before_health:
+        if before_health.get("problem_count", 0) > 0:
+            return True
+        if before_health.get("is_general_cost") or before_health.get("is_assignment_unresolved"):
+            return True
+        if before_health.get("needs_assignment_review") or before_health.get("is_supplier_unresolved"):
+            return True
+        if before_health.get("ai_status") == "failed":
+            return True
+    if not document:
+        return False
+    extraction = document.get("extraction") if isinstance(document.get("extraction"), dict) else {}
+    raw_result = extraction.get("raw_result") if isinstance(extraction.get("raw_result"), dict) else {}
+    warnings = extraction.get("warnings") or raw_result.get("warnings") or []
+    if warnings:
+        return True
+    try:
+        confidence = float(extraction.get("confidence") or raw_result.get("confidence") or 1)
+    except (TypeError, ValueError):
+        confidence = 1
+    if confidence < 0.90:
+        return True
+    if raw_result.get("assignment_type") in {"assignment_unresolved", "general_cost"}:
+        return True
+    return _should_allow_initial_ocr(document)
 
 
 def _expected_status(action: str) -> str | list[str]:
