@@ -228,6 +228,48 @@ class AiExtractionTests(TestCase):
         self.assertIn("assignment_code", accepted_fields)
         self.assertIn("assignment_kind", accepted_fields)
 
+    def test_ai_extraction_accepts_equipment_rental_cost_category(self):
+        extraction = {
+            "supplier_name": "Mietpark",
+            "invoice_number": "123",
+            "invoice_date": "2026-09-01",
+            "gross_amount": Decimal("117.81"),
+            "confidence": Decimal("0.70"),
+            "warnings": ["Kostenart nicht sicher erkannt."],
+            "raw_result": {
+                "document_type": "incoming_invoice",
+                "cost_category": "general_overhead",
+                "warnings": ["Kostenart nicht sicher erkannt."],
+            },
+        }
+        ai_payload = {
+            "cost_category": "equipment_rental",
+            "item_summary": "Maschinenmiete Rüttelplatte",
+            "confidence": "0.94",
+            "evidence": ["Maschinenmiete Rüttelplatte"],
+            "warnings": [],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload),
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "miete.pdf"},
+                extraction=extraction,
+                pdf_text="Maschinenmiete Rüttelplatte",
+            )
+
+        self.assertEqual(result["raw_result"]["cost_category"], "equipment_rental")
+        self.assertIn("cost_category", result["raw_result"]["ai_extraction"]["accepted_fields"])
+
     def test_ai_provider_failure_keeps_rule_result_with_warning(self):
         extraction = {
             "supplier_name": "Unklar",

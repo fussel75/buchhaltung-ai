@@ -277,7 +277,7 @@ def _user_prompt(
         "discount_amount": "decimal string|null",
         "discounted_payable_amount": "decimal string|null",
         "currency": "EUR",
-        "cost_category": "material|subcontractor|disposal|fuel_vehicle|software_subscription|security_subscription|general_overhead|null",
+        "cost_category": "material|subcontractor|disposal|equipment_rental|fuel_vehicle|software_subscription|security_subscription|general_overhead|null",
         "assignment_code": "Projektname/Code aus Projektliste|null",
         "project_number": "Projektnummer aus Projektliste|null",
         "assignment_kind": "construction_project|construction_or_dropoff_site|location|general_cost|cost_object|vehicle|subscription|department|null",
@@ -579,6 +579,8 @@ def _should_replace_value(field_name: str, current_value: Any, new_value: Any, r
     if field_name == "invoice_date" and _field_warned_missing_or_uncertain(raw_result, "Datum"):
         return True
     if field_name == "invoice_number" and _field_warned_missing_or_uncertain(raw_result, "Rechnung"):
+        return True
+    if field_name == "cost_category" and _field_warned_missing_or_uncertain(raw_result, "Kostenart"):
         return True
     if field_name == "tax_amount" and _tax_amount_looks_like_rate(current_value, new_value, raw_result):
         return True

@@ -9,6 +9,7 @@ const COST_CATEGORY_OPTIONS = [
   ["material", "Material"],
   ["subcontractor", "Fremdleistung"],
   ["disposal", "Entsorgung"],
+  ["equipment_rental", "Maschinenmiete"],
   ["fuel_vehicle", "Fahrzeug/Tanken"],
   ["software_subscription", "Software/Abo"],
   ["security_subscription", "Überwachung/Abo"],
@@ -6321,13 +6322,9 @@ function MasterdataAdmin({
             <FormField label="Kostenart" error={fieldError(accountingFormErrors, "cost_category")}>
               <select data-accounting-field="cost_category" value={accountingForm.cost_category} onChange={(event) => setAccountingForm({ ...accountingForm, cost_category: event.target.value })}>
                 <option value="">Alle Kostenarten</option>
-                <option value="material">Material</option>
-                <option value="subcontractor">Fremdleistung</option>
-                <option value="disposal">Entsorgung</option>
-                <option value="fuel_vehicle">Fahrzeug/Tanken</option>
-                <option value="software_subscription">Software/Abo</option>
-                <option value="security_subscription">Überwachung/Abo</option>
-                <option value="general_overhead">Sonstige Gemeinkosten</option>
+                {COST_CATEGORY_OPTIONS.map(([category, label]) => (
+                  <option key={category} value={category}>{label}</option>
+                ))}
               </select>
             </FormField>
             <FormField label="Aufwandskonto" error={fieldError(accountingFormErrors, "debit_account")}>
@@ -6853,13 +6850,9 @@ function BookingSuggestions({ document, suggestions, tenantProfile, assignmentUn
                 aria-label={`Kostenart Zeile ${suggestion.line_no}`}
               >
                 <option value="">-</option>
-                <option value="material">Material</option>
-                <option value="subcontractor">Fremdleistung</option>
-                <option value="disposal">Entsorgung</option>
-                <option value="fuel_vehicle">Fahrzeug/Tanken</option>
-                <option value="software_subscription">Software/Abo</option>
-                <option value="security_subscription">Überwachung/Abo</option>
-                <option value="general_overhead">Sonstige Gemeinkosten</option>
+                {COST_CATEGORY_OPTIONS.map(([category, label]) => (
+                  <option key={category} value={category}>{label}</option>
+                ))}
               </select>
               <MoneyInput
                 value={draft.net_amount}
@@ -8548,6 +8541,7 @@ const ACCOUNTING_ACCOUNT_PRESETS = {
     debit: {
       material: [{ account: "3400", label: "Wareneingang 19 %" }],
       subcontractor: [{ account: "3100", label: "Fremdleistungen 19 %" }],
+      equipment_rental: [{ account: "4900", label: "Sonstige betriebliche Aufwendungen" }],
       fuel_vehicle: [{ account: "4530", label: "Kfz-Betriebskosten" }],
       software_subscription: [{ account: "4806", label: "Wartung/Software" }],
       security_subscription: [{ account: "4900", label: "Sonstige betriebliche Aufwendungen" }],
@@ -8560,6 +8554,7 @@ const ACCOUNTING_ACCOUNT_PRESETS = {
     debit: {
       material: [{ account: "5400", label: "Wareneingang 19 %" }],
       subcontractor: [{ account: "5900", label: "Fremdleistungen/Aufwand" }],
+      equipment_rental: [{ account: "6850", label: "Sonstige betriebliche Aufwendungen" }],
       fuel_vehicle: [{ account: "6530", label: "Fahrzeugkosten" }],
       software_subscription: [{ account: "6835", label: "Wartung/Software" }],
       security_subscription: [{ account: "6850", label: "Sonstige betriebliche Aufwendungen" }],

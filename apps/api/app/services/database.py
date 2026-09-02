@@ -4198,6 +4198,7 @@ def _bwa_cost_category_terms(cost_category: str | None) -> list[str]:
     terms_by_category = {
         "material": ["material", "waren", "wareneinkauf", "wareneingang", "baustoff"],
         "subcontractor": ["fremdleistung", "fremdarbeiten", "subunternehmer"],
+        "equipment_rental": ["maschinenmiete", "gerätemiete", "geraetemiete", "mietgerät", "mietgeraet"],
         "fuel_vehicle": ["fahrzeug", "kfz", "tanken", "kraftstoff"],
         "software_subscription": ["software", "wartung", "lizenz", "abo"],
         "security_subscription": ["ueberwachung", "überwachung", "kamera", "abo"],

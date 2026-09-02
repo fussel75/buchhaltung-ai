@@ -4443,6 +4443,8 @@ def _cost_category(
     assignment_type: str,
 ) -> str:
     haystack = " ".join([supplier_name or "", product_name or "", text[:3000]]).lower()
+    if any(term in haystack for term in ["maschinenmiete", "gerätemiete", "geraetemiete", "mietgerät", "mietgeraet", "baumaschinenmiete", "arbeitsbühne", "arbeitsbuehne"]):
+        return "equipment_rental"
     if any(term in haystack for term in ["rieprecht", "baumisch", "boden ohne analyse", "gestellung container", "container abholung", "container"]):
         return "disposal"
     if "dammers" in haystack:

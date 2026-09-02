@@ -517,10 +517,26 @@ class BookingSuggestionTests(TestCase):
         payload = masterdata_route.SupplierRuleRequest(
             match_text="konzept 54",
             supplier_name="konzept 54 GmbH & Co.KG",
-            default_cost_category="material,subcontractor",
+            default_cost_category="material,equipment_rental,subcontractor",
         )
 
-        self.assertEqual(payload.default_cost_category, "material,subcontractor")
+        self.assertEqual(payload.default_cost_category, "material,equipment_rental,subcontractor")
+
+    def test_extraction_update_accepts_equipment_rental_cost_category(self):
+        payload = documents_route.ExtractionUpdate(cost_category="equipment_rental")
+
+        self.assertEqual(payload.cost_category, "equipment_rental")
+
+    def test_machine_rental_text_maps_to_equipment_rental_cost_category(self):
+        self.assertEqual(
+            extraction_service._cost_category(
+                "Mietpark GmbH",
+                "Maschinenmiete Rüttelplatte",
+                "Rechnung für Mietgerät und Baumaschinenmiete",
+                "assigned",
+            ),
+            "equipment_rental",
+        )
 
     def test_accounting_rule_rejects_unknown_cost_category(self):
         with self.assertRaises(ValidationError):
