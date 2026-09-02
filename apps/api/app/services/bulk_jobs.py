@@ -30,11 +30,12 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
     if job is None or job["status"] not in {"queued", "running"}:
         return
 
+    worker_count = _bulk_job_max_workers(len(job["items"]))
     health_entries: list[dict] = []
     cancelled = False
     try:
         items = list(job["items"])
-        executor = ThreadPoolExecutor(max_workers=_bulk_job_max_workers(len(items)))
+        executor = ThreadPoolExecutor(max_workers=worker_count)
         try:
             futures = [
                 executor.submit(_run_document_bulk_item, job_id, job["action"], item, actor)
@@ -52,11 +53,11 @@ def run_document_bulk_job(job_id: UUID, actor: str = "system") -> None:
         finally:
             executor.shutdown(wait=True, cancel_futures=cancelled)
         if cancelled:
-            _finish_bulk_job(job_id, "failed", job["action"], health_entries, "Manuell abgebrochen.")
+            _finish_bulk_job(job_id, "failed", job["action"], health_entries, "Manuell abgebrochen.", worker_count=worker_count)
         else:
-            _finish_bulk_job(job_id, "completed", job["action"], health_entries)
+            _finish_bulk_job(job_id, "completed", job["action"], health_entries, worker_count=worker_count)
     except Exception as error:  # noqa: BLE001 - persist fatal job errors for the UI
-        _finish_bulk_job(job_id, "failed", job["action"], health_entries, _error_message(error))
+        _finish_bulk_job(job_id, "failed", job["action"], health_entries, _error_message(error), worker_count=worker_count)
     finally:
         _CANCELLED_BULK_JOBS.discard(job_id)
 
@@ -165,6 +166,9 @@ def _should_allow_initial_ocr(document: dict | None) -> bool:
 
 
 def _should_allow_bulk_ai(document: dict | None, before_health: dict | None) -> bool:
+    policy = str(get_settings().bulk_ai_policy or "always").strip().lower()
+    if policy in {"always", "ai_first", "true", "1", "yes"}:
+        return True
     if before_health:
         if before_health.get("problem_count", 0) > 0:
             return True
@@ -231,8 +235,12 @@ def _finish_bulk_job(
     action: str,
     health_entries: list[dict],
     error: str | None = None,
+    worker_count: int | None = None,
 ) -> None:
     summary = _bulk_job_summary(action, health_entries)
+    if summary:
+        summary["worker_count"] = worker_count
+        summary["bulk_ai_policy"] = str(get_settings().bulk_ai_policy or "always")
     if summary:
         finish_document_bulk_job(job_id, status, error, summary=summary)
         return

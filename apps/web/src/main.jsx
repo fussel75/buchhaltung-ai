@@ -2942,6 +2942,8 @@ function BulkJobHistory({ jobs, onCancel }) {
               <div className="job-meta">
                 <span>{job.succeeded_count || 0} erfolgreich</span>
                 <span>{job.failed_count || 0} fehlgeschlagen</span>
+                {job.summary?.worker_count ? <span>{job.summary.worker_count} Worker</span> : null}
+                {job.summary?.bulk_ai_policy ? <span>KI: {formatBulkAiPolicy(job.summary.bulk_ai_policy)}</span> : null}
                 <span>{formatDateTime(job.started_at || job.created_at)}</span>
               </div>
               <BulkJobSummary summary={job.summary} />
@@ -8227,6 +8229,15 @@ function formatBulkStatus(status) {
     failed: "Fehlgeschlagen",
   };
   return labels[status] ?? status;
+}
+
+function formatBulkAiPolicy(policy) {
+  const labels = {
+    always: "immer",
+    ai_first: "immer",
+    problem_only: "nur Probleme",
+  };
+  return labels[policy] ?? policy;
 }
 
 function discountedAmount(rawResult) {

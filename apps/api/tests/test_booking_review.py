@@ -3359,8 +3359,8 @@ class BookingSuggestionTests(TestCase):
         self.assertEqual(release_claim.call_count, 2)
         run_extraction.assert_has_calls(
             [
-                call(first_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
-                call(second_document_id, processing_job_id=job_id, allow_ai=False, allow_ocr=False),
+                call(first_document_id, processing_job_id=job_id, allow_ai=True, allow_ocr=False),
+                call(second_document_id, processing_job_id=job_id, allow_ai=True, allow_ocr=False),
             ],
             any_order=True,
         )
@@ -3429,7 +3429,7 @@ class BookingSuggestionTests(TestCase):
             allow_ocr=True,
         )
 
-    def test_bulk_reextraction_skips_ai_for_clean_documents(self):
+    def test_bulk_reextraction_uses_ai_first_by_default_for_clean_documents(self):
         job_id = uuid4()
         document_id = uuid4()
         job = {
@@ -3461,6 +3461,55 @@ class BookingSuggestionTests(TestCase):
             patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(document_id)}),
             patch.object(bulk_job_service, "get_document", return_value=clean_document),
             patch.object(bulk_job_service, "document_extraction_health", return_value=clean_health),
+            patch.object(bulk_job_service, "release_document_bulk_claim"),
+            patch.object(bulk_job_service, "run_mock_extraction") as run_extraction,
+            patch.object(bulk_job_service, "mark_document_bulk_job_item"),
+            patch.object(bulk_job_service, "finish_document_bulk_job"),
+        ):
+            bulk_job_service.run_document_bulk_job(job_id, actor="admin@example.com")
+
+        run_extraction.assert_called_once_with(
+            document_id,
+            processing_job_id=job_id,
+            force=True,
+            actor="admin@example.com",
+            allow_ai=True,
+            allow_ocr=True,
+        )
+
+    def test_bulk_reextraction_can_limit_ai_to_problem_documents(self):
+        job_id = uuid4()
+        document_id = uuid4()
+        job = {
+            "id": str(job_id),
+            "tenant_id": "demo-mandant",
+            "action": "reextract",
+            "status": "running",
+            "items": [{"document_id": str(document_id), "status": "queued"}],
+        }
+        clean_health = {
+            "problem_count": 0,
+            "is_general_cost": False,
+            "is_assignment_unresolved": False,
+            "needs_assignment_review": False,
+            "is_supplier_unresolved": False,
+        }
+        clean_document = {
+            "id": str(document_id),
+            "original_filename": "saubere-rechnung.pdf",
+            "extraction": {
+                "confidence": "0.97",
+                "warnings": [],
+                "raw_result": {"assignment_type": "assigned"},
+            },
+        }
+
+        with (
+            patch.object(bulk_job_service, "mark_document_bulk_job_running", return_value=job),
+            patch.object(bulk_job_service, "claim_document_for_bulk_job", return_value={"id": str(document_id)}),
+            patch.object(bulk_job_service, "get_document", return_value=clean_document),
+            patch.object(bulk_job_service, "document_extraction_health", return_value=clean_health),
+            patch.object(bulk_job_service, "get_settings", return_value=SimpleNamespace(bulk_job_max_workers=4, bulk_ai_policy="problem_only")),
             patch.object(bulk_job_service, "release_document_bulk_claim"),
             patch.object(bulk_job_service, "run_mock_extraction") as run_extraction,
             patch.object(bulk_job_service, "mark_document_bulk_job_item"),
