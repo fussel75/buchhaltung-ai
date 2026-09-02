@@ -21,6 +21,7 @@ AI_EXTRACTABLE_DOCUMENT_TYPES = {
     "credit_note",
     "fuel_receipt",
     "project_document",
+    "tax_notice",
     "tax_exemption_certificate",
     "reverse_charge_certificate",
     "other",
@@ -46,6 +47,7 @@ AI_MERGE_FIELDS = {
     "discount_amount",
     "discounted_payable_amount",
     "item_summary",
+    "normalized_filename",
 }
 
 TOP_LEVEL_FIELDS = {
@@ -57,6 +59,7 @@ TOP_LEVEL_FIELDS = {
     "tax_amount",
     "gross_amount",
     "currency",
+    "normalized_filename",
 }
 
 MONEY_FIELDS = {
@@ -263,7 +266,7 @@ def _user_prompt(
         for unit in selected_assignment_units
     ]
     schema = {
-        "document_type": "incoming_invoice|credit_note|fuel_receipt|project_document|tax_exemption_certificate|reverse_charge_certificate|other|null",
+        "document_type": "incoming_invoice|credit_note|fuel_receipt|project_document|tax_notice|tax_exemption_certificate|reverse_charge_certificate|other|null",
         "supplier_name": "string|null",
         "invoice_number": "string|null",
         "customer_number": "string|null",
@@ -403,19 +406,20 @@ def _merge_ai_payload(
         raw_result.pop("project_code", None)
         raw_result["assignment_type"] = "assigned"
         raw_result["project_number"] = normalized_ai.get("project_number")
-    if "document_type" in accepted and accepted["document_type"] == "credit_note":
-        raw_result["document_type"] = "credit_note"
+    if "document_type" in accepted:
+        raw_result["document_type"] = accepted["document_type"]
 
     ai_confidence = _decimal_or_none(normalized_ai.get("confidence"))
     current_confidence = _decimal_or_none(enriched.get("confidence")) or Decimal("0.50")
     if ai_confidence is not None and accepted:
         enriched["confidence"] = max(current_confidence, min(ai_confidence, Decimal("0.98")))
 
-    warnings = list(enriched.get("warnings") or [])
-    warnings.extend(str(item) for item in normalized_ai.get("warnings") or [] if item)
-    if accepted:
-        warnings.append("KI-Extraktion hat unsichere Felder ergänzt; fachlich prüfen.")
-    enriched["warnings"] = _unique(warnings)
+    enriched["warnings"] = _merged_warnings_after_ai(
+        existing_warnings=enriched.get("warnings") or [],
+        ai_warnings=normalized_ai.get("warnings") or [],
+        accepted=accepted,
+        raw_result=raw_result,
+    )
     raw_result["ai_extraction"] = {
         "status": "applied" if accepted else "no_changes",
         "model": model,
@@ -431,7 +435,7 @@ def _merge_ai_payload(
 
 
 def _normalize_ai_payload(ai_payload: dict[str, Any], assignment_units: list[dict[str, Any]]) -> dict[str, Any]:
-    payload = {key: ai_payload.get(key) for key in AI_MERGE_FIELDS | {"confidence", "evidence", "warnings", "normalized_filename"}}
+    payload = {key: ai_payload.get(key) for key in AI_MERGE_FIELDS | {"confidence", "evidence", "warnings"}}
     original_assignment_code = payload.get("assignment_code")
     original_assignment_kind = payload.get("assignment_kind")
     document_type = payload.get("document_type")
@@ -457,7 +461,7 @@ def _normalize_ai_payload(ai_payload: dict[str, Any], assignment_units: list[dic
         payload["assignment_kind"] = original_assignment_kind if payload["assignment_code"] and original_assignment_kind in VALID_AI_ASSIGNMENT_KINDS else None
     payload["evidence"] = [str(item)[:300] for item in payload.get("evidence") or [] if item][:8]
     payload["warnings"] = [str(item)[:300] for item in payload.get("warnings") or [] if item][:8]
-    for field_name in ("supplier_name", "invoice_number", "customer_number", "item_summary"):
+    for field_name in ("supplier_name", "invoice_number", "customer_number", "item_summary", "normalized_filename"):
         if payload.get(field_name) is not None:
             payload[field_name] = str(payload[field_name]).strip()[:500] or None
     return payload
@@ -568,6 +572,19 @@ def _should_replace_value(field_name: str, current_value: Any, new_value: Any, r
             or _field_warned_missing_or_uncertain(raw_result, "Zuordnung")
             or _assignment_value_is_generic(current_value)
         )
+    if field_name == "document_type":
+        return bool(new_value) and (
+            not current_value
+            or str(current_value) == str(new_value)
+            or raw_result.get("source") in {"mock", "pdf_unreadable", "unreadable_pdf"}
+            or _has_any_missing_or_uncertain_warning(raw_result)
+        )
+    if field_name == "normalized_filename":
+        return bool(new_value) and (
+            not current_value
+            or _filename_value_is_generic(current_value)
+            or _has_any_missing_or_uncertain_warning(raw_result)
+        )
     if current_value in (None, "", "-", "MOCK"):
         return True
     if field_name == "invoice_number" and str(current_value).startswith("MOCK-"):
@@ -576,11 +593,17 @@ def _should_replace_value(field_name: str, current_value: Any, new_value: Any, r
         return True
     if field_name == "supplier_name" and _supplier_value_is_document_number(current_value, raw_result):
         return True
+    if field_name == "supplier_name" and _supplier_value_is_known_recipient(current_value):
+        return True
     if field_name == "invoice_date" and _field_warned_missing_or_uncertain(raw_result, "Datum"):
         return True
     if field_name == "invoice_number" and _field_warned_missing_or_uncertain(raw_result, "Rechnung"):
         return True
     if field_name == "cost_category" and _field_warned_missing_or_uncertain(raw_result, "Kostenart"):
+        return True
+    if field_name == "gross_amount" and _field_warned_missing_or_uncertain(raw_result, "Brutto"):
+        return True
+    if field_name == "net_amount" and _field_warned_missing_or_uncertain(raw_result, "Netto"):
         return True
     if field_name == "tax_amount" and _tax_amount_looks_like_rate(current_value, new_value, raw_result):
         return True
@@ -620,10 +643,82 @@ def _assignment_value_is_generic(value: Any) -> bool:
     return normalized in {"allgemeinekosten", "allgemeinkosten", "bauvorhabenungeklaert", "bauvorhabenungeklärt", "ungeklaert", "ungeklärt"}
 
 
+def _filename_value_is_generic(value: Any) -> bool:
+    normalized = _normalize_lookup(value)
+    return any(
+        marker in normalized
+        for marker in (
+            "allgemeinekosten",
+            "ohnedatum",
+            "ohnenummer",
+            "bauvorhabenungeklaert",
+            "bauvorhabenungeklärt",
+            "lieferantungeklaert",
+            "rechnungunbekannt",
+        )
+    )
+
+
 def _field_warned_missing_or_uncertain(raw_result: dict[str, Any], label: str) -> bool:
     label_lower = label.casefold()
     warnings = " ".join(str(item) for item in raw_result.get("warnings") or []).casefold()
     return label_lower in warnings and any(marker in warnings for marker in ("fehlt", "nicht sicher", "unklar"))
+
+
+def _has_any_missing_or_uncertain_warning(raw_result: dict[str, Any]) -> bool:
+    warnings = " ".join(str(item) for item in raw_result.get("warnings") or []).casefold()
+    return any(marker in warnings for marker in ("fehlt", "nicht sicher", "unklar", "ungeklärt", "ungeklaert"))
+
+
+def _merged_warnings_after_ai(
+    *,
+    existing_warnings: list[Any],
+    ai_warnings: list[Any],
+    accepted: dict[str, Any],
+    raw_result: dict[str, Any],
+) -> list[str]:
+    clear_markers = _warning_markers_for_accepted_fields(accepted, raw_result)
+    cleaned_existing = [
+        str(warning)
+        for warning in existing_warnings
+        if warning and not _warning_matches_any_marker(str(warning), clear_markers)
+    ]
+    merged = cleaned_existing + [str(item) for item in ai_warnings if item]
+    return _unique(merged)
+
+
+def _warning_markers_for_accepted_fields(accepted: dict[str, Any], raw_result: dict[str, Any]) -> set[str]:
+    markers: set[str] = set()
+    if accepted.get("supplier_name"):
+        markers.update({"lieferant", "aussteller", "firma"})
+    if accepted.get("invoice_number"):
+        markers.update({"rechnungsnummer", "rechnung nummer", "belegnummer", "nummer"})
+    if accepted.get("invoice_date"):
+        markers.update({"datum", "rechnungsdatum", "belegdatum"})
+    if accepted.get("gross_amount"):
+        markers.update({"brutto", "gesamtbetrag", "rechnungsbetrag"})
+    if accepted.get("net_amount"):
+        markers.add("netto")
+    if accepted.get("tax_amount"):
+        markers.update({"ust", "mwst", "steuerbetrag"})
+    if accepted.get("cost_category"):
+        markers.add("kostenart")
+    if accepted.get("assignment_code") or accepted.get("project_number") or accepted.get("assignment_kind"):
+        markers.update({"zuordnung", "bauvorhaben", "projekt", "allgemeine kosten"})
+
+    document_type = accepted.get("document_type") or raw_result.get("document_type")
+    if document_type in {"project_document", "tax_notice", "tax_exemption_certificate", "reverse_charge_certificate", "other"}:
+        markers.update({"rechnungsnummer", "rechnung nummer", "brutto", "netto", "gesamtbetrag", "rechnungsbetrag"})
+    return markers
+
+
+def _warning_matches_any_marker(warning: str, markers: set[str]) -> bool:
+    if not markers:
+        return False
+    normalized_warning = warning.casefold()
+    if not any(marker in normalized_warning for marker in ("fehlt", "nicht sicher", "unklar", "ungeklärt", "ungeklaert")):
+        return False
+    return any(marker in normalized_warning for marker in markers)
 
 
 def _supplier_value_is_document_number(current_value: Any, raw_result: dict[str, Any]) -> bool:
@@ -639,6 +734,16 @@ def _supplier_value_is_document_number(current_value: Any, raw_result: dict[str,
     if any(current and current in _normalize_lookup(candidate) for candidate in candidates if candidate):
         return True
     return bool(search(r"^\d{6,}$", current))
+
+
+def _supplier_value_is_known_recipient(current_value: Any) -> bool:
+    normalized = _normalize_lookup(current_value)
+    return normalized in {
+        "fristdbau",
+        "fristdbauzub",
+        "fristdbauzubgmbhcokg",
+        "fristdbauverwaltungsgmbh",
+    }
 
 
 def _tax_amount_looks_like_rate(current_value: Any, new_value: Any, raw_result: dict[str, Any]) -> bool:

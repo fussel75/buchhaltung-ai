@@ -164,6 +164,7 @@ class AiExtractionTests(TestCase):
         self.assertIn("invoice_number", accepted_fields)
         self.assertIn("invoice_date", accepted_fields)
         self.assertIn("tax_amount", accepted_fields)
+        self.assertNotIn("Nicht sicher erkannt: Lieferant, Datum, Rechnungsnummer.", result["warnings"])
 
     def test_ai_extraction_replaces_generic_assignment_with_unmatched_project_hint(self):
         extraction = {
@@ -224,9 +225,102 @@ class AiExtractionTests(TestCase):
         self.assertIsNone(result["raw_result"]["project_number"])
         self.assertEqual(result["raw_result"]["assignment_kind"], "construction_project")
         self.assertEqual(result["raw_result"]["item_summary"], "Zink-Blech vorbew. VM Anthra")
+        self.assertNotIn("Zuordnung unklar", result["warnings"])
         accepted_fields = result["raw_result"]["ai_extraction"]["accepted_fields"]
         self.assertIn("assignment_code", accepted_fields)
         self.assertIn("assignment_kind", accepted_fields)
+
+    def test_ai_extraction_replaces_generic_normalized_filename(self):
+        extraction = {
+            "supplier_name": "Dammers",
+            "invoice_number": "813467-608",
+            "invoice_date": "2026-08-12",
+            "gross_amount": Decimal("366.12"),
+            "confidence": Decimal("0.72"),
+            "warnings": ["Zuordnung unklar"],
+            "normalized_filename": "ERg 813467-608, Allgemeine Kosten, Dammers, Zink-Blech, 2026-08-12.pdf",
+            "raw_result": {
+                "document_type": "incoming_invoice",
+                "assignment_code": "Allgemeine Kosten",
+                "assignment_type": "general_cost",
+                "warnings": ["Zuordnung unklar"],
+            },
+        }
+        ai_payload = {
+            "assignment_code": "Eckerkoppel 149",
+            "assignment_kind": "construction_project",
+            "normalized_filename": "ERg 813467-608, Eckerkoppel 149, Dammers, Zink-Blech vorbew. VM Anthra, 2026-08-12.pdf",
+            "confidence": "0.95",
+            "evidence": ["Bestelldaten: Eckerkoppel 149"],
+            "warnings": [],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload),
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "813467-608.pdf"},
+                extraction=extraction,
+                pdf_text="Bestelldaten: Eckerkoppel 149",
+            )
+
+        self.assertEqual(
+            result["normalized_filename"],
+            "ERg 813467-608, Eckerkoppel 149, Dammers, Zink-Blech vorbew. VM Anthra, 2026-08-12.pdf",
+        )
+        self.assertIn("normalized_filename", result["raw_result"]["ai_extraction"]["accepted_fields"])
+
+    def test_ai_extraction_accepts_tax_notice_and_clears_invoice_required_warnings(self):
+        extraction = {
+            "supplier_name": "FriStD-Bau",
+            "invoice_number": None,
+            "invoice_date": "2026-02-25",
+            "gross_amount": None,
+            "confidence": Decimal("0.60"),
+            "warnings": ["Nicht sicher erkannt: Rechnungsnummer, Brutto."],
+            "source": "pdf_text_rules",
+            "raw_result": {
+                "document_type": "incoming_invoice",
+                "source": "pdf_text_rules",
+                "warnings": ["Nicht sicher erkannt: Rechnungsnummer, Brutto."],
+            },
+        }
+        ai_payload = {
+            "document_type": "tax_notice",
+            "supplier_name": "Finanzamt Hamburg-Altona",
+            "confidence": "0.96",
+            "evidence": ["Bescheid über Körperschaftsteuer 2024"],
+            "warnings": [],
+        }
+        settings = SimpleNamespace(
+            ai_extraction_enabled=True,
+            ai_extraction_api_key="secret",
+            ai_extraction_model="test-model",
+            ai_extraction_min_confidence=0.90,
+        )
+
+        with (
+            patch.object(ai_extraction, "get_settings", return_value=settings),
+            patch.object(ai_extraction, "list_assignment_units", return_value=[]),
+            patch.object(ai_extraction, "_call_ai_extractor", return_value=ai_payload),
+        ):
+            result = ai_extraction.maybe_enhance_extraction_with_ai(
+                document={"tenant_id": "demo-mandant", "original_filename": "KSt Bescheid.pdf"},
+                extraction=extraction,
+                pdf_text="Bescheid über Körperschaftsteuer 2024",
+            )
+
+        self.assertEqual(result["raw_result"]["document_type"], "tax_notice")
+        self.assertEqual(result["supplier_name"], "Finanzamt Hamburg-Altona")
+        self.assertEqual(result["warnings"], [])
 
     def test_ai_extraction_accepts_equipment_rental_cost_category(self):
         extraction = {
