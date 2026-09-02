@@ -23,7 +23,6 @@ jobs:
           SSH_KEY_B64: ${{ secrets.DEPLOY_SSH_KEY_B64 }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-          GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
         run: |
           set -eo pipefail
@@ -83,12 +82,12 @@ jobs:
           )
 
           deploy_log="$(mktemp)"
-          git_remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GH_REPOSITORY}.git"
+          git_remote_url="https://github.com/${GH_REPOSITORY}.git"
 
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             set +e
             ssh "${ssh_options[@]}" "root@$SSH_HOST" \
-              "cd /docker/buchhaltung-ai && git fetch --quiet '${git_remote_url}' main && git merge --ff-only FETCH_HEAD && docker compose up -d --build" \
+              "cd /docker/buchhaltung-ai && GIT_TERMINAL_PROMPT=0 git fetch --quiet '${git_remote_url}' main && git merge --ff-only FETCH_HEAD && docker compose up -d --build" \
               2>&1 | tee "$deploy_log"
             status="${PIPESTATUS[0]}"
             set -e
